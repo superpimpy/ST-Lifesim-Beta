@@ -8,7 +8,7 @@
 
 import { getContext } from '../../utils/st-context.js';
 import { slashSend } from '../../utils/slash.js';
-import { loadData, saveData, getDefaultBinding } from '../../utils/storage.js';
+import { loadData, saveData, getDefaultBinding, getExtensionSettings } from '../../utils/storage.js';
 import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, escapeHtml, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
@@ -358,7 +358,25 @@ function renderSendForm() {
             saveGifticons(list);
 
             const senderName = getContext()?.name1 || 'user';
-            await slashSend(`${escapeHtml(emoji)} **기프티콘 전송 완료**\n- 보내는 사람: ${escapeHtml(senderName)}\n- 받는 사람: ${escapeHtml(recipient)}\n- 품목: ${escapeHtml(g.name)}${g.value ? ` (${escapeHtml(g.value)})` : ''}${g.memo ? `\n- 메모: ${escapeHtml(g.memo)}` : ''}\n<!--${g.messageMarker}-->`);
+            const valuePart = g.value ? ` (${escapeHtml(g.value)})` : '';
+            const memoPart = g.memo ? `\n- 메모: ${escapeHtml(g.memo)}` : '';
+            const tmpl = getExtensionSettings()?.['st-lifesim']?.messageTemplates?.gifticonSend;
+            let msg;
+            if (tmpl) {
+                msg = tmpl
+                    .replace(/\{emoji\}/g, escapeHtml(emoji))
+                    .replace(/\{senderName\}/g, escapeHtml(senderName))
+                    .replace(/\{recipient\}/g, escapeHtml(recipient))
+                    .replace(/\{name\}/g, escapeHtml(g.name))
+                    .replace(/\{value\}/g, escapeHtml(g.value || ''))
+                    .replace(/\{valuePart\}/g, valuePart)
+                    .replace(/\{memo\}/g, escapeHtml(g.memo || ''))
+                    .replace(/\{memoPart\}/g, memoPart)
+                    + `\n<!--${g.messageMarker}-->`;
+            } else {
+                msg = `${escapeHtml(emoji)} **기프티콘 전송 완료**\n- 보내는 사람: ${escapeHtml(senderName)}\n- 받는 사람: ${escapeHtml(recipient)}\n- 품목: ${escapeHtml(g.name)}${valuePart}${memoPart}\n<!--${g.messageMarker}-->`;
+            }
+            await slashSend(msg);
             showToast(`${recipient}에게 기프티콘 전송 완료`, 'success');
 
             nameInput.value = '';

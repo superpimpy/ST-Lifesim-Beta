@@ -212,16 +212,18 @@ export function renderReadReceiptUI() {
 
 /**
  * 읽씹 연출 실행
+ * ({{user}}가 {{char}}에게 보낸 메시지를 {{char}}가 읽었지만 답장하지 않는 상황)
  */
 async function handleReadReceipt() {
     const ctx = getContext();
     const charName = ctx?.name2 || '{{char}}';
 
     try {
-        await slashGen(
-            `${charName} has read the message but has not replied yet. Briefly describe the situation in 1-2 sentences.`,
-            charName,
-        );
+        const tmpl = getExtensionSettings()?.['st-lifesim']?.messageTemplates?.readReceipt;
+        const prompt = tmpl
+            ? tmpl.replace(/\{charName\}/g, charName)
+            : `{{user}} sent ${charName} a message. ${charName} has read {{user}}'s message but has not replied yet. Briefly describe ${charName}'s reaction in 1-2 sentences.`;
+        await slashGen(prompt, charName);
         showToast('읽씹 연출 완료', 'success', 1500);
     } catch (e) {
         showToast('읽씹 연출 실패: ' + e.message, 'error');
@@ -271,10 +273,11 @@ async function handleNoContact() {
     const charName = ctx?.name2 || '{{char}}';
 
     try {
-        await slashGen(
-            `${charName} tried to reach the user but the user has not seen or responded yet. Briefly describe the situation in 1-2 sentences.`,
-            charName,
-        );
+        const tmpl = getExtensionSettings()?.['st-lifesim']?.messageTemplates?.noContact;
+        const prompt = tmpl
+            ? tmpl.replace(/\{charName\}/g, charName)
+            : `${charName} tried to reach {{user}} but {{user}} has not seen or responded yet. Briefly describe the situation in 1-2 sentences.`;
+        await slashGen(prompt, charName);
         showToast('연락 안 됨 연출 완료', 'success', 1500);
     } catch (e) {
         showToast('연락 안 됨 연출 실패: ' + e.message, 'error');
@@ -548,16 +551,18 @@ async function handleVoiceMemo(seconds, hint, aiMode = false) {
 
     try {
         if (aiMode) {
-            await slashGen(
-                `As ${charName}, send exactly one voice message in Korean. You must choose suitable duration and content yourself based on current context.
-Output only this HTML format:
-🎤 음성메시지 (M:SS)<br>[actual voice message content]`,
-                charName,
-            );
+            const tmpl = getExtensionSettings()?.['st-lifesim']?.messageTemplates?.voiceMemoAiPrompt;
+            const genPrompt = tmpl
+                ? tmpl.replace(/\{charName\}/g, charName)
+                : `As ${charName}, send exactly one voice message in Korean. You must choose suitable duration and content yourself based on current context.\nOutput only this HTML format:\n🎤 음성메시지 (M:SS)<br>[actual voice message content]`;
+            await slashGen(genPrompt, charName);
             showToast(`${charName}의 음성메시지 생성 완료`, 'success', 1500);
         } else {
             const hintText = hint ? escapeHtml(hint) : '(내용 없음)';
-            const voiceHtml = `🎤 음성메시지 (${timeStr})<br>${hintText}`;
+            const tmpl = getExtensionSettings()?.['st-lifesim']?.messageTemplates?.voiceMemo;
+            const voiceHtml = tmpl
+                ? tmpl.replace(/\{timeStr\}/g, timeStr).replace(/\{hint\}/g, hintText)
+                : `🎤 음성메시지 (${timeStr})<br>${hintText}`;
             await slashSend(voiceHtml);
             showToast('음성메시지 삽입 완료', 'success', 1500);
         }

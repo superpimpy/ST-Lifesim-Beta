@@ -75,6 +75,18 @@ const SNS_PROMPT_DEFAULTS = {
     extraComment: 'Write exactly one additional SNS comment for this post.\nPost author: {{postAuthorName}} ({{postAuthorHandle}})\nPost: "{{postContent}}"\nComment author: {{extraAuthorName}} ({{extraAuthorHandle}})\nRules: one short sentence from {{extraAuthorName}}\'s perspective; use only fixed @handles if needed; use natural language fitting {{extraAuthorName}}\'s background; no explanations, quotes, or hashtags. Personality hint: {{extraPersonality}}.',
 };
 
+// 메시지 템플릿 기본값
+const DEFAULT_MESSAGE_TEMPLATES = {
+    callStart_incoming: '📞 {charName}님께서 전화를 거셨습니다. {{user}}님께서 전화를 받으셨습니다.',
+    callStart_outgoing: '📞 {charName}님께 전화를 걸었습니다. {charName}님께서 전화를 받으셨습니다.',
+    callEnd: '📵 통화 종료 (통화시간: {timeStr})',
+    voiceMemo: '🎤 음성메시지 ({timeStr})<br>{hint}',
+    voiceMemoAiPrompt: 'As {charName}, send exactly one voice message in Korean. You must choose suitable duration and content yourself based on current context.\nOutput only this HTML format:\n🎤 음성메시지 (M:SS)<br>[actual voice message content]',
+    readReceipt: '{{user}} sent {charName} a message. {charName} has read {{user}}\'s message but has not replied yet. Briefly describe {charName}\'s reaction in 1-2 sentences.',
+    noContact: '{charName} tried to reach {{user}} but {{user}} has not seen or responded yet. Briefly describe the situation in 1-2 sentences.',
+    gifticonSend: '{emoji} **기프티콘 전송 완료**\n- 보내는 사람: {senderName}\n- 받는 사람: {recipient}\n- 품목: {name}{valuePart}{memoPart}',
+};
+
 // 기본 설정
 const DEFAULT_SETTINGS = {
     enabled: true,
@@ -93,6 +105,7 @@ const DEFAULT_SETTINGS = {
     emoticonRadius: 10, // px
     imageRadius: 10, // px
     defaultSnsImageUrl: '', // SNS 기본 이미지 URL
+    snsImageMode: false, // SNS 게시물 이미지 자동 생성 여부
     themeColors: {}, // CSS 커스텀 색상
     toast: {
         offsetY: 16,
@@ -115,6 +128,8 @@ const DEFAULT_SETTINGS = {
     snsLanguage: 'ko',
     snsKoreanTranslationPrompt: 'Translate the following SNS text into natural Korean. Output Korean text only.\n{{text}}',
     snsPrompts: { ...SNS_PROMPT_DEFAULTS },
+    callSummaryPrompt: '', // 비어 있으면 기본 요약 프롬프트 사용 ({contactName}, {transcript} 변수 지원)
+    messageTemplates: { ...DEFAULT_MESSAGE_TEMPLATES },
     aiRoutes: {
         sns: { ...AI_ROUTE_DEFAULTS },
         snsTranslation: { ...AI_ROUTE_DEFAULTS },
@@ -221,6 +236,23 @@ function getSettings() {
             }
         });
     });
+    // 신규: 통화 요약 프롬프트
+    if (typeof ext[SETTINGS_KEY].callSummaryPrompt !== 'string') {
+        ext[SETTINGS_KEY].callSummaryPrompt = DEFAULT_SETTINGS.callSummaryPrompt;
+    }
+    // 신규: 메시지 템플릿
+    if (!ext[SETTINGS_KEY].messageTemplates || typeof ext[SETTINGS_KEY].messageTemplates !== 'object') {
+        ext[SETTINGS_KEY].messageTemplates = { ...DEFAULT_MESSAGE_TEMPLATES };
+    }
+    Object.keys(DEFAULT_MESSAGE_TEMPLATES).forEach((key) => {
+        if (typeof ext[SETTINGS_KEY].messageTemplates[key] !== 'string') {
+            ext[SETTINGS_KEY].messageTemplates[key] = DEFAULT_MESSAGE_TEMPLATES[key];
+        }
+    });
+    // 신규: SNS 이미지 모드
+    if (ext[SETTINGS_KEY].snsImageMode == null) {
+        ext[SETTINGS_KEY].snsImageMode = DEFAULT_SETTINGS.snsImageMode;
+    }
     return ext[SETTINGS_KEY];
 }
 
@@ -630,6 +662,38 @@ function openSettingsPanel(onBack) {
         };
         imageRadiusRow.append(imageRadiusLbl, imageRadiusInput, imageRadiusPxLbl, imageRadiusApplyBtn);
         wrapper.appendChild(imageRadiusRow);
+
+        // SNS 이미지 모드 토글
+        wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
+        const snsImageTitle = Object.assign(document.createElement('div'), {
+            className: 'slm-label',
+            textContent: '📸 SNS 이미지 모드',
+        });
+        snsImageTitle.style.fontWeight = '600';
+        wrapper.appendChild(snsImageTitle);
+
+        const snsImageDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: '활성화 시 SNS 게시물에 이미지 자동 생성을 사용합니다. 비활성화 시 기본 프리셋 이미지를 사용합니다.',
+        });
+        wrapper.appendChild(snsImageDesc);
+
+        const snsImageRow = document.createElement('div');
+        snsImageRow.className = 'slm-settings-row';
+        const snsImageLbl = document.createElement('label');
+        snsImageLbl.className = 'slm-toggle-label';
+        const snsImageChk = document.createElement('input');
+        snsImageChk.type = 'checkbox';
+        snsImageChk.checked = settings.snsImageMode === true;
+        snsImageChk.onchange = () => {
+            settings.snsImageMode = snsImageChk.checked;
+            saveSettings();
+            showToast(`SNS 이미지 모드: ${settings.snsImageMode ? 'ON' : 'OFF'}`, 'success', 1500);
+        };
+        snsImageLbl.appendChild(snsImageChk);
+        snsImageLbl.appendChild(document.createTextNode(' SNS 이미지 자동 생성 ON'));
+        snsImageRow.appendChild(snsImageLbl);
+        wrapper.appendChild(snsImageRow);
 
         return wrapper;
     }
@@ -1042,6 +1106,92 @@ function openSettingsPanel(onBack) {
             group.append(lbl, input, resetBtn);
             wrapper.appendChild(group);
         });
+
+        // 통화 요약 프롬프트 커스터마이징 (Item 4)
+        wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
+        const callSummaryTitle = Object.assign(document.createElement('div'), {
+            className: 'slm-label',
+            textContent: '📞 통화 요약 프롬프트',
+        });
+        callSummaryTitle.style.fontWeight = '700';
+        wrapper.appendChild(callSummaryTitle);
+        const callSummaryDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: '통화 종료 후 요약 생성 시 사용할 프롬프트입니다. {contactName}(상대방 이름), {transcript}(통화 내용) 변수를 사용할 수 있습니다. 비워두면 기본 요약 프롬프트를 사용합니다.',
+        });
+        wrapper.appendChild(callSummaryDesc);
+        const callSummaryGroup = document.createElement('div');
+        callSummaryGroup.className = 'slm-form-group';
+        const callSummaryInput = document.createElement('textarea');
+        callSummaryInput.className = 'slm-textarea';
+        callSummaryInput.rows = 4;
+        callSummaryInput.value = settings.callSummaryPrompt || '';
+        callSummaryInput.placeholder = '비워두면 기본 프롬프트를 사용합니다. 예: {contactName}과의 통화 내용:\n{transcript}\n위 통화를 한국어로 2~3문장 요약하세요.';
+        callSummaryInput.oninput = () => {
+            settings.callSummaryPrompt = callSummaryInput.value;
+            saveSettings();
+        };
+        const callSummaryResetBtn = document.createElement('button');
+        callSummaryResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+        callSummaryResetBtn.textContent = '↺ 기본값';
+        callSummaryResetBtn.onclick = () => {
+            settings.callSummaryPrompt = '';
+            callSummaryInput.value = '';
+            saveSettings();
+        };
+        callSummaryGroup.append(callSummaryInput, callSummaryResetBtn);
+        wrapper.appendChild(callSummaryGroup);
+
+        // 메시지 템플릿 커스터마이징 (Item 3)
+        wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
+        const templateTitle = Object.assign(document.createElement('div'), {
+            className: 'slm-label',
+            textContent: '✉️ 메시지 템플릿 커스터마이징',
+        });
+        templateTitle.style.fontWeight = '700';
+        wrapper.appendChild(templateTitle);
+        const templateDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: '각 기능에서 전송되는 메시지 포맷을 커스터마이징합니다. 사용 가능한 변수는 각 항목 설명을 참고하세요.',
+        });
+        wrapper.appendChild(templateDesc);
+
+        if (!settings.messageTemplates) settings.messageTemplates = { ...DEFAULT_MESSAGE_TEMPLATES };
+        const templateDefs = [
+            { key: 'callStart_incoming', label: '📞 통화 시작 (수신)', hint: '{charName}: 상대방 이름' },
+            { key: 'callStart_outgoing', label: '📞 통화 시작 (발신)', hint: '{charName}: 상대방 이름' },
+            { key: 'callEnd', label: '📵 통화 종료', hint: '{timeStr}: 통화 시간' },
+            { key: 'voiceMemo', label: '🎤 음성메시지 (유저)', hint: '{timeStr}: 길이, {hint}: 내용 힌트' },
+            { key: 'voiceMemoAiPrompt', label: '🤖 AI 음성메시지 생성 프롬프트', hint: '{charName}: 캐릭터 이름', rows: 4 },
+            { key: 'readReceipt', label: '👻 읽씹 프롬프트', hint: '{charName}: 캐릭터 이름 ({{user}}, {{char}} 사용 가능)', rows: 3 },
+            { key: 'noContact', label: '📵 연락 안 됨 프롬프트', hint: '{charName}: 캐릭터 이름 ({{user}} 사용 가능)', rows: 3 },
+            { key: 'gifticonSend', label: '🎁 기프티콘 전송', hint: '{emoji}, {senderName}, {recipient}, {name}, {valuePart}, {memoPart}', rows: 4 },
+        ];
+        templateDefs.forEach(({ key, label, hint, rows = 2 }) => {
+            const group = document.createElement('div');
+            group.className = 'slm-form-group';
+            const lbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: label });
+            const hintEl = Object.assign(document.createElement('div'), { className: 'slm-desc', textContent: `변수: ${hint}` });
+            const input = document.createElement('textarea');
+            input.className = 'slm-textarea';
+            input.rows = rows;
+            input.value = settings.messageTemplates[key] ?? DEFAULT_MESSAGE_TEMPLATES[key];
+            input.oninput = () => {
+                settings.messageTemplates[key] = input.value;
+                saveSettings();
+            };
+            const resetBtn = document.createElement('button');
+            resetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+            resetBtn.textContent = '↺ 기본값';
+            resetBtn.onclick = () => {
+                settings.messageTemplates[key] = DEFAULT_MESSAGE_TEMPLATES[key];
+                input.value = settings.messageTemplates[key];
+                saveSettings();
+            };
+            group.append(lbl, hintEl, input, resetBtn);
+            wrapper.appendChild(group);
+        });
+
         return wrapper;
     }
 

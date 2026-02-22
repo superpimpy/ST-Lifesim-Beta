@@ -314,6 +314,14 @@ function buildEmoticonContent() {
     footer.appendChild(addBtn);
     footer.appendChild(importBtn);
     footer.appendChild(exportBtn);
+
+    const bulkBtn = document.createElement('button');
+    bulkBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
+    bulkBtn.textContent = '📋 일괄 등록';
+    bulkBtn.title = '여러 URL을 한 번에 등록합니다 (한 줄에 하나씩 또는 "이름|URL" 형식)';
+    bulkBtn.onclick = () => openBulkAddDialog(renderAll);
+    footer.appendChild(bulkBtn);
+
     wrapper.appendChild(footer);
 
     // 전체 렌더링
@@ -723,6 +731,129 @@ function openEmoticonContextMenu(ev, emoticon, onUpdate) {
     setTimeout(() => {
         document.addEventListener('click', () => menu.remove(), { once: true });
     }, 0);
+}
+
+/**
+ * 이모티콘 일괄 등록 다이얼로그를 연다
+ * 각 줄에 URL 또는 "이름|URL" 형식으로 입력한다
+ * @param {Function} onSave - 저장 후 콜백
+ */
+function openBulkAddDialog(onSave) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'slm-form';
+
+    const desc = document.createElement('p');
+    desc.className = 'slm-desc';
+    desc.textContent = '한 줄에 하나씩 입력하세요. 형식: URL 또는 이름|URL';
+    wrapper.appendChild(desc);
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'slm-textarea';
+    textarea.rows = 8;
+    textarea.placeholder = 'https://example.com/sticker1.png\n스티커이름|https://example.com/sticker2.gif\n...';
+    wrapper.appendChild(textarea);
+
+    const catLabel = document.createElement('label');
+    catLabel.className = 'slm-label';
+    catLabel.textContent = '카테고리';
+    const existingCategories = [...new Set(loadEmoticons().map(e => e.category).filter(Boolean))];
+    const categoryOptions = [...new Set(['기본', ...existingCategories])];
+    const catSelect = document.createElement('select');
+    catSelect.className = 'slm-select';
+    categoryOptions.forEach(cat => {
+        const opt = document.createElement('option');
+        opt.value = cat;
+        opt.textContent = cat;
+        catSelect.appendChild(opt);
+    });
+    const directCatOpt = document.createElement('option');
+    directCatOpt.value = '__direct__';
+    directCatOpt.textContent = '직접입력';
+    catSelect.appendChild(directCatOpt);
+    const catInput = document.createElement('input');
+    catInput.className = 'slm-input';
+    catInput.type = 'text';
+    catInput.placeholder = '카테고리 직접 입력';
+    catInput.style.display = 'none';
+    catSelect.onchange = () => {
+        catInput.style.display = catSelect.value === '__direct__' ? '' : 'none';
+    };
+    wrapper.appendChild(catLabel);
+    wrapper.appendChild(catSelect);
+    wrapper.appendChild(catInput);
+
+    const footer = document.createElement('div');
+    footer.className = 'slm-panel-footer';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'slm-btn slm-btn-secondary';
+    cancelBtn.textContent = '취소';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'slm-btn slm-btn-primary';
+    saveBtn.textContent = '일괄 등록';
+
+    footer.appendChild(cancelBtn);
+    footer.appendChild(saveBtn);
+
+    const { close } = createPopup({
+        id: 'emoticon-bulk-add',
+        title: '📋 이모티콘 일괄 등록',
+        content: wrapper,
+        footer,
+        className: 'slm-sub-panel',
+    });
+
+    cancelBtn.onclick = () => close();
+
+    saveBtn.onclick = () => {
+        const category = (catSelect.value === '__direct__'
+            ? catInput.value.trim()
+            : catSelect.value.trim()) || '기본';
+        const lines = textarea.value.split('\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length === 0) {
+            showToast('등록할 항목이 없습니다.', 'warn');
+            return;
+        }
+        const emoticons = loadEmoticons();
+        const existingUrls = new Set(emoticons.map(e => e.url));
+        let added = 0;
+        for (const line of lines) {
+            let name = '';
+            let url = '';
+            if (line.includes('|')) {
+                const sepIdx = line.indexOf('|');
+                name = line.slice(0, sepIdx).trim();
+                url = line.slice(sepIdx + 1).trim();
+            } else {
+                url = line.trim();
+                // URL에서 파일명을 이름으로 사용
+                try {
+                    const fileName = new URL(url).pathname.split('/').pop().replace(/\.[^.]+$/, '') || '이모티콘';
+                    name = decodeURIComponent(fileName);
+                } catch (urlErr) {
+                    console.warn('[ST-LifeSim] 일괄 등록: URL 파싱 실패, 기본 이름 사용:', url, urlErr);
+                    name = '이모티콘';
+                }
+            }
+            if (!url || existingUrls.has(url)) continue;
+            emoticons.push({
+                id: generateId(),
+                name: name || '이모티콘',
+                url,
+                category,
+                favorite: false,
+                aiUsable: true,
+                aiOverrideAllow: false,
+            });
+            existingUrls.add(url);
+            added++;
+        }
+        saveEmoticons(emoticons);
+        close();
+        onSave();
+        showToast(`이모티콘 ${added}개 일괄 등록 완료`, 'success');
+    };
 }
 
 /**

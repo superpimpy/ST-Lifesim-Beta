@@ -23,6 +23,10 @@ const COLLAPSED_KEY = 'call-log-collapsed';
 // 통화 감지 키워드 설정 저장 키
 const KEYWORDS_KEY = 'call-keywords';
 
+// char 측 통화 종료 감지 정규식 및 키워드
+const EXPLICIT_CHAR_HANG_UP_RE = /(전화\s*(끊을게|끊겠어|끊어야|끊자|끊어도\s*될까|이만\s*끊을게|이만\s*끊겠어|끊어|끊어야\s*할|끊어야\s*겠어)|I(?:'m| am)\s*hanging\s*up|gotta\s*(go|hang\s*up)|I\s*have\s*to\s*go\s*now|let\s*me\s*hang\s*up|I('ll|'d| will| would)\s*hang\s*up|bye\s+for\s+now|talk\s+later)/i;
+const CHAR_HANG_UP_KEYWORDS = ['전화 끊', '끊을게', '끊겠어', '이만 끊', '통화 종료할게', 'hang up', 'gotta go', 'have to go', 'talk later', 'bye for now'];
+
 // 통화 중 컨텍스트 주입 태그
 const CALL_INJECT_TAG = 'st-lifesim-call';
 const CALL_POLICY_TAG = 'st-lifesim-call-policy';
@@ -112,6 +116,52 @@ function getCallSummaryAiRouteSettings() {
         modelSettingKey: String(route.modelSettingKey || '').trim(),
         model: String(route.model || '').trim(),
     };
+}
+
+/**
+ * 설정에서 통화 요약 프롬프트를 가져온다
+ * @param {string} contactName - 통화 상대 이름
+ * @param {string} transcript - 통화 내용 텍스트
+ * @returns {string}
+ */
+function buildCallSummaryPrompt(contactName, transcript) {
+    const tmpl = getExtensionSettings()?.['st-lifesim']?.callSummaryPrompt;
+    if (tmpl && tmpl.trim()) {
+        return tmpl
+            .replace(/\{contactName\}/g, contactName)
+            .replace(/\{transcript\}/g, transcript);
+    }
+    return `The following is the conversation transcript from a call with ${contactName}. Write a concise 2-3 sentence summary IN KOREAN of what was discussed during the call. The summary must be written in Korean regardless of the conversation language. Character names may be kept as-is:\n${transcript}`;
+}
+
+/**
+ * 설정에서 통화 시작 메시지 템플릿을 가져온다
+ * @param {string} charName - 통화 상대 이름
+ * @param {'incoming'|'outgoing'} direction
+ * @returns {string}
+ */
+function getCallStartMessage(charName, direction) {
+    const settings = getExtensionSettings()?.['st-lifesim']?.messageTemplates;
+    if (direction === 'incoming') {
+        const tmpl = settings?.callStart_incoming;
+        if (tmpl) return tmpl.replace(/\{charName\}/g, charName);
+        return `📞 ${charName}님께서 전화를 거셨습니다. {{user}}님께서 전화를 받으셨습니다.`;
+    } else {
+        const tmpl = settings?.callStart_outgoing;
+        if (tmpl) return tmpl.replace(/\{charName\}/g, charName);
+        return `📞 ${charName}님께 전화를 걸었습니다. ${charName}님께서 전화를 받으셨습니다.`;
+    }
+}
+
+/**
+ * 설정에서 통화 종료 메시지 템플릿을 가져온다
+ * @param {string} timeStr - 통화 시간 문자열
+ * @returns {string}
+ */
+function getCallEndMessage(timeStr) {
+    const tmpl = getExtensionSettings()?.['st-lifesim']?.messageTemplates?.callEnd;
+    if (tmpl) return tmpl.replace(/\{timeStr\}/g, timeStr);
+    return `📵 통화 종료 (통화시간: ${timeStr})`;
 }
 
 function inferModelSettingKey(source) {
@@ -231,9 +281,15 @@ export function initCall() {
     const eventTypes = ctx.event_types || ctx.eventTypes;
     if (!eventTypes?.CHARACTER_MESSAGE_RENDERED) return;
 
-    // AI 응답 완료 시 통화 키워드 감지 + 비-char 통화 메시지 재주입
+    // AI 응답 완료 시 통화 키워드 감지 + 통화 중 char 종료 감지 + 비-char 통화 메시지 재주입
     ctx.eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, async () => {
         if (!isCallModuleEnabled()) return;
+
+        // 통화 중: char 측 통화 종료 감지
+        if (callActive) {
+            await detectCharCallTermination();
+        }
+
         await detectCallKeywords();
 
         // 비-char 통화 중: AI 응답을 "전화" 이름으로 재주입
@@ -328,8 +384,66 @@ function injectCallPolicyPrompt() {
 - Before a call starts, speak as normal chat text.
 - If you want to call first, explicitly ask or state that you are calling now in a natural way, then wait for user action.
 - Do not continue as if the call is already connected until the call is accepted.
-- Make call initiation natural and context-driven (emotion, urgency, intimacy), not repetitive.`;
+- Make call initiation natural and context-driven (emotion, urgency, intimacy), not repetitive.
+- During an active call: if you (${ctx.name2 || '{{char}}'}) decide to end the call for any reason (emergency, emotion, situation), explicitly state that you are hanging up (e.g. "전화 끊을게", "I have to go", "gotta hang up"). The system will detect this and end the call automatically.
+- Output format during a call: respond naturally as if speaking on the phone. Do not add narration brackets unless describing non-verbal context. Keep responses concise and conversational.`;
     ctx.setExtensionPrompt(CALL_POLICY_TAG, prompt, 1, 0);
+}
+
+/**
+ * AI 응답에서 char 측 통화 종료 의도를 감지한다
+ */
+async function detectCharCallTermination() {
+    if (!callActive) return;
+    const ctx = getContext();
+    if (!ctx) return;
+    const lastMsg = ctx.chat?.[ctx.chat.length - 1];
+    if (!lastMsg || lastMsg.is_user) return;
+
+    const text = String(lastMsg.mes || '');
+
+    // 명시적 종료 패턴 즉시 감지
+    if (EXPLICIT_CHAR_HANG_UP_RE.test(text)) {
+        showToast(`${callContact}이(가) 통화를 종료했습니다.`, 'info', 2000);
+        await endCall();
+        return;
+    }
+
+    // 키워드 기반 감지
+    const lower = text.toLowerCase();
+    const found = CHAR_HANG_UP_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
+    if (!found) return;
+
+    // AI를 통한 의도 분류 (필요시 fallback으로 바로 종료)
+    if (!ctx || typeof ctx.generateQuietPrompt !== 'function') {
+        showToast(`${callContact}이(가) 통화를 종료했습니다.`, 'info', 2000);
+        await endCall();
+        return;
+    }
+    try {
+        const prompt = `You are classifying whether this message means the character wants to END the phone call RIGHT NOW.
+Message: """${text}"""
+Return JSON only: {"hang_up":true|false,"confidence":0.0-1.0}
+Set hang_up=true ONLY when the character clearly states they are ending/hanging up the call now.
+Set false for mid-call expressions of wanting to leave eventually, or vague goodbyes without call context.
+JSON only, no prose.`;
+        const raw = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: 'hang-up-intent' }) || '';
+        const jsonPart = raw.match(/\{[\s\S]*\}/)?.[0];
+        if (!jsonPart) return;
+        let parsed;
+        try {
+            parsed = JSON.parse(jsonPart);
+        } catch (jsonErr) {
+            console.warn('[ST-LifeSim] 통화 종료 분류 JSON 파싱 실패:', jsonErr);
+            return;
+        }
+        if (parsed.hang_up && Number(parsed.confidence || 0) >= 0.6) {
+            showToast(`${callContact}이(가) 통화를 종료했습니다.`, 'info', 2000);
+            await endCall();
+        }
+    } catch (e) {
+        console.warn('[ST-LifeSim] 통화 종료 의도 분류 오류:', e);
+    }
 }
 
 /**
@@ -569,9 +683,7 @@ async function startCall(charName, matchedContact = null, direction = 'outgoing'
     }
 
     try {
-        const startMessage = direction === 'incoming'
-            ? `📞 ${charName}님께서 전화를 거셨습니다. {{user}}님께서 전화를 받으셨습니다.`
-            : `📞 ${charName}님께 전화를 걸었습니다. ${charName}님께서 전화를 받으셨습니다.`;
+        const startMessage = getCallStartMessage(charName, direction);
         if (isMainChar) {
             await slashSend(formatVoiceMsg(startMessage));
         } else {
@@ -619,10 +731,11 @@ async function endCall() {
     const ctx = getContext();
 
     try {
+        const endMessage = getCallEndMessage(timeStr);
         if (wasMainChar) {
-            await slashSend(formatVoiceMsg(`📵 통화 종료 (통화시간: ${timeStr})`));
+            await slashSend(formatVoiceMsg(endMessage));
         } else {
-            await slashSendAs('전화', formatVoiceMsg(`📵 통화 종료 (통화시간: ${timeStr})`));
+            await slashSendAs('전화', formatVoiceMsg(endMessage));
         }
     } catch (e) {
         console.error('[ST-LifeSim] 통화 종료 오류:', e);
@@ -637,7 +750,7 @@ async function endCall() {
         const callMsgs = ctx?.chat?.slice(startFrom, chatLen) ?? [];
         if (callMsgs.length > 0) {
             const msgText = callMsgs.map(m => `${m.is_user ? '{{user}}' : m.name}: ${m.mes}`).join('\n');
-            const summaryPrompt = `The following is the conversation transcript from a call with ${endedContact}. Write a concise 2-3 sentence summary IN KOREAN of what was discussed during the call. The summary must be written in Korean regardless of the conversation language. Character names may be kept as-is:\n${msgText}`;
+            const summaryPrompt = buildCallSummaryPrompt(endedContact, msgText);
             summary = await generateCallSummaryText(ctx, summaryPrompt, endedContact);
         }
     } catch (e) {
