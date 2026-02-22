@@ -24,8 +24,8 @@ const COLLAPSED_KEY = 'call-log-collapsed';
 const KEYWORDS_KEY = 'call-keywords';
 
 // char 측 통화 종료 감지 정규식 및 키워드
-const EXPLICIT_CHAR_HANG_UP_RE = /(전화\s*(끊을게|끊겠어|끊어야|끊자|끊어도\s*될까|이만\s*끊을게|이만\s*끊겠어|끊어|끊어야\s*할|끊어야\s*겠어)|I(?:'m| am)\s*hanging\s*up|gotta\s*(go|hang\s*up)|I\s*have\s*to\s*go\s*now|let\s*me\s*hang\s*up|I('ll|'d| will| would)\s*hang\s*up|bye\s+for\s+now|talk\s+later)/i;
-const CHAR_HANG_UP_KEYWORDS = ['전화 끊', '끊을게', '끊겠어', '이만 끊', '통화 종료할게', 'hang up', 'gotta go', 'have to go', 'talk later', 'bye for now'];
+const EXPLICIT_CHAR_HANG_UP_RE = /(전화\s*(끊을게|끊겠어|끊어야|끊자|끊어도\s*될까|이만\s*끊을게|이만\s*끊겠어|끊어|끊어야\s*할|끊어야\s*겠어|끊을\s*게요|끊을\s*게|끊는다)|이만\s*(끊을게|끊겠어|끊어야|끊자|전화\s*끊)|통화\s*(끊을게|끊겠어|끊어야|끊자|종료할게|종료하겠어|종료한다)|그럼\s*(끊을게|끊겠어|끊자)|나\s*먼저\s*끊을게|먼저\s*끊을게|먼저\s*끊겠어|끊어야겠다|끊어야\s*될\s*것\s*같|끊을\s*수\s*밖에|I(?:'m| am)\s*hanging\s*up|gotta\s*(go|hang\s*up)|I\s*have\s*to\s*go\s*now|let\s*me\s*hang\s*up|I('ll|'d| will| would)\s*hang\s*up|bye\s+for\s+now|talk\s+later|hanging\s+up\s+now|I\s*need\s*to\s*hang\s*up|I('ll|'d| will| would)\s*let\s*you\s*go|got\s*to\s*go\s*now|gotta\s*run)/i;
+const CHAR_HANG_UP_KEYWORDS = ['전화 끊', '끊을게', '끊겠어', '이만 끊', '통화 종료', '먼저 끊', '끊어야', '끊는다', '끊을 수', 'hang up', 'gotta go', 'have to go', 'talk later', 'bye for now', 'hanging up', 'let you go', 'gotta run', 'got to go'];
 
 // 통화 중 컨텍스트 주입 태그
 const CALL_INJECT_TAG = 'st-lifesim-call';
@@ -74,6 +74,21 @@ function formatVoiceMsg(text) {
     const before = text.slice(0, idx);
     const after = text.slice(idx + 4).trim();
     return after ? `${before}<br>**${after}**` : text;
+}
+
+/**
+ * 한국어 주격 조사(이/가)를 이름 끝 글자의 받침 여부에 따라 선택한다.
+ * @param {string} name
+ * @returns {string} "이" 또는 "가"
+ */
+function pickParticle(name) {
+    if (!name) return '이';
+    const lastChar = name.charCodeAt(name.length - 1);
+    // 한글 유니코드 범위: 0xAC00 ~ 0xD7A3
+    if (lastChar >= 0xAC00 && lastChar <= 0xD7A3) {
+        return (lastChar - 0xAC00) % 28 !== 0 ? '이' : '가';
+    }
+    return '이(가)';
 }
 
 // 통화 감지 키워드 (설정에서 변경 가능)
@@ -184,6 +199,17 @@ function getCallEndMessage(timeStr) {
     const tmpl = getExtensionSettings()?.['st-lifesim']?.messageTemplates?.callEnd;
     if (tmpl) return tmpl.replace(/\{timeStr\}/g, timeStr);
     return `📵 통화 종료 (통화시간: ${timeStr})`;
+}
+
+/**
+ * char가 통화를 종료했을 때의 메시지를 반환한다
+ * @param {string} charName - 통화 상대 이름
+ * @param {string} timeStr - 통화 시간 문자열
+ * @returns {string}
+ */
+function getCallEndByCharMessage(charName, timeStr) {
+    const p = pickParticle(charName);
+    return `📵 ${charName}${p} 통화를 종료했습니다. (통화시간: ${timeStr})`;
 }
 
 function inferModelSettingKey(source) {
@@ -401,19 +427,24 @@ export function onCharacterMessageRenderedForProactiveCall() {
 function injectCallPolicyPrompt() {
     const ctx = getContext();
     if (!ctx || typeof ctx.setExtensionPrompt !== 'function') return;
+    const charName = ctx.name2 || '{{char}}';
     const prompt = `[PHONE CALL ROLEPLAY POLICY]
 - Never assume an active phone call unless an explicit call-start marker appears in chat.
 - Before a call starts, speak as normal chat text.
 - If you want to call first, explicitly ask or state that you are calling now in a natural way, then wait for user action.
 - Do not continue as if the call is already connected until the call is accepted.
 - Make call initiation natural and context-driven (emotion, urgency, intimacy), not repetitive.
-- During an active call: if you (${ctx.name2 || '{{char}}'}) decide to end the call for any reason (emergency, emotion, situation), explicitly state that you are hanging up (e.g. "전화 끊을게", "I have to go", "gotta hang up"). The system will detect this and end the call automatically.
+- During an active call: ${charName} CAN and SHOULD autonomously decide to end the call when it feels natural (e.g. the conversation reaches a natural conclusion, an emergency arises, ${charName} has other plans, emotional reasons, etc.). You do not need to wait for {{user}} to end the call.
+- To end the call, explicitly say phrases like: "전화 끊을게", "이만 끊을게", "끊어야겠다", "I have to go", "gotta hang up", "I'll let you go", "talk later". The system will automatically detect these and terminate the call.
+- IMPORTANT: Do not just say goodbye without using one of the explicit hang-up phrases above. The system needs these specific phrases to detect the call ending.
 - Output format during a call: respond naturally as if speaking on the phone. Do not add narration brackets unless describing non-verbal context. Keep responses concise and conversational.`;
     ctx.setExtensionPrompt(CALL_POLICY_TAG, prompt, 1, 0);
 }
 
 /**
  * AI 응답에서 char 측 통화 종료 의도를 감지한다
+ * - 명시적 정규식 매치 시 즉시 종료
+ * - 키워드 매치 시 즉시 종료 (AI 분류 제거하여 반응 속도 향상)
  */
 async function detectCharCallTermination() {
     if (!callActive) return;
@@ -426,45 +457,15 @@ async function detectCharCallTermination() {
 
     // 명시적 종료 패턴 즉시 감지
     if (EXPLICIT_CHAR_HANG_UP_RE.test(text)) {
-        showToast(`${callContact}이(가) 통화를 종료했습니다.`, 'info', 2000);
-        await endCall();
+        await endCallByChar();
         return;
     }
 
-    // 키워드 기반 감지
+    // 키워드 기반 감지 — 매치되면 즉시 종료 (이전의 AI 분류 단계를 제거하여 신뢰성 향상)
     const lower = text.toLowerCase();
     const found = CHAR_HANG_UP_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
-    if (!found) return;
-
-    // AI를 통한 의도 분류 (필요시 fallback으로 바로 종료)
-    if (!ctx || typeof ctx.generateQuietPrompt !== 'function') {
-        showToast(`${callContact}이(가) 통화를 종료했습니다.`, 'info', 2000);
-        await endCall();
-        return;
-    }
-    try {
-        const prompt = `You are classifying whether this message means the character wants to END the phone call RIGHT NOW.
-Message: """${text}"""
-Return JSON only: {"hang_up":true|false,"confidence":0.0-1.0}
-Set hang_up=true ONLY when the character clearly states they are ending/hanging up the call now.
-Set false for mid-call expressions of wanting to leave eventually, or vague goodbyes without call context.
-JSON only, no prose.`;
-        const raw = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: 'hang-up-intent' }) || '';
-        const jsonPart = raw.match(/\{[\s\S]*\}/)?.[0];
-        if (!jsonPart) return;
-        let parsed;
-        try {
-            parsed = JSON.parse(jsonPart);
-        } catch (jsonErr) {
-            console.warn('[ST-LifeSim] 통화 종료 분류 JSON 파싱 실패:', jsonErr);
-            return;
-        }
-        if (parsed.hang_up && Number(parsed.confidence || 0) >= 0.6) {
-            showToast(`${callContact}이(가) 통화를 종료했습니다.`, 'info', 2000);
-            await endCall();
-        }
-    } catch (e) {
-        console.warn('[ST-LifeSim] 통화 종료 의도 분류 오류:', e);
+    if (found) {
+        await endCallByChar();
     }
 }
 
@@ -824,6 +825,93 @@ async function endCall() {
     saveCallLogs(logs);
 
     showToast(`통화 종료 (${timeStr})`, 'success');
+}
+
+/**
+ * char가 자율적으로 통화를 종료할 때 호출된다.
+ * - 배너를 "char가 통화를 종료했습니다" 텍스트로 전환 후 제거
+ * - 통화 종료 메시지에 char가 끊었음을 명시
+ */
+async function endCallByChar() {
+    if (!callActive) return;
+
+    const duration = Math.floor((Date.now() - callStartTime) / 1000);
+    const m = Math.floor(duration / 60);
+    const s = duration % 60;
+    const timeStr = `${String(m).padStart(2, '0')}분 ${String(s).padStart(2, '0')}초`;
+
+    const endedContact = callContact;
+    const startIdx = callStartMessageIdx;
+    const wasMainChar = callIsMainChar;
+
+    callActive = false;
+    callStartTime = null;
+    callContact = '';
+    callStartMessageIdx = -1;
+    callIsMainChar = true;
+
+    // 비-char 통화 컨텍스트 주입 제거
+    if (!wasMainChar) {
+        clearCallContext();
+    }
+
+    // 배너를 "상대방이 통화를 종료했습니다" 텍스트로 업데이트 후 제거
+    const banner = document.getElementById('slm-call-banner');
+    if (banner) {
+        const textEl = banner.querySelector('#slm-call-banner-text');
+        const endBtn = banner.querySelector('#slm-call-banner-end');
+        if (textEl) textEl.textContent = `📵 ${endedContact}${pickParticle(endedContact)} 통화를 종료했습니다.`;
+        if (endBtn) endBtn.remove();
+        setTimeout(() => removeCallBanner(), 3000);
+    }
+    playCustomSound(getCallAudioSettings().endSoundUrl);
+
+    // 통화 종료 메시지 삽입 (char가 끊었음을 명시)
+    const ctx = getContext();
+    try {
+        const endMessage = getCallEndByCharMessage(endedContact, timeStr);
+        if (wasMainChar) {
+            await slashSend(formatVoiceMsg(endMessage));
+        } else {
+            await slashSendAs('전화', formatVoiceMsg(endMessage));
+        }
+    } catch (e) {
+        console.error('[ST-LifeSim] 통화 종료 오류:', e);
+    }
+    const endIdx = ((getContext()?.chat?.length ?? 1) - 1);
+
+    // AI가 통화 내용 요약 생성
+    let summary = '';
+    try {
+        const chatLen = ctx?.chat?.length ?? 0;
+        const startFrom = Math.max(0, startIdx);
+        const callMsgs = ctx?.chat?.slice(startFrom, chatLen) ?? [];
+        if (callMsgs.length > 0) {
+            const msgText = callMsgs.map(msg => `${msg.is_user ? '{{user}}' : msg.name}: ${msg.mes}`).join('\n');
+            const summaryPrompt = buildCallSummaryPrompt(endedContact, msgText);
+            summary = await generateCallSummaryText(ctx, summaryPrompt, endedContact);
+        }
+    } catch (e) {
+        console.error('[ST-LifeSim] 통화 요약 생성 오류:', e);
+        showToast('통화 요약 생성 실패 (기록은 저장됩니다)', 'warn', 2500);
+    }
+
+    // 통화 기록 저장
+    const logs = loadCallLogs();
+    logs.push({
+        id: generateId(),
+        contactName: endedContact,
+        date: new Date().toISOString(),
+        durationSeconds: duration,
+        summary,
+        startMessageIdx: startIdx,
+        endMessageIdx: endIdx,
+        includeInContext: false,
+        binding: getDefaultBinding(),
+    });
+    saveCallLogs(logs);
+
+    showToast(`${endedContact}${pickParticle(endedContact)} 통화를 종료했습니다. (${timeStr})`, 'info', 3000);
 }
 
 /**
