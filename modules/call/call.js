@@ -569,14 +569,31 @@ async function showIncomingCallDialog(charName) {
     document.body.appendChild(overlay);
     const callAudio = getCallAudioSettings();
     const ringtone = playCustomSound(callAudio.ringtoneUrl, true);
+    // 진동을 반복적으로 실행하여 유저가 수락/거절/부재중 중 하나를 선택할 때까지 유지
+    let vibrateIntervalId = 0;
     if (callAudio.vibrateOnIncoming && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-        navigator.vibrate([220, 120, 220, 120]);
+        // 패턴: 200ms 진동 → 100ms 대기 → 200ms 진동 → 800ms 대기 = 1300ms 한 사이클
+        const vibratePattern = [200, 100, 200, 800];
+        navigator.vibrate(vibratePattern);
+        // 한 사이클의 총 시간(ms)을 계산하여 사이클이 끝날 때마다 반복 실행
+        const patternDuration = vibratePattern.reduce((a, b) => a + b, 0);
+        vibrateIntervalId = window.setInterval(() => {
+            navigator.vibrate(vibratePattern);
+        }, patternDuration);
     }
 
     const cleanup = () => {
         if (ringtone) {
             ringtone.pause();
             ringtone.currentTime = 0;
+        }
+        // 진동 중지
+        if (vibrateIntervalId) {
+            clearInterval(vibrateIntervalId);
+            vibrateIntervalId = 0;
+        }
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            navigator.vibrate(0);
         }
         overlay.remove();
         incomingCallUiOpen = false;

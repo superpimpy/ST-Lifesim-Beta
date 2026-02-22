@@ -106,9 +106,11 @@ const DEFAULT_SETTINGS = {
     imageRadius: 10, // px
     defaultSnsImageUrl: '', // SNS 기본 이미지 URL
     snsImageMode: false, // SNS 게시물 이미지 자동 생성 여부
-    messageImageDisplayMode: 'image', // char 이미지 메시지 표시 방식 (image|text)
-    snsImagePrompt: '',
-    messageImagePrompt: '',
+    messageImageGenerationMode: false, // 메신저 이미지 자동 생성 여부 (ON: 이미지 API로 생성, OFF: 줄글 텍스트)
+    messageImageTextTemplate: '[사진: {description}]', // OFF일 때 줄글 형식 커스텀 템플릿
+    messageImageInjectionPrompt: '<image_generation_rule>\nWhen {{char}} would naturally send a photo or picture in the conversation (e.g., selfie, scenery, food, screenshot, etc.), insert a <pic prompt="image description in English for stable diffusion"> tag at that point in your response.\nOnly insert when it makes contextual sense. The prompt should describe the image visually.\n</image_generation_rule>',
+    snsImagePrompt: 'Create a photo for {authorName}\'s SNS post. Appearance: {appearanceTags}. Scene should match the post content naturally. Photorealistic, casual daily life style.',
+    messageImagePrompt: 'Generate an image that {charName} would send via messenger. Appearance: {appearanceTags}. The image should feel personal and candid, matching the conversation context.',
     characterAppearanceTags: {}, // { [charName]: "tag1, tag2" }
     callAudio: {
         startSoundUrl: '',
@@ -120,6 +122,7 @@ const DEFAULT_SETTINGS = {
     themeColors: {}, // CSS 커스텀 색상
     toast: {
         offsetY: 16,
+        fontColor: '#ffffff',
         colors: {
             info: '#1c1c1e',
             success: '#34c759',
@@ -139,7 +142,7 @@ const DEFAULT_SETTINGS = {
     snsLanguage: 'ko',
     snsKoreanTranslationPrompt: 'Translate the following SNS text into natural Korean. Output Korean text only.\n{{text}}',
     snsPrompts: { ...SNS_PROMPT_DEFAULTS },
-    callSummaryPrompt: '', // 비어 있으면 기본 요약 프롬프트 사용 ({contactName}, {transcript} 변수 지원)
+    callSummaryPrompt: 'The following is the conversation transcript from a call with {contactName}. Write a concise 2-3 sentence summary IN KOREAN of what was discussed during the call. The summary must be written in Korean regardless of the conversation language. Character names may be kept as-is:\n{transcript}',
     messageTemplates: { ...DEFAULT_MESSAGE_TEMPLATES },
     aiRoutes: {
         sns: { ...AI_ROUTE_DEFAULTS },
@@ -178,8 +181,24 @@ function getSettings() {
     if (ext[SETTINGS_KEY].themeColors == null) {
         ext[SETTINGS_KEY].themeColors = {};
     }
-    if (!['image', 'text'].includes(ext[SETTINGS_KEY].messageImageDisplayMode)) {
-        ext[SETTINGS_KEY].messageImageDisplayMode = DEFAULT_SETTINGS.messageImageDisplayMode;
+    // 메신저 이미지 생성 모드 (boolean)
+    if (typeof ext[SETTINGS_KEY].messageImageGenerationMode !== 'boolean') {
+        ext[SETTINGS_KEY].messageImageGenerationMode = DEFAULT_SETTINGS.messageImageGenerationMode;
+    }
+    // 메신저 이미지 OFF 시 줄글 텍스트 템플릿
+    if (typeof ext[SETTINGS_KEY].messageImageTextTemplate !== 'string') {
+        ext[SETTINGS_KEY].messageImageTextTemplate = DEFAULT_SETTINGS.messageImageTextTemplate;
+    }
+    // 메신저 이미지 생성 프롬프트 주입
+    if (typeof ext[SETTINGS_KEY].messageImageInjectionPrompt !== 'string') {
+        ext[SETTINGS_KEY].messageImageInjectionPrompt = DEFAULT_SETTINGS.messageImageInjectionPrompt;
+    }
+    // 하위 호환: 기존 messageImageDisplayMode가 남아있으면 마이그레이션
+    if (ext[SETTINGS_KEY].messageImageDisplayMode != null) {
+        if (ext[SETTINGS_KEY].messageImageGenerationMode == null) {
+            ext[SETTINGS_KEY].messageImageGenerationMode = ext[SETTINGS_KEY].messageImageDisplayMode === 'image';
+        }
+        delete ext[SETTINGS_KEY].messageImageDisplayMode;
     }
     if (typeof ext[SETTINGS_KEY].snsImagePrompt !== 'string') {
         ext[SETTINGS_KEY].snsImagePrompt = DEFAULT_SETTINGS.snsImagePrompt;
@@ -216,6 +235,9 @@ function getSettings() {
             ext[SETTINGS_KEY].toast.colors[key] = DEFAULT_SETTINGS.toast.colors[key];
         }
     });
+    if (typeof ext[SETTINGS_KEY].toast.fontColor !== 'string') {
+        ext[SETTINGS_KEY].toast.fontColor = DEFAULT_SETTINGS.toast.fontColor;
+    }
     if (ext[SETTINGS_KEY].firstMsg == null) {
         ext[SETTINGS_KEY].firstMsg = { ...DEFAULT_SETTINGS.firstMsg };
     }
@@ -731,22 +753,93 @@ function openSettingsPanel(onBack) {
         wrapper.appendChild(snsImageRow);
 
         wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
-        const msgImageModeRow = document.createElement('div');
-        msgImageModeRow.className = 'slm-form-group';
-        const msgImageModeLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '💬 메신저 이미지 표시 모드' });
-        const msgImageModeSelect = document.createElement('select');
-        msgImageModeSelect.className = 'slm-select';
-        msgImageModeSelect.innerHTML = `
-            <option value="image">이미지로 표시</option>
-            <option value="text">줄글 텍스트로 표시</option>
-        `;
-        msgImageModeSelect.value = settings.messageImageDisplayMode || 'image';
-        msgImageModeSelect.onchange = () => {
-            settings.messageImageDisplayMode = msgImageModeSelect.value === 'text' ? 'text' : 'image';
+
+        // 메신저 이미지 생성 모드
+        const msgImageTitle = Object.assign(document.createElement('div'), {
+            className: 'slm-label',
+            textContent: '💬 메신저 이미지 생성 모드',
+        });
+        msgImageTitle.style.fontWeight = '600';
+        wrapper.appendChild(msgImageTitle);
+
+        const msgImageDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: 'ON: char 메시지에서 사진을 보낼만한 상황일 때 이미지 생성 API로 실제 이미지를 생성합니다.\nOFF: 이미지 생성 API를 호출하지 않으며 [사진: (상황설명)] 같은 줄글 텍스트로만 출력됩니다.',
+        });
+        msgImageDesc.style.whiteSpace = 'pre-line';
+        wrapper.appendChild(msgImageDesc);
+
+        const msgImageRow = document.createElement('div');
+        msgImageRow.className = 'slm-settings-row';
+        const msgImageLbl = document.createElement('label');
+        msgImageLbl.className = 'slm-toggle-label';
+        const msgImageChk = document.createElement('input');
+        msgImageChk.type = 'checkbox';
+        msgImageChk.checked = settings.messageImageGenerationMode === true;
+        msgImageChk.onchange = () => {
+            settings.messageImageGenerationMode = msgImageChk.checked;
+            saveSettings();
+            updateMessageImageInjection();
+            showToast(`메신저 이미지 생성 모드: ${settings.messageImageGenerationMode ? 'ON' : 'OFF'}`, 'success', 1500);
+        };
+        msgImageLbl.appendChild(msgImageChk);
+        msgImageLbl.appendChild(document.createTextNode(' 메신저 이미지 자동 생성 ON'));
+        msgImageRow.appendChild(msgImageLbl);
+        wrapper.appendChild(msgImageRow);
+
+        // 줄글 텍스트 템플릿 (OFF 모드일 때)
+        const textTemplateGroup = document.createElement('div');
+        textTemplateGroup.className = 'slm-form-group';
+        textTemplateGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '📝 OFF 모드 줄글 형식 (커스텀)' }));
+        const textTemplateDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: '이미지 생성 모드 OFF일 때 사진 대신 표시할 텍스트 형식입니다. {description}에 상황 설명이 들어갑니다.',
+        });
+        textTemplateGroup.appendChild(textTemplateDesc);
+        const textTemplateInput = document.createElement('input');
+        textTemplateInput.className = 'slm-input';
+        textTemplateInput.type = 'text';
+        textTemplateInput.placeholder = '예: [사진: {description}]';
+        textTemplateInput.value = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
+        textTemplateInput.oninput = () => { settings.messageImageTextTemplate = textTemplateInput.value; saveSettings(); };
+        textTemplateGroup.appendChild(textTemplateInput);
+        const textTemplateResetBtn = document.createElement('button');
+        textTemplateResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+        textTemplateResetBtn.textContent = '↺ 기본값';
+        textTemplateResetBtn.onclick = () => {
+            settings.messageImageTextTemplate = DEFAULT_SETTINGS.messageImageTextTemplate;
+            textTemplateInput.value = settings.messageImageTextTemplate;
             saveSettings();
         };
-        msgImageModeRow.append(msgImageModeLbl, msgImageModeSelect);
-        wrapper.appendChild(msgImageModeRow);
+        textTemplateGroup.appendChild(textTemplateResetBtn);
+        wrapper.appendChild(textTemplateGroup);
+
+        // 이미지 생성 프롬프트 주입 (AI에게 보내는 지시)
+        const injectionPromptGroup = document.createElement('div');
+        injectionPromptGroup.className = 'slm-form-group';
+        injectionPromptGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '🤖 이미지 생성 프롬프트 주입 (커스텀)' }));
+        const injectionPromptDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: 'AI에게 보내는 이미지 생성 지시 프롬프트입니다. AI가 사진을 보낼만한 상황에서 <pic prompt="설명"> 태그를 출력하도록 유도합니다.',
+        });
+        injectionPromptGroup.appendChild(injectionPromptDesc);
+        const injectionPromptInput = document.createElement('textarea');
+        injectionPromptInput.className = 'slm-textarea';
+        injectionPromptInput.rows = 4;
+        injectionPromptInput.placeholder = 'AI 이미지 생성 지시 프롬프트';
+        injectionPromptInput.value = settings.messageImageInjectionPrompt || DEFAULT_SETTINGS.messageImageInjectionPrompt;
+        injectionPromptInput.oninput = () => { settings.messageImageInjectionPrompt = injectionPromptInput.value; saveSettings(); };
+        injectionPromptGroup.appendChild(injectionPromptInput);
+        const injectionPromptResetBtn = document.createElement('button');
+        injectionPromptResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+        injectionPromptResetBtn.textContent = '↺ 기본값';
+        injectionPromptResetBtn.onclick = () => {
+            settings.messageImageInjectionPrompt = DEFAULT_SETTINGS.messageImageInjectionPrompt;
+            injectionPromptInput.value = settings.messageImageInjectionPrompt;
+            saveSettings();
+        };
+        injectionPromptGroup.appendChild(injectionPromptResetBtn);
+        wrapper.appendChild(injectionPromptGroup);
 
         const snsImagePromptGroup = document.createElement('div');
         snsImagePromptGroup.className = 'slm-form-group';
@@ -758,6 +851,15 @@ function openSettingsPanel(onBack) {
         snsImagePromptInput.value = settings.snsImagePrompt || '';
         snsImagePromptInput.oninput = () => { settings.snsImagePrompt = snsImagePromptInput.value; saveSettings(); };
         snsImagePromptGroup.appendChild(snsImagePromptInput);
+        const snsImagePromptResetBtn = document.createElement('button');
+        snsImagePromptResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+        snsImagePromptResetBtn.textContent = '↺ 기본값';
+        snsImagePromptResetBtn.onclick = () => {
+            settings.snsImagePrompt = DEFAULT_SETTINGS.snsImagePrompt;
+            snsImagePromptInput.value = settings.snsImagePrompt;
+            saveSettings();
+        };
+        snsImagePromptGroup.appendChild(snsImagePromptResetBtn);
         wrapper.appendChild(snsImagePromptGroup);
 
         const messageImagePromptGroup = document.createElement('div');
@@ -770,6 +872,15 @@ function openSettingsPanel(onBack) {
         messageImagePromptInput.value = settings.messageImagePrompt || '';
         messageImagePromptInput.oninput = () => { settings.messageImagePrompt = messageImagePromptInput.value; saveSettings(); };
         messageImagePromptGroup.appendChild(messageImagePromptInput);
+        const messageImagePromptResetBtn = document.createElement('button');
+        messageImagePromptResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+        messageImagePromptResetBtn.textContent = '↺ 기본값';
+        messageImagePromptResetBtn.onclick = () => {
+            settings.messageImagePrompt = DEFAULT_SETTINGS.messageImagePrompt;
+            messageImagePromptInput.value = settings.messageImagePrompt;
+            saveSettings();
+        };
+        messageImagePromptGroup.appendChild(messageImagePromptResetBtn);
         wrapper.appendChild(messageImagePromptGroup);
 
         const ctx = getContext();
@@ -792,6 +903,24 @@ function openSettingsPanel(onBack) {
             wrapper.appendChild(appearanceGroup);
         }
 
+        // {{user}} 외관 태그 바인딩
+        const userAppearanceGroup = document.createElement('div');
+        userAppearanceGroup.className = 'slm-form-group';
+        const userName = getContext()?.name1 || '{{user}}';
+        userAppearanceGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: `🏷️ ${userName} (유저) 외관 태그 바인딩` }));
+        const userAppearanceInput = document.createElement('input');
+        userAppearanceInput.className = 'slm-input';
+        userAppearanceInput.type = 'text';
+        userAppearanceInput.placeholder = '예: short hair, casual outfit, glasses';
+        userAppearanceInput.value = settings.characterAppearanceTags?.['{{user}}'] || '';
+        userAppearanceInput.oninput = () => {
+            if (!settings.characterAppearanceTags || typeof settings.characterAppearanceTags !== 'object') settings.characterAppearanceTags = {};
+            settings.characterAppearanceTags['{{user}}'] = userAppearanceInput.value.trim();
+            saveSettings();
+        };
+        userAppearanceGroup.appendChild(userAppearanceInput);
+        wrapper.appendChild(userAppearanceGroup);
+
         wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
         const callSoundTitle = Object.assign(document.createElement('div'), {
             className: 'slm-label',
@@ -808,6 +937,8 @@ function openSettingsPanel(onBack) {
             const group = document.createElement('div');
             group.className = 'slm-form-group';
             group.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: label }));
+            const inputRow = document.createElement('div');
+            inputRow.className = 'slm-input-row';
             const input = document.createElement('input');
             input.className = 'slm-input';
             input.type = 'url';
@@ -818,9 +949,92 @@ function openSettingsPanel(onBack) {
                 settings.callAudio[key] = input.value.trim();
                 saveSettings();
             };
-            group.appendChild(input);
+            const previewBtn = document.createElement('button');
+            previewBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+            previewBtn.textContent = '▶';
+            previewBtn.title = '미리듣기';
+            let previewAudio = null;
+            previewBtn.onclick = () => {
+                if (previewAudio) { previewAudio.pause(); previewAudio = null; previewBtn.textContent = '▶'; return; }
+                const url = input.value.trim();
+                if (!url) { showToast('URL을 입력해주세요.', 'warn'); return; }
+                try {
+                    previewAudio = new Audio(url);
+                    previewAudio.onended = () => { previewAudio = null; previewBtn.textContent = '▶'; };
+                    previewAudio.onerror = () => { showToast('재생 실패', 'error'); previewAudio = null; previewBtn.textContent = '▶'; };
+                    previewBtn.textContent = '⏹';
+                    void previewAudio.play().catch(() => { showToast('재생 실패', 'error'); previewAudio = null; previewBtn.textContent = '▶'; });
+                } catch { showToast('재생 실패', 'error'); }
+            };
+            inputRow.append(input, previewBtn);
+            group.appendChild(inputRow);
             wrapper.appendChild(group);
         });
+
+        // 사운드 프리셋 저장/불러오기
+        const presetRow = document.createElement('div');
+        presetRow.className = 'slm-btn-row';
+        presetRow.style.marginTop = '8px';
+        const presetSaveBtn = document.createElement('button');
+        presetSaveBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
+        presetSaveBtn.textContent = '💾 프리셋 저장';
+        presetSaveBtn.onclick = () => {
+            const presetName = prompt('프리셋 이름을 입력하세요:');
+            if (!presetName) return;
+            const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets') || '{}');
+            presets[presetName] = {
+                startSoundUrl: settings.callAudio?.startSoundUrl || '',
+                endSoundUrl: settings.callAudio?.endSoundUrl || '',
+                ringtoneUrl: settings.callAudio?.ringtoneUrl || '',
+            };
+            localStorage.setItem('st-lifesim:sound-presets', JSON.stringify(presets));
+            showToast(`프리셋 "${presetName}" 저장됨`, 'success', 1500);
+            refreshPresetList();
+        };
+        const presetLoadSelect = document.createElement('select');
+        presetLoadSelect.className = 'slm-select';
+        presetLoadSelect.style.flex = '1';
+        const refreshPresetList = () => {
+            presetLoadSelect.innerHTML = '';
+            presetLoadSelect.appendChild(Object.assign(document.createElement('option'), { value: '', textContent: '-- 프리셋 선택 --' }));
+            const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets') || '{}');
+            Object.keys(presets).forEach((name) => {
+                presetLoadSelect.appendChild(Object.assign(document.createElement('option'), { value: name, textContent: name }));
+            });
+        };
+        refreshPresetList();
+        const presetLoadBtn = document.createElement('button');
+        presetLoadBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
+        presetLoadBtn.textContent = '📂 불러오기';
+        presetLoadBtn.onclick = () => {
+            const name = presetLoadSelect.value;
+            if (!name) { showToast('프리셋을 선택하세요.', 'warn'); return; }
+            const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets') || '{}');
+            const preset = presets[name];
+            if (!preset) { showToast('프리셋을 찾을 수 없습니다.', 'error'); return; }
+            if (!settings.callAudio || typeof settings.callAudio !== 'object') settings.callAudio = { ...DEFAULT_SETTINGS.callAudio };
+            settings.callAudio.startSoundUrl = preset.startSoundUrl || '';
+            settings.callAudio.endSoundUrl = preset.endSoundUrl || '';
+            settings.callAudio.ringtoneUrl = preset.ringtoneUrl || '';
+            saveSettings();
+            // 입력 필드 업데이트를 위해 패널 재빌드
+            showToast(`프리셋 "${name}" 적용됨. 패널을 다시 열어 확인하세요.`, 'success', 2000);
+        };
+        const presetDeleteBtn = document.createElement('button');
+        presetDeleteBtn.className = 'slm-btn slm-btn-danger slm-btn-sm';
+        presetDeleteBtn.textContent = '🗑️';
+        presetDeleteBtn.title = '선택된 프리셋 삭제';
+        presetDeleteBtn.onclick = () => {
+            const name = presetLoadSelect.value;
+            if (!name) return;
+            const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets') || '{}');
+            delete presets[name];
+            localStorage.setItem('st-lifesim:sound-presets', JSON.stringify(presets));
+            refreshPresetList();
+            showToast(`프리셋 "${name}" 삭제됨`, 'success', 1500);
+        };
+        presetRow.append(presetSaveBtn, presetLoadSelect, presetLoadBtn, presetDeleteBtn);
+        wrapper.appendChild(presetRow);
         const vibrateRow = document.createElement('div');
         vibrateRow.className = 'slm-settings-row';
         const vibrateLbl = document.createElement('label');
@@ -938,7 +1152,7 @@ function openSettingsPanel(onBack) {
             picker.value = normalizeColorValue(savedColor || currentCssVal, def.defaultVal);
 
             picker.oninput = () => {
-                document.documentElement.style.setProperty(def.key, picker.value);
+                document.documentElement.style.setProperty(def.key, picker.value, 'important');
                 settings.themeColors[def.key] = picker.value;
                 saveSettings();
             };
@@ -948,7 +1162,7 @@ function openSettingsPanel(onBack) {
             resetBtn.textContent = '↺';
             resetBtn.title = '기본값으로 복원';
             resetBtn.onclick = () => {
-                document.documentElement.style.setProperty(def.key, def.defaultVal);
+                document.documentElement.style.setProperty(def.key, def.defaultVal, 'important');
                 settings.themeColors[def.key] = def.defaultVal;
                 picker.value = def.defaultVal;
                 saveSettings();
@@ -966,7 +1180,7 @@ function openSettingsPanel(onBack) {
         resetAllBtn.textContent = '🔄 전체 색상 초기화';
         resetAllBtn.onclick = () => {
             colorDefs.forEach((def, i) => {
-                document.documentElement.style.setProperty(def.key, def.defaultVal);
+                document.documentElement.style.setProperty(def.key, def.defaultVal, 'important');
                 settings.themeColors[def.key] = def.defaultVal;
                 // Update each color picker in place
                 const pickers = wrapper.querySelectorAll('input[type="color"]');
@@ -1031,6 +1245,24 @@ function openSettingsPanel(onBack) {
             row.append(lbl, picker);
             wrapper.appendChild(row);
         });
+
+        // 토스트 폰트 색상 설정
+        const toastFontRow = document.createElement('div');
+        toastFontRow.className = 'slm-input-row';
+        toastFontRow.style.marginTop = '8px';
+        const toastFontLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '토스트 폰트 색:' });
+        toastFontLbl.style.flex = '1';
+        const toastFontPicker = document.createElement('input');
+        toastFontPicker.type = 'color';
+        toastFontPicker.className = 'slm-color-picker';
+        toastFontPicker.value = normalizeColorValue(settings.toast?.fontColor, DEFAULT_SETTINGS.toast.fontColor);
+        toastFontPicker.oninput = () => {
+            settings.toast.fontColor = toastFontPicker.value;
+            document.documentElement.style.setProperty('--slm-toast-font-color', toastFontPicker.value);
+            saveSettings();
+        };
+        toastFontRow.append(toastFontLbl, toastFontPicker);
+        wrapper.appendChild(toastFontRow);
 
         return wrapper;
     }
@@ -1353,18 +1585,35 @@ function openSettingsPanel(onBack) {
             preview.style.whiteSpace = 'normal';
             preview.style.display = 'none';
             const containsHtmlOrCss = (text) => /<\/?[a-z][\s\S]*>/i.test(text) || /(^|\n)\s*[.#a-zA-Z][^{\n]*\{[^}]*:[^}]*\}/.test(text);
+            const containsMarkdown = (text) => /(\*\*[^*]+\*\*|\*[^*]+\*|^#{1,6}\s|`[^`]+`|\[.+\]\(.+\)|\n[-*]\s)/m.test(text);
+            const simpleMarkdownToHtml = (text) => {
+                return String(text)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                    .replace(/`(.+?)`/g, '<code>$1</code>')
+                    .replace(/\n/g, '<br>');
+            };
             const refreshPreview = () => {
                 const val = input.value || '';
                 const hasHtml = containsHtmlOrCss(val);
-                preview.style.display = hasHtml ? '' : 'none';
+                const hasMd = containsMarkdown(val);
+                preview.style.display = (hasHtml || hasMd) ? '' : 'none';
                 preview.innerHTML = '';
-                if (!hasHtml) return;
+                if (!hasHtml && !hasMd) return;
                 preview.appendChild(Object.assign(document.createElement('div'), { textContent: '👀 미리보기 (샌드박스)' }));
-                const frame = document.createElement('iframe');
-                frame.sandbox = '';
-                frame.style.cssText = 'width:100%;min-height:80px;border:1px solid var(--slm-border);border-radius:8px;background:#fff;margin-top:6px';
-                frame.srcdoc = String(val);
-                preview.appendChild(frame);
+                if (hasHtml) {
+                    const frame = document.createElement('iframe');
+                    frame.sandbox = '';
+                    frame.style.cssText = 'width:100%;min-height:80px;border:1px solid var(--slm-border);border-radius:8px;background:#fff;margin-top:6px';
+                    frame.srcdoc = String(val);
+                    preview.appendChild(frame);
+                } else {
+                    const mdPreview = document.createElement('div');
+                    mdPreview.style.cssText = 'padding:8px 12px;border:1px solid var(--slm-border);border-radius:8px;background:var(--slm-surface,#fff);margin-top:6px;font-size:13px;line-height:1.6';
+                    mdPreview.innerHTML = simpleMarkdownToHtml(val);
+                    preview.appendChild(mdPreview);
+                }
             };
             input.oninput = () => {
                 settings.messageTemplates[key] = input.value;
@@ -1442,33 +1691,162 @@ function syncQuickSendButtons() {
     }
 }
 
-function convertImageMessageToText(html, charName) {
-    const imageMatches = [...String(html || '').matchAll(/<img[^>]*src="([^"]+)"[^>]*>/gi)];
-    if (imageMatches.length === 0) return '';
-    const appearanceTag = getSettings().characterAppearanceTags?.[charName] || '';
-    const promptLine = getSettings().messageImagePrompt
-        ? getSettings().messageImagePrompt
-            .replace(/\{charName\}/g, charName)
-            .replace(/\{appearanceTags\}/g, appearanceTag)
-        : '';
-    const lines = imageMatches.map((m, i) => `📷 ${charName} 사진 ${i + 1}: ${m[1]}`);
-    if (promptLine) lines.push(`🧠 프롬프트: ${promptLine}`);
-    return lines.join('\n');
+// ── 메신저 이미지 생성/텍스트 변환 로직 ──────────────────────────
+
+// 메신저 이미지 프롬프트 주입 태그
+const MSG_IMAGE_INJECT_TAG = 'st-lifesim-msg-image';
+
+// <pic prompt="..."> 패턴 감지 정규식
+const PIC_TAG_REGEX = /<pic\s[^>]*?prompt="([^"]*)"[^>]*?\/?>/gi;
+
+/**
+ * 메신저 이미지 모드에 따라 AI 프롬프트 주입을 업데이트한다
+ * ON: AI에게 사진 상황에서 <pic prompt="..."> 태그를 출력하도록 지시
+ * OFF: 주입을 제거하여 AI가 <pic> 태그를 출력하지 않도록 한다
+ */
+// OFF 모드 이미지 프롬프트 — AI가 사진 상황을 <pic> 태그로 표시하되, 실제 생성은 하지 않음
+const MSG_IMAGE_OFF_PROMPT = '<image_generation_rule>\nWhen {{char}} would naturally send a photo or picture in the conversation (e.g., selfie, scenery, food, screenshot, etc.), insert a <pic prompt="image description in Korean for the photo situation"> tag at that point in your response.\nOnly insert when it makes contextual sense. The prompt should describe the image situation briefly.\n</image_generation_rule>';
+
+function updateMessageImageInjection() {
+    const ctx = getContext();
+    if (!ctx || typeof ctx.setExtensionPrompt !== 'function') return;
+    const settings = getSettings();
+    if (settings.messageImageGenerationMode) {
+        const prompt = settings.messageImageInjectionPrompt || DEFAULT_SETTINGS.messageImageInjectionPrompt;
+        ctx.setExtensionPrompt(MSG_IMAGE_INJECT_TAG, prompt, 1, 0);
+    } else {
+        // OFF 모드에서도 AI가 <pic> 태그를 출력하도록 유도
+        // (이후 텍스트로 변환 처리됨)
+        ctx.setExtensionPrompt(MSG_IMAGE_INJECT_TAG, MSG_IMAGE_OFF_PROMPT, 1, 0);
+    }
 }
 
+/**
+ * 메신저 이미지 생성 API를 사용하여 실제 이미지를 생성한다
+ * SillyTavern의 /sd 슬래시 커맨드를 사용한다
+ * @param {string} imagePrompt - 이미지 생성에 사용할 프롬프트
+ * @returns {Promise<string>} 생성된 이미지의 URL 또는 빈 문자열
+ */
+async function generateMessageImageViaApi(imagePrompt) {
+    if (!imagePrompt || !imagePrompt.trim()) return '';
+    try {
+        const ctx = getContext();
+        if (!ctx) return '';
+        if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
+            const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true ${imagePrompt}`, { showOutput: false });
+            const resultStr = String(result?.pipe || result || '').trim();
+            if (resultStr && (resultStr.startsWith('http') || resultStr.startsWith('/') || resultStr.startsWith('data:'))) {
+                return resultStr;
+            }
+        }
+        return '';
+    } catch (e) {
+        console.warn('[ST-LifeSim] 메신저 이미지 생성 API 호출 실패:', e);
+        return '';
+    }
+}
+
+/**
+ * char 메시지 렌더링 후 이미지 태그를 처리한다
+ * - ON: <pic prompt="..."> 태그를 감지하여 이미지 생성 API로 실제 이미지 생성
+ * - OFF: <pic prompt="..."> 태그를 줄글 텍스트 형식으로 변환
+ */
 async function applyCharacterImageDisplayMode() {
     const settings = getSettings();
-    if (settings.messageImageDisplayMode !== 'text') return;
     const ctx = getContext();
-    const lastMsg = ctx?.chat?.[ctx.chat.length - 1];
+    if (!ctx) return;
+    const lastMsg = ctx.chat?.[ctx.chat.length - 1];
     if (!lastMsg || lastMsg.is_user) return;
     const mes = String(lastMsg.mes || '');
-    if (!/<img[\s\S]*?>/i.test(mes)) return;
-    const converted = convertImageMessageToText(mes, String(lastMsg.name || ctx?.name2 || '{{char}}'));
-    if (!converted) return;
-    lastMsg.mes = escapeHtml(converted).replace(/\n/g, '<br>');
-    if (typeof ctx?.saveChat === 'function') {
-        await ctx.saveChat();
+
+    // <pic prompt="..."> 태그가 있는지 확인
+    const picMatches = [...mes.matchAll(PIC_TAG_REGEX)];
+    if (picMatches.length === 0) return;
+
+    const charName = String(lastMsg.name || ctx?.name2 || '{{char}}');
+    const msgIdx = Number(ctx.chat.length - 1);
+
+    // 각 매치에 대한 대체 문자열을 미리 계산한다 (역순 처리를 위해)
+    /** @type {Array<{index: number, length: number, replacement: string}>} */
+    const replacements = [];
+
+    if (settings.messageImageGenerationMode) {
+        // ── ON 모드: 이미지 생성 API로 실제 이미지 생성 ──
+        showToast(`📷 ${picMatches.length}개 이미지 생성 중...`, 'info', 2000);
+        const appearanceTags = settings.characterAppearanceTags?.[charName] || '';
+        for (const match of picMatches) {
+            const fullTag = match[0];
+            const rawPrompt = (match[1] || '').trim();
+            const matchIndex = match.index;
+            if (!rawPrompt) {
+                replacements.push({ index: matchIndex, length: fullTag.length, replacement: '' });
+                continue;
+            }
+            const prompt = appearanceTags ? `${rawPrompt}, ${appearanceTags}` : rawPrompt;
+            let replacement;
+            try {
+                const imageUrl = await generateMessageImageViaApi(prompt);
+                if (imageUrl) {
+                    const safeUrl = escapeHtml(imageUrl);
+                    const safePrompt = escapeHtml(rawPrompt);
+                    replacement = `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`;
+                } else {
+                    const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
+                    replacement = template.replace(/\{description\}/g, rawPrompt);
+                }
+            } catch (err) {
+                console.warn('[ST-LifeSim] 메신저 이미지 개별 생성 실패:', err);
+                const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
+                replacement = template.replace(/\{description\}/g, rawPrompt);
+            }
+            replacements.push({ index: matchIndex, length: fullTag.length, replacement });
+        }
+    } else {
+        // ── OFF 모드: 줄글 텍스트로 변환 ──
+        const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
+        for (const match of picMatches) {
+            const fullTag = match[0];
+            const prompt = (match[1] || '').trim();
+            const matchIndex = match.index;
+            if (!prompt) {
+                replacements.push({ index: matchIndex, length: fullTag.length, replacement: '' });
+                continue;
+            }
+            const text = template.replace(/\{description\}/g, prompt);
+            replacements.push({ index: matchIndex, length: fullTag.length, replacement: text });
+        }
+    }
+
+    if (replacements.length === 0) return;
+
+    // 역순으로 치환하여 인덱스 오프셋 문제를 방지한다
+    let updatedMes = mes;
+    for (let i = replacements.length - 1; i >= 0; i--) {
+        const { index, length, replacement } = replacements[i];
+        updatedMes = updatedMes.slice(0, index) + replacement + updatedMes.slice(index + length);
+    }
+
+    if (updatedMes !== mes) {
+        lastMsg.mes = updatedMes;
+        if (typeof ctx.saveChat === 'function') {
+            await ctx.saveChat();
+        }
+        // UI 업데이트
+        if (settings.messageImageGenerationMode && Number.isFinite(msgIdx) && msgIdx >= 0) {
+            try {
+                const msgEl = document.querySelector(`.mes[mesid="${msgIdx}"]`);
+                if (msgEl) {
+                    const mesTextEl = msgEl.querySelector('.mes_text');
+                    if (mesTextEl) mesTextEl.innerHTML = updatedMes;
+                }
+            } catch (uiErr) {
+                console.warn('[ST-LifeSim] 메시지 UI 업데이트 실패:', uiErr);
+            }
+        }
+    }
+
+    if (settings.messageImageGenerationMode && replacements.length > 0) {
+        showToast(`📷 이미지 생성 완료`, 'success', 1500);
     }
 }
 
@@ -1510,8 +1888,21 @@ function cycleTheme() {
  * @returns {string}
  */
 function normalizeColorValue(value, fallback) {
-    const hex = (value || '').trim();
-    return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex) ? hex : fallback;
+    const raw = (value || '').trim();
+    // Already valid 6-digit hex
+    if (/^#[0-9a-f]{6}$/i.test(raw)) return raw;
+    // 3-digit hex → expand to 6-digit
+    const m3 = raw.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i);
+    if (m3) return `#${m3[1]}${m3[1]}${m3[2]}${m3[2]}${m3[3]}${m3[3]}`;
+    // rgb(r, g, b) / rgba(r, g, b, a) → hex
+    const rgbMatch = raw.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/);
+    if (rgbMatch) {
+        const r = Math.min(255, parseInt(rgbMatch[1], 10));
+        const g = Math.min(255, parseInt(rgbMatch[2], 10));
+        const b = Math.min(255, parseInt(rgbMatch[3], 10));
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
+    return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(fallback) ? fallback : '#000000';
 }
 
 /**
@@ -1538,7 +1929,7 @@ async function init() {
     // 저장된 테마 색상 적용
     if (settings.themeColors) {
         Object.entries(settings.themeColors).forEach(([key, val]) => {
-            if (key && val) document.documentElement.style.setProperty(key, val);
+            if (key && val) document.documentElement.style.setProperty(key, val, 'important');
         });
     }
     document.documentElement.style.setProperty('--slm-toast-top', `${settings.toast?.offsetY ?? 16}px`);
@@ -1546,6 +1937,9 @@ async function init() {
         const val = settings.toast?.colors?.[key];
         if (val) document.documentElement.style.setProperty(`--slm-toast-${key}`, val);
     });
+    if (settings.toast?.fontColor) {
+        document.documentElement.style.setProperty('--slm-toast-font-color', settings.toast.fontColor);
+    }
 
     // 각 모듈 초기화 (활성화된 경우만, 오류 발생 시 개별 모듈만 스킵)
     const moduleInits = [
@@ -1567,6 +1961,9 @@ async function init() {
     if (isEnabled() && isModuleEnabled('quickTools')) {
         try { injectQuickSendButton(); } catch (e) { console.error('[ST-LifeSim] 퀵 센드 버튼 오류:', e); }
     }
+
+    // 메신저 이미지 생성 프롬프트 주입 설정
+    try { updateMessageImageInjection(); } catch (e) { console.error('[ST-LifeSim] 이미지 프롬프트 주입 오류:', e); }
 
     // ST-LifeSim 메뉴 버튼 삽입 (sendform 옆)
     try { injectLifeSimMenuButton(); } catch (e) { console.error('[ST-LifeSim] 메뉴 버튼 오류:', e); }
@@ -1591,6 +1988,7 @@ async function init() {
         evSrc.on(eventTypes.CHAT_CHANGED, async () => {
             if (isEnabled()) {
                 await injectContext().catch(e => console.error('[ST-LifeSim] 컨텍스트 주입 오류:', e));
+                try { updateMessageImageInjection(); } catch (e) { console.error('[ST-LifeSim] 이미지 프롬프트 재주입 오류:', e); }
             }
         });
     }
