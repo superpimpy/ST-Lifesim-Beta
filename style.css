@@ -478,7 +478,7 @@ body[data-theme="dark"],
 
 .slm-toast {
   background: var(--slm-bg-secondary);
-  color: var(--slm-text) !important;
+  color: var(--slm-toast-font-color, #ffffff) !important;
   padding: 10px 18px;
   border-radius: 20px;
   font-family: var(--slm-font);

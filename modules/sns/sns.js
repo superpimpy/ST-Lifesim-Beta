@@ -269,6 +269,33 @@ function getAuthorDefaultImageUrl(authorName, includeLegacy = true) {
 }
 
 /**
+ * 이미지 생성 API를 사용하여 실제 이미지를 생성한다.
+ * SillyTavern의 /sd 슬래시 커맨드를 사용한다.
+ * @param {string} imagePrompt - 이미지 생성에 사용할 프롬프트
+ * @returns {Promise<string>} 생성된 이미지의 URL 또는 빈 문자열
+ */
+async function generateImageViaApi(imagePrompt) {
+    if (!imagePrompt || !imagePrompt.trim()) return '';
+    try {
+        const ctx = getContext();
+        if (!ctx) return '';
+        // SillyTavern SlashCommandParser를 통해 /sd 명령어 사용
+        if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
+            const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true ${imagePrompt}`, { showOutput: false });
+            const resultStr = String(result?.pipe || result || '').trim();
+            // 결과가 URL-like 문자열이면 반환
+            if (resultStr && (resultStr.startsWith('http') || resultStr.startsWith('/') || resultStr.startsWith('data:'))) {
+                return resultStr;
+            }
+        }
+        return '';
+    } catch (e) {
+        console.warn('[ST-LifeSim] 이미지 생성 API 호출 실패:', e);
+        return '';
+    }
+}
+
+/**
  * 배열에서 임의의 원소를 반환한다.
  * @template T
  * @param {T[]} arr
@@ -454,11 +481,12 @@ export async function triggerNpcPosting() {
         const presetPick = getRandomItem(presets);
         const presetImg = presetPick ? presetPick.url : '';
         // 캐릭터별 기본 이미지가 있으면 우선 사용하고, 없을 때만 프리셋으로 보완한다.
-        const finalImageUrl = defaultImg || presetImg;
+        let finalImageUrl = defaultImg || presetImg;
         let imageDescription = '';
         const appearanceTags = String(promptSettings.characterAppearanceTags?.[pick.name] || '').trim();
+        const userAppearanceTags = String(promptSettings.characterAppearanceTags?.['{{user}}'] || '').trim();
         let resolvedImagePrompt = '';
-        if (finalImageUrl && promptSettings.snsImageMode && (typeof freshCtx.generateQuietPrompt === 'function' || typeof freshCtx.generateRaw === 'function')) {
+        if (promptSettings.snsImageMode) {
             const basePrompt = applyPromptTemplate(promptSettings.templates.imageDescription, {
                 authorName: pick.name,
                 postContent,
@@ -468,9 +496,25 @@ export async function triggerNpcPosting() {
                     .replace(/\{authorName\}/g, pick.name)
                     .replace(/\{postContent\}/g, postContent)
                     .replace(/\{appearanceTags\}/g, appearanceTags)
+                    .replace(/\{\{user\}\}/g, freshCtx?.name1 || '{{user}}')
+                    .replace(/\{userAppearanceTags\}/g, userAppearanceTags)
                 : basePrompt;
             const descPrompt = appearanceTags ? `${resolvedImagePrompt}\nAppearance tags: ${appearanceTags}` : resolvedImagePrompt;
-            imageDescription = normalizeSnsText(await generateSnsText(freshCtx, enforceSnsLanguage(descPrompt, authorLanguage), `${pick.name}-image-desc`), SNS_IMAGE_DESC_MAX);
+
+            // 이미지 API를 사용하여 실제 이미지 생성 시도
+            try {
+                const generatedUrl = await generateImageViaApi(descPrompt);
+                if (generatedUrl) {
+                    finalImageUrl = generatedUrl;
+                }
+            } catch (imgErr) {
+                console.warn('[ST-LifeSim] SNS 이미지 생성 실패, 기본 이미지 사용:', imgErr);
+            }
+
+            // 이미지 설명 텍스트 생성
+            if (typeof freshCtx.generateQuietPrompt === 'function' || typeof freshCtx.generateRaw === 'function') {
+                imageDescription = normalizeSnsText(await generateSnsText(freshCtx, enforceSnsLanguage(descPrompt, authorLanguage), `${pick.name}-image-desc`), SNS_IMAGE_DESC_MAX);
+            }
         }
         if (!imageDescription && inlineCaption) imageDescription = inlineCaption;
 

@@ -107,8 +107,8 @@ const DEFAULT_SETTINGS = {
     defaultSnsImageUrl: '', // SNS 기본 이미지 URL
     snsImageMode: false, // SNS 게시물 이미지 자동 생성 여부
     messageImageDisplayMode: 'image', // char 이미지 메시지 표시 방식 (image|text)
-    snsImagePrompt: '',
-    messageImagePrompt: '',
+    snsImagePrompt: 'Create a photo for {authorName}\'s SNS post. Appearance: {appearanceTags}. Scene should match the post content naturally. Photorealistic, casual daily life style.',
+    messageImagePrompt: 'Generate an image that {charName} would send via messenger. Appearance: {appearanceTags}. The image should feel personal and candid, matching the conversation context.',
     characterAppearanceTags: {}, // { [charName]: "tag1, tag2" }
     callAudio: {
         startSoundUrl: '',
@@ -120,6 +120,7 @@ const DEFAULT_SETTINGS = {
     themeColors: {}, // CSS 커스텀 색상
     toast: {
         offsetY: 16,
+        fontColor: '#ffffff',
         colors: {
             info: '#1c1c1e',
             success: '#34c759',
@@ -139,7 +140,7 @@ const DEFAULT_SETTINGS = {
     snsLanguage: 'ko',
     snsKoreanTranslationPrompt: 'Translate the following SNS text into natural Korean. Output Korean text only.\n{{text}}',
     snsPrompts: { ...SNS_PROMPT_DEFAULTS },
-    callSummaryPrompt: '', // 비어 있으면 기본 요약 프롬프트 사용 ({contactName}, {transcript} 변수 지원)
+    callSummaryPrompt: 'The following is the conversation transcript from a call with {contactName}. Write a concise 2-3 sentence summary IN KOREAN of what was discussed during the call. The summary must be written in Korean regardless of the conversation language. Character names may be kept as-is:\n{transcript}',
     messageTemplates: { ...DEFAULT_MESSAGE_TEMPLATES },
     aiRoutes: {
         sns: { ...AI_ROUTE_DEFAULTS },
@@ -216,6 +217,9 @@ function getSettings() {
             ext[SETTINGS_KEY].toast.colors[key] = DEFAULT_SETTINGS.toast.colors[key];
         }
     });
+    if (typeof ext[SETTINGS_KEY].toast.fontColor !== 'string') {
+        ext[SETTINGS_KEY].toast.fontColor = DEFAULT_SETTINGS.toast.fontColor;
+    }
     if (ext[SETTINGS_KEY].firstMsg == null) {
         ext[SETTINGS_KEY].firstMsg = { ...DEFAULT_SETTINGS.firstMsg };
     }
@@ -758,6 +762,15 @@ function openSettingsPanel(onBack) {
         snsImagePromptInput.value = settings.snsImagePrompt || '';
         snsImagePromptInput.oninput = () => { settings.snsImagePrompt = snsImagePromptInput.value; saveSettings(); };
         snsImagePromptGroup.appendChild(snsImagePromptInput);
+        const snsImagePromptResetBtn = document.createElement('button');
+        snsImagePromptResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+        snsImagePromptResetBtn.textContent = '↺ 기본값';
+        snsImagePromptResetBtn.onclick = () => {
+            settings.snsImagePrompt = DEFAULT_SETTINGS.snsImagePrompt;
+            snsImagePromptInput.value = settings.snsImagePrompt;
+            saveSettings();
+        };
+        snsImagePromptGroup.appendChild(snsImagePromptResetBtn);
         wrapper.appendChild(snsImagePromptGroup);
 
         const messageImagePromptGroup = document.createElement('div');
@@ -770,6 +783,15 @@ function openSettingsPanel(onBack) {
         messageImagePromptInput.value = settings.messageImagePrompt || '';
         messageImagePromptInput.oninput = () => { settings.messageImagePrompt = messageImagePromptInput.value; saveSettings(); };
         messageImagePromptGroup.appendChild(messageImagePromptInput);
+        const messageImagePromptResetBtn = document.createElement('button');
+        messageImagePromptResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+        messageImagePromptResetBtn.textContent = '↺ 기본값';
+        messageImagePromptResetBtn.onclick = () => {
+            settings.messageImagePrompt = DEFAULT_SETTINGS.messageImagePrompt;
+            messageImagePromptInput.value = settings.messageImagePrompt;
+            saveSettings();
+        };
+        messageImagePromptGroup.appendChild(messageImagePromptResetBtn);
         wrapper.appendChild(messageImagePromptGroup);
 
         const ctx = getContext();
@@ -792,6 +814,24 @@ function openSettingsPanel(onBack) {
             wrapper.appendChild(appearanceGroup);
         }
 
+        // {{user}} 외관 태그 바인딩
+        const userAppearanceGroup = document.createElement('div');
+        userAppearanceGroup.className = 'slm-form-group';
+        const userName = getContext()?.name1 || '{{user}}';
+        userAppearanceGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: `🏷️ ${userName} (유저) 외관 태그 바인딩` }));
+        const userAppearanceInput = document.createElement('input');
+        userAppearanceInput.className = 'slm-input';
+        userAppearanceInput.type = 'text';
+        userAppearanceInput.placeholder = '예: short hair, casual outfit, glasses';
+        userAppearanceInput.value = settings.characterAppearanceTags?.['{{user}}'] || '';
+        userAppearanceInput.oninput = () => {
+            if (!settings.characterAppearanceTags || typeof settings.characterAppearanceTags !== 'object') settings.characterAppearanceTags = {};
+            settings.characterAppearanceTags['{{user}}'] = userAppearanceInput.value.trim();
+            saveSettings();
+        };
+        userAppearanceGroup.appendChild(userAppearanceInput);
+        wrapper.appendChild(userAppearanceGroup);
+
         wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
         const callSoundTitle = Object.assign(document.createElement('div'), {
             className: 'slm-label',
@@ -808,6 +848,8 @@ function openSettingsPanel(onBack) {
             const group = document.createElement('div');
             group.className = 'slm-form-group';
             group.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: label }));
+            const inputRow = document.createElement('div');
+            inputRow.className = 'slm-input-row';
             const input = document.createElement('input');
             input.className = 'slm-input';
             input.type = 'url';
@@ -818,9 +860,92 @@ function openSettingsPanel(onBack) {
                 settings.callAudio[key] = input.value.trim();
                 saveSettings();
             };
-            group.appendChild(input);
+            const previewBtn = document.createElement('button');
+            previewBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+            previewBtn.textContent = '▶';
+            previewBtn.title = '미리듣기';
+            let previewAudio = null;
+            previewBtn.onclick = () => {
+                if (previewAudio) { previewAudio.pause(); previewAudio = null; previewBtn.textContent = '▶'; return; }
+                const url = input.value.trim();
+                if (!url) { showToast('URL을 입력해주세요.', 'warn'); return; }
+                try {
+                    previewAudio = new Audio(url);
+                    previewAudio.onended = () => { previewAudio = null; previewBtn.textContent = '▶'; };
+                    previewAudio.onerror = () => { showToast('재생 실패', 'error'); previewAudio = null; previewBtn.textContent = '▶'; };
+                    previewBtn.textContent = '⏹';
+                    void previewAudio.play().catch(() => { showToast('재생 실패', 'error'); previewAudio = null; previewBtn.textContent = '▶'; });
+                } catch { showToast('재생 실패', 'error'); }
+            };
+            inputRow.append(input, previewBtn);
+            group.appendChild(inputRow);
             wrapper.appendChild(group);
         });
+
+        // 사운드 프리셋 저장/불러오기
+        const presetRow = document.createElement('div');
+        presetRow.className = 'slm-btn-row';
+        presetRow.style.marginTop = '8px';
+        const presetSaveBtn = document.createElement('button');
+        presetSaveBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
+        presetSaveBtn.textContent = '💾 프리셋 저장';
+        presetSaveBtn.onclick = () => {
+            const presetName = prompt('프리셋 이름을 입력하세요:');
+            if (!presetName) return;
+            const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets') || '{}');
+            presets[presetName] = {
+                startSoundUrl: settings.callAudio?.startSoundUrl || '',
+                endSoundUrl: settings.callAudio?.endSoundUrl || '',
+                ringtoneUrl: settings.callAudio?.ringtoneUrl || '',
+            };
+            localStorage.setItem('st-lifesim:sound-presets', JSON.stringify(presets));
+            showToast(`프리셋 "${presetName}" 저장됨`, 'success', 1500);
+            refreshPresetList();
+        };
+        const presetLoadSelect = document.createElement('select');
+        presetLoadSelect.className = 'slm-select';
+        presetLoadSelect.style.flex = '1';
+        const refreshPresetList = () => {
+            presetLoadSelect.innerHTML = '';
+            presetLoadSelect.appendChild(Object.assign(document.createElement('option'), { value: '', textContent: '-- 프리셋 선택 --' }));
+            const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets') || '{}');
+            Object.keys(presets).forEach((name) => {
+                presetLoadSelect.appendChild(Object.assign(document.createElement('option'), { value: name, textContent: name }));
+            });
+        };
+        refreshPresetList();
+        const presetLoadBtn = document.createElement('button');
+        presetLoadBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
+        presetLoadBtn.textContent = '📂 불러오기';
+        presetLoadBtn.onclick = () => {
+            const name = presetLoadSelect.value;
+            if (!name) { showToast('프리셋을 선택하세요.', 'warn'); return; }
+            const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets') || '{}');
+            const preset = presets[name];
+            if (!preset) { showToast('프리셋을 찾을 수 없습니다.', 'error'); return; }
+            if (!settings.callAudio || typeof settings.callAudio !== 'object') settings.callAudio = { ...DEFAULT_SETTINGS.callAudio };
+            settings.callAudio.startSoundUrl = preset.startSoundUrl || '';
+            settings.callAudio.endSoundUrl = preset.endSoundUrl || '';
+            settings.callAudio.ringtoneUrl = preset.ringtoneUrl || '';
+            saveSettings();
+            // 입력 필드 업데이트를 위해 패널 재빌드
+            showToast(`프리셋 "${name}" 적용됨. 패널을 다시 열어 확인하세요.`, 'success', 2000);
+        };
+        const presetDeleteBtn = document.createElement('button');
+        presetDeleteBtn.className = 'slm-btn slm-btn-danger slm-btn-sm';
+        presetDeleteBtn.textContent = '🗑️';
+        presetDeleteBtn.title = '선택된 프리셋 삭제';
+        presetDeleteBtn.onclick = () => {
+            const name = presetLoadSelect.value;
+            if (!name) return;
+            const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets') || '{}');
+            delete presets[name];
+            localStorage.setItem('st-lifesim:sound-presets', JSON.stringify(presets));
+            refreshPresetList();
+            showToast(`프리셋 "${name}" 삭제됨`, 'success', 1500);
+        };
+        presetRow.append(presetSaveBtn, presetLoadSelect, presetLoadBtn, presetDeleteBtn);
+        wrapper.appendChild(presetRow);
         const vibrateRow = document.createElement('div');
         vibrateRow.className = 'slm-settings-row';
         const vibrateLbl = document.createElement('label');
@@ -938,7 +1063,7 @@ function openSettingsPanel(onBack) {
             picker.value = normalizeColorValue(savedColor || currentCssVal, def.defaultVal);
 
             picker.oninput = () => {
-                document.documentElement.style.setProperty(def.key, picker.value);
+                document.documentElement.style.setProperty(def.key, picker.value, 'important');
                 settings.themeColors[def.key] = picker.value;
                 saveSettings();
             };
@@ -948,7 +1073,7 @@ function openSettingsPanel(onBack) {
             resetBtn.textContent = '↺';
             resetBtn.title = '기본값으로 복원';
             resetBtn.onclick = () => {
-                document.documentElement.style.setProperty(def.key, def.defaultVal);
+                document.documentElement.style.setProperty(def.key, def.defaultVal, 'important');
                 settings.themeColors[def.key] = def.defaultVal;
                 picker.value = def.defaultVal;
                 saveSettings();
@@ -966,7 +1091,7 @@ function openSettingsPanel(onBack) {
         resetAllBtn.textContent = '🔄 전체 색상 초기화';
         resetAllBtn.onclick = () => {
             colorDefs.forEach((def, i) => {
-                document.documentElement.style.setProperty(def.key, def.defaultVal);
+                document.documentElement.style.setProperty(def.key, def.defaultVal, 'important');
                 settings.themeColors[def.key] = def.defaultVal;
                 // Update each color picker in place
                 const pickers = wrapper.querySelectorAll('input[type="color"]');
@@ -1031,6 +1156,24 @@ function openSettingsPanel(onBack) {
             row.append(lbl, picker);
             wrapper.appendChild(row);
         });
+
+        // 토스트 폰트 색상 설정
+        const toastFontRow = document.createElement('div');
+        toastFontRow.className = 'slm-input-row';
+        toastFontRow.style.marginTop = '8px';
+        const toastFontLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '토스트 폰트 색:' });
+        toastFontLbl.style.flex = '1';
+        const toastFontPicker = document.createElement('input');
+        toastFontPicker.type = 'color';
+        toastFontPicker.className = 'slm-color-picker';
+        toastFontPicker.value = normalizeColorValue(settings.toast?.fontColor, DEFAULT_SETTINGS.toast.fontColor);
+        toastFontPicker.oninput = () => {
+            settings.toast.fontColor = toastFontPicker.value;
+            document.documentElement.style.setProperty('--slm-toast-font-color', toastFontPicker.value);
+            saveSettings();
+        };
+        toastFontRow.append(toastFontLbl, toastFontPicker);
+        wrapper.appendChild(toastFontRow);
 
         return wrapper;
     }
@@ -1353,18 +1496,35 @@ function openSettingsPanel(onBack) {
             preview.style.whiteSpace = 'normal';
             preview.style.display = 'none';
             const containsHtmlOrCss = (text) => /<\/?[a-z][\s\S]*>/i.test(text) || /(^|\n)\s*[.#a-zA-Z][^{\n]*\{[^}]*:[^}]*\}/.test(text);
+            const containsMarkdown = (text) => /(\*\*[^*]+\*\*|\*[^*]+\*|^#{1,6}\s|`[^`]+`|\[.+\]\(.+\)|\n[-*]\s)/m.test(text);
+            const simpleMarkdownToHtml = (text) => {
+                return String(text)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                    .replace(/`(.+?)`/g, '<code>$1</code>')
+                    .replace(/\n/g, '<br>');
+            };
             const refreshPreview = () => {
                 const val = input.value || '';
                 const hasHtml = containsHtmlOrCss(val);
-                preview.style.display = hasHtml ? '' : 'none';
+                const hasMd = containsMarkdown(val);
+                preview.style.display = (hasHtml || hasMd) ? '' : 'none';
                 preview.innerHTML = '';
-                if (!hasHtml) return;
+                if (!hasHtml && !hasMd) return;
                 preview.appendChild(Object.assign(document.createElement('div'), { textContent: '👀 미리보기 (샌드박스)' }));
-                const frame = document.createElement('iframe');
-                frame.sandbox = '';
-                frame.style.cssText = 'width:100%;min-height:80px;border:1px solid var(--slm-border);border-radius:8px;background:#fff;margin-top:6px';
-                frame.srcdoc = String(val);
-                preview.appendChild(frame);
+                if (hasHtml) {
+                    const frame = document.createElement('iframe');
+                    frame.sandbox = '';
+                    frame.style.cssText = 'width:100%;min-height:80px;border:1px solid var(--slm-border);border-radius:8px;background:#fff;margin-top:6px';
+                    frame.srcdoc = String(val);
+                    preview.appendChild(frame);
+                } else {
+                    const mdPreview = document.createElement('div');
+                    mdPreview.style.cssText = 'padding:8px 12px;border:1px solid var(--slm-border);border-radius:8px;background:var(--slm-surface,#fff);margin-top:6px;font-size:13px;line-height:1.6';
+                    mdPreview.innerHTML = simpleMarkdownToHtml(val);
+                    preview.appendChild(mdPreview);
+                }
             };
             input.oninput = () => {
                 settings.messageTemplates[key] = input.value;
@@ -1445,11 +1605,16 @@ function syncQuickSendButtons() {
 function convertImageMessageToText(html, charName) {
     const imageMatches = [...String(html || '').matchAll(/<img[^>]*src="([^"]+)"[^>]*>/gi)];
     if (imageMatches.length === 0) return '';
+    const ctx = getContext();
+    const userName = ctx?.name1 || '{{user}}';
     const appearanceTag = getSettings().characterAppearanceTags?.[charName] || '';
+    const userAppearanceTag = getSettings().characterAppearanceTags?.['{{user}}'] || '';
     const promptLine = getSettings().messageImagePrompt
         ? getSettings().messageImagePrompt
             .replace(/\{charName\}/g, charName)
             .replace(/\{appearanceTags\}/g, appearanceTag)
+            .replace(/\{\{user\}\}/g, userName)
+            .replace(/\{userAppearanceTags\}/g, userAppearanceTag)
         : '';
     const lines = imageMatches.map((m, i) => `📷 ${charName} 사진 ${i + 1}: ${m[1]}`);
     if (promptLine) lines.push(`🧠 프롬프트: ${promptLine}`);
@@ -1510,8 +1675,21 @@ function cycleTheme() {
  * @returns {string}
  */
 function normalizeColorValue(value, fallback) {
-    const hex = (value || '').trim();
-    return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex) ? hex : fallback;
+    const raw = (value || '').trim();
+    // Already valid 6-digit hex
+    if (/^#[0-9a-f]{6}$/i.test(raw)) return raw;
+    // 3-digit hex → expand to 6-digit
+    const m3 = raw.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i);
+    if (m3) return `#${m3[1]}${m3[1]}${m3[2]}${m3[2]}${m3[3]}${m3[3]}`;
+    // rgb(r, g, b) / rgba(r, g, b, a) → hex
+    const rgbMatch = raw.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/);
+    if (rgbMatch) {
+        const r = Math.min(255, parseInt(rgbMatch[1]));
+        const g = Math.min(255, parseInt(rgbMatch[2]));
+        const b = Math.min(255, parseInt(rgbMatch[3]));
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
+    return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(fallback) ? fallback : '#000000';
 }
 
 /**
@@ -1538,7 +1716,7 @@ async function init() {
     // 저장된 테마 색상 적용
     if (settings.themeColors) {
         Object.entries(settings.themeColors).forEach(([key, val]) => {
-            if (key && val) document.documentElement.style.setProperty(key, val);
+            if (key && val) document.documentElement.style.setProperty(key, val, 'important');
         });
     }
     document.documentElement.style.setProperty('--slm-toast-top', `${settings.toast?.offsetY ?? 16}px`);
@@ -1546,6 +1724,9 @@ async function init() {
         const val = settings.toast?.colors?.[key];
         if (val) document.documentElement.style.setProperty(`--slm-toast-${key}`, val);
     });
+    if (settings.toast?.fontColor) {
+        document.documentElement.style.setProperty('--slm-toast-font-color', settings.toast.fontColor);
+    }
 
     // 각 모듈 초기화 (활성화된 경우만, 오류 발생 시 개별 모듈만 스킵)
     const moduleInits = [
