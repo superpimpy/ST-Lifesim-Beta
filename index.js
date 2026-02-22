@@ -1819,6 +1819,20 @@ function hasForcedCallIntentFromLatestUserMessage() {
     return callRequestRe.test(text) || longingRe.test(text);
 }
 
+function hasExplicitImageIntentAroundLatestMessage() {
+    const ctx = getContext();
+    const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
+    if (!chat.length) return false;
+    const recentMessages = chat.slice(-4);
+    const userRequestRe = /사진.*(보내|줘|보여)|이미지.*(보내|줘|보여)|셀카.*(보내|줘)|찍은\s*사진|photo|picture|pic|image|selfie|screenshot|send\s+(me\s+)?(a\s+)?(photo|picture|pic|image)|show\s+(me\s+)?(a\s+)?(photo|picture|pic|image)/i;
+    const charSendIntentRe = /사진.*(보낼게|보내줄게|찍어줄게|첨부|보여줄게)|이미지.*(보낼게|보내줄게|첨부|보여줄게)|셀카.*(보낼게|보내줄게)|here'?s\s+(a\s+)?(photo|picture|pic|image)|i('|’)ll\s+send\s+(you\s+)?(a\s+)?(photo|picture|pic|image)|let\s+me\s+show/i;
+    return recentMessages.some((msg) => {
+        const text = String(msg?.mes || '');
+        if (!text) return false;
+        return msg?.is_user ? userRequestRe.test(text) : charSendIntentRe.test(text);
+    });
+}
+
 function syncQuickSendButtons() {
     const quickBtn = document.getElementById('slm-quick-send-btn');
     const deletedBtn = document.getElementById('slm-deleted-msg-btn');
@@ -1910,8 +1924,9 @@ async function applyCharacterImageDisplayMode() {
     // 각 매치에 대한 대체 문자열을 미리 계산한다 (역순 처리를 위해)
     /** @type {Array<{index: number, length: number, replacement: string}>} */
     const replacements = [];
+    const allowAutoImageGeneration = settings.messageImageGenerationMode && hasExplicitImageIntentAroundLatestMessage();
 
-    if (settings.messageImageGenerationMode) {
+    if (allowAutoImageGeneration) {
         // ── ON 모드: 이미지 생성 API로 실제 이미지 생성 ──
         showToast(`📷 ${picMatches.length}개 이미지 생성 중...`, 'info', 2000);
         const appearanceTags = getAppearanceTagsByName(charName) || settings.characterAppearanceTags?.[charName] || '';
@@ -2005,7 +2020,7 @@ async function applyCharacterImageDisplayMode() {
         }
     }
 
-    if (settings.messageImageGenerationMode && replacements.length > 0) {
+    if (allowAutoImageGeneration && replacements.length > 0) {
         showToast(`📷 이미지 생성 완료`, 'success', 1500);
     }
 }
