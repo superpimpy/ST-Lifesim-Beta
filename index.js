@@ -647,6 +647,8 @@ function openSettingsPanel(onBack) {
     // 탭 3: 이모티콘 & SNS 설정
     // ─────────────────────────────────────────
     function buildMediaTab() {
+        // ── 서브 탭 1: 이미지/이모티콘 설정 ──
+        function buildImageSubTab() {
         const wrapper = document.createElement('div');
         wrapper.className = 'slm-settings-wrapper slm-form';
 
@@ -841,6 +843,14 @@ function openSettingsPanel(onBack) {
         injectionPromptGroup.appendChild(injectionPromptResetBtn);
         wrapper.appendChild(injectionPromptGroup);
 
+        return wrapper;
+        }
+
+        // ── 서브 탭 2: 이미지 프롬프트/외관 태그 ──
+        function buildPromptSubTab() {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'slm-settings-wrapper slm-form';
+
         const snsImagePromptGroup = document.createElement('div');
         snsImagePromptGroup.className = 'slm-form-group';
         snsImagePromptGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '📸 SNS 이미지 프롬프트 (커스텀)' }));
@@ -921,7 +931,14 @@ function openSettingsPanel(onBack) {
         userAppearanceGroup.appendChild(userAppearanceInput);
         wrapper.appendChild(userAppearanceGroup);
 
-        wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
+        return wrapper;
+        }
+
+        // ── 서브 탭 3: 통화 사운드/진동 ──
+        function buildSoundSubTab() {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'slm-settings-wrapper slm-form';
+
         const callSoundTitle = Object.assign(document.createElement('div'), {
             className: 'slm-label',
             textContent: '🔊 통화 사운드/진동',
@@ -933,6 +950,8 @@ function openSettingsPanel(onBack) {
             { key: 'endSoundUrl', label: '통화 종료 사운드 URL' },
             { key: 'ringtoneUrl', label: '수신 착신음 URL' },
         ];
+        // 사운드 프리셋 저장/불러오기 (개별 등록 가능)
+        const soundInputs = {};
         callSoundDefs.forEach(({ key, label }) => {
             const group = document.createElement('div');
             group.className = 'slm-form-group';
@@ -949,6 +968,7 @@ function openSettingsPanel(onBack) {
                 settings.callAudio[key] = input.value.trim();
                 saveSettings();
             };
+            soundInputs[key] = input;
             const previewBtn = document.createElement('button');
             previewBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
             previewBtn.textContent = '▶';
@@ -966,18 +986,86 @@ function openSettingsPanel(onBack) {
                     void previewAudio.play().catch(() => { showToast('재생 실패', 'error'); previewAudio = null; previewBtn.textContent = '▶'; });
                 } catch { showToast('재생 실패', 'error'); }
             };
+
+            // 개별 프리셋 저장/불러오기 버튼
+            const indivPresetSaveBtn = document.createElement('button');
+            indivPresetSaveBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+            indivPresetSaveBtn.textContent = '💾';
+            indivPresetSaveBtn.title = '이 사운드를 프리셋으로 저장';
+            indivPresetSaveBtn.onclick = () => {
+                const url = input.value.trim();
+                if (!url) { showToast('URL을 먼저 입력해주세요.', 'warn'); return; }
+                const presetName = prompt(`${label} 프리셋 이름:`);
+                if (!presetName) return;
+                const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets-individual') || '{}');
+                if (!presets[key]) presets[key] = {};
+                presets[key][presetName] = url;
+                localStorage.setItem('st-lifesim:sound-presets-individual', JSON.stringify(presets));
+                showToast(`"${presetName}" 저장됨`, 'success', 1500);
+                refreshIndivPreset(key);
+            };
+
+            const indivPresetSelect = document.createElement('select');
+            indivPresetSelect.className = 'slm-select';
+            indivPresetSelect.style.flex = '1';
+            indivPresetSelect.style.maxWidth = '140px';
+
+            const refreshIndivPreset = (soundKey) => {
+                indivPresetSelect.innerHTML = '';
+                indivPresetSelect.appendChild(Object.assign(document.createElement('option'), { value: '', textContent: '-- 프리셋 --' }));
+                const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets-individual') || '{}');
+                const entries = presets[soundKey] || {};
+                Object.keys(entries).forEach((name) => {
+                    indivPresetSelect.appendChild(Object.assign(document.createElement('option'), { value: name, textContent: name }));
+                });
+            };
+            refreshIndivPreset(key);
+
+            indivPresetSelect.onchange = () => {
+                const name = indivPresetSelect.value;
+                if (!name) return;
+                const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets-individual') || '{}');
+                const url = presets[key]?.[name];
+                if (!url) return;
+                input.value = url;
+                if (!settings.callAudio || typeof settings.callAudio !== 'object') settings.callAudio = { ...DEFAULT_SETTINGS.callAudio };
+                settings.callAudio[key] = url;
+                saveSettings();
+                showToast(`"${name}" 적용됨`, 'success', 1200);
+            };
+
+            const indivPresetDelBtn = document.createElement('button');
+            indivPresetDelBtn.className = 'slm-btn slm-btn-danger slm-btn-sm';
+            indivPresetDelBtn.textContent = '🗑️';
+            indivPresetDelBtn.title = '선택된 프리셋 삭제';
+            indivPresetDelBtn.onclick = () => {
+                const name = indivPresetSelect.value;
+                if (!name) return;
+                const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets-individual') || '{}');
+                if (presets[key]) { delete presets[key][name]; }
+                localStorage.setItem('st-lifesim:sound-presets-individual', JSON.stringify(presets));
+                refreshIndivPreset(key);
+                showToast(`"${name}" 삭제됨`, 'success', 1200);
+            };
+
             inputRow.append(input, previewBtn);
             group.appendChild(inputRow);
+
+            const indivPresetRow = document.createElement('div');
+            indivPresetRow.className = 'slm-input-row';
+            indivPresetRow.style.marginTop = '4px';
+            indivPresetRow.append(indivPresetSaveBtn, indivPresetSelect, indivPresetDelBtn);
+            group.appendChild(indivPresetRow);
             wrapper.appendChild(group);
         });
 
-        // 사운드 프리셋 저장/불러오기
+        // 세트 프리셋 저장/불러오기 (기존 호환)
         const presetRow = document.createElement('div');
         presetRow.className = 'slm-btn-row';
         presetRow.style.marginTop = '8px';
         const presetSaveBtn = document.createElement('button');
         presetSaveBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
-        presetSaveBtn.textContent = '💾 프리셋 저장';
+        presetSaveBtn.textContent = '💾 세트 프리셋 저장';
         presetSaveBtn.onclick = () => {
             const presetName = prompt('프리셋 이름을 입력하세요:');
             if (!presetName) return;
@@ -996,7 +1084,7 @@ function openSettingsPanel(onBack) {
         presetLoadSelect.style.flex = '1';
         const refreshPresetList = () => {
             presetLoadSelect.innerHTML = '';
-            presetLoadSelect.appendChild(Object.assign(document.createElement('option'), { value: '', textContent: '-- 프리셋 선택 --' }));
+            presetLoadSelect.appendChild(Object.assign(document.createElement('option'), { value: '', textContent: '-- 세트 프리셋 선택 --' }));
             const presets = JSON.parse(localStorage.getItem('st-lifesim:sound-presets') || '{}');
             Object.keys(presets).forEach((name) => {
                 presetLoadSelect.appendChild(Object.assign(document.createElement('option'), { value: name, textContent: name }));
@@ -1017,8 +1105,11 @@ function openSettingsPanel(onBack) {
             settings.callAudio.endSoundUrl = preset.endSoundUrl || '';
             settings.callAudio.ringtoneUrl = preset.ringtoneUrl || '';
             saveSettings();
-            // 입력 필드 업데이트를 위해 패널 재빌드
-            showToast(`프리셋 "${name}" 적용됨. 패널을 다시 열어 확인하세요.`, 'success', 2000);
+            // 입력 필드 업데이트
+            if (soundInputs.startSoundUrl) soundInputs.startSoundUrl.value = settings.callAudio.startSoundUrl;
+            if (soundInputs.endSoundUrl) soundInputs.endSoundUrl.value = settings.callAudio.endSoundUrl;
+            if (soundInputs.ringtoneUrl) soundInputs.ringtoneUrl.value = settings.callAudio.ringtoneUrl;
+            showToast(`프리셋 "${name}" 적용됨`, 'success', 2000);
         };
         const presetDeleteBtn = document.createElement('button');
         presetDeleteBtn.className = 'slm-btn slm-btn-danger slm-btn-sm';
@@ -1052,6 +1143,13 @@ function openSettingsPanel(onBack) {
         wrapper.appendChild(vibrateRow);
 
         return wrapper;
+        }
+
+        return createTabs([
+            { key: 'image', label: '🖼️ 이미지/이모티콘', content: buildImageSubTab() },
+            { key: 'imgprompt', label: '🎨 프롬프트/태그', content: buildPromptSubTab() },
+            { key: 'sound', label: '🔊 사운드', content: buildSoundSubTab() },
+        ], 'image');
     }
 
     function buildProbabilityTab() {
