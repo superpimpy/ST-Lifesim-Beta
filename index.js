@@ -1684,9 +1684,9 @@ function normalizeColorValue(value, fallback) {
     // rgb(r, g, b) / rgba(r, g, b, a) → hex
     const rgbMatch = raw.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/);
     if (rgbMatch) {
-        const r = Math.min(255, parseInt(rgbMatch[1]));
-        const g = Math.min(255, parseInt(rgbMatch[2]));
-        const b = Math.min(255, parseInt(rgbMatch[3]));
+        const r = Math.min(255, parseInt(rgbMatch[1], 10));
+        const g = Math.min(255, parseInt(rgbMatch[2], 10));
+        const b = Math.min(255, parseInt(rgbMatch[3], 10));
         return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
     }
     return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(fallback) ? fallback : '#000000';

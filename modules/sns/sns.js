@@ -278,7 +278,10 @@ async function generateImageViaApi(imagePrompt) {
     if (!imagePrompt || !imagePrompt.trim()) return '';
     try {
         const ctx = getContext();
-        if (!ctx) return '';
+        if (!ctx) {
+            console.warn('[ST-LifeSim] 이미지 생성: 컨텍스트를 가져올 수 없습니다.');
+            return '';
+        }
         // SillyTavern SlashCommandParser를 통해 /sd 명령어 사용
         if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
             const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true ${imagePrompt}`, { showOutput: false });
