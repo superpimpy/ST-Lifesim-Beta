@@ -22,7 +22,7 @@ import { exportAllData, importAllData, clearAllData } from './utils/storage.js';
 import { injectQuickSendButton, renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEventGeneratorUI, renderVoiceMemoUI } from './modules/quick-tools/quick-tools.js';
 import { startFirstMsgTimer, renderFirstMsgSettingsUI } from './modules/firstmsg/firstmsg.js';
 import { initEmoticon, openEmoticonPopup } from './modules/emoticon/emoticon.js';
-import { initContacts, openContactsPopup } from './modules/contacts/contacts.js';
+import { initContacts, openContactsPopup, getAppearanceTagsByName } from './modules/contacts/contacts.js';
 import { initCall, onCharacterMessageRenderedForProactiveCall, openCallLogsPopup, triggerProactiveIncomingCall } from './modules/call/call.js';
 import { initWallet, openWalletPopup } from './modules/wallet/wallet.js';
 import { initSns, openSnsPopup, triggerNpcPosting, triggerPendingCommentReaction, hasPendingCommentReaction } from './modules/sns/sns.js';
@@ -893,43 +893,19 @@ function openSettingsPanel(onBack) {
         messageImagePromptGroup.appendChild(messageImagePromptResetBtn);
         wrapper.appendChild(messageImagePromptGroup);
 
-        const ctx = getContext();
-        const currentCharName = ctx?.name2 || '';
-        if (currentCharName) {
-            const appearanceGroup = document.createElement('div');
-            appearanceGroup.className = 'slm-form-group';
-            appearanceGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: `🏷️ ${currentCharName} 외관 태그 바인딩` }));
-            const appearanceInput = document.createElement('input');
-            appearanceInput.className = 'slm-input';
-            appearanceInput.type = 'text';
-            appearanceInput.placeholder = '예: long hair, school uniform, warm smile';
-            appearanceInput.value = settings.characterAppearanceTags?.[currentCharName] || '';
-            appearanceInput.oninput = () => {
-                if (!settings.characterAppearanceTags || typeof settings.characterAppearanceTags !== 'object') settings.characterAppearanceTags = {};
-                settings.characterAppearanceTags[currentCharName] = appearanceInput.value.trim();
-                saveSettings();
-            };
-            appearanceGroup.appendChild(appearanceInput);
-            wrapper.appendChild(appearanceGroup);
-        }
-
-        // {{user}} 외관 태그 바인딩
-        const userAppearanceGroup = document.createElement('div');
-        userAppearanceGroup.className = 'slm-form-group';
-        const userName = getContext()?.name1 || '{{user}}';
-        userAppearanceGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: `🏷️ ${userName} (유저) 외관 태그 바인딩` }));
-        const userAppearanceInput = document.createElement('input');
-        userAppearanceInput.className = 'slm-input';
-        userAppearanceInput.type = 'text';
-        userAppearanceInput.placeholder = '예: short hair, casual outfit, glasses';
-        userAppearanceInput.value = settings.characterAppearanceTags?.['{{user}}'] || '';
-        userAppearanceInput.oninput = () => {
-            if (!settings.characterAppearanceTags || typeof settings.characterAppearanceTags !== 'object') settings.characterAppearanceTags = {};
-            settings.characterAppearanceTags['{{user}}'] = userAppearanceInput.value.trim();
-            saveSettings();
-        };
-        userAppearanceGroup.appendChild(userAppearanceInput);
-        wrapper.appendChild(userAppearanceGroup);
+        // 외관 태그 안내 (연락처 탭으로 이동됨)
+        const appearanceNotice = document.createElement('div');
+        appearanceNotice.className = 'slm-form-group';
+        appearanceNotice.appendChild(Object.assign(document.createElement('label'), {
+            className: 'slm-label',
+            textContent: '🏷️ 외관 태그 설정',
+        }));
+        const noticeDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: '각 캐릭터의 외관 태그는 📋 연락처 탭의 편집 화면에서 개별적으로 설정할 수 있습니다. 이미지 생성 시 해당 연락처의 외관 태그가 자동으로 적용됩니다.',
+        });
+        appearanceNotice.appendChild(noticeDesc);
+        wrapper.appendChild(appearanceNotice);
 
         return wrapper;
         }
@@ -1871,7 +1847,11 @@ async function applyCharacterImageDisplayMode() {
     if (settings.messageImageGenerationMode) {
         // ── ON 모드: 이미지 생성 API로 실제 이미지 생성 ──
         showToast(`📷 ${picMatches.length}개 이미지 생성 중...`, 'info', 2000);
-        const appearanceTags = settings.characterAppearanceTags?.[charName] || '';
+        const appearanceTags = getAppearanceTagsByName(charName) || settings.characterAppearanceTags?.[charName] || '';
+        const userName = ctx?.name1 || '';
+        const userAppearanceTags = getAppearanceTagsByName(userName) || settings.characterAppearanceTags?.['{{user}}'] || '';
+        // 셀카/유저 사진 감지용 패턴
+        const userSelfieRe = /selfie|셀[카피]|셀[카피]|self[- ]?shot|my (photo|picture|face)|내 (사진|얼굴)|유저|user/i;
         for (const match of picMatches) {
             const fullTag = match[0];
             const rawPrompt = (match[1] || '').trim();
@@ -1880,7 +1860,10 @@ async function applyCharacterImageDisplayMode() {
                 replacements.push({ index: matchIndex, length: fullTag.length, replacement: '' });
                 continue;
             }
-            const prompt = appearanceTags ? `${rawPrompt}, ${appearanceTags}` : rawPrompt;
+            // 유저 셀카/사진인 경우 user 외관 태그를 주입, 아닌 경우 char 외관 태그 주입
+            const isUserPhoto = userSelfieRe.test(rawPrompt) || (userName && rawPrompt.toLowerCase().includes(userName.toLowerCase()));
+            const tagsToUse = isUserPhoto ? userAppearanceTags : appearanceTags;
+            const prompt = tagsToUse ? `${rawPrompt}, ${tagsToUse}` : rawPrompt;
             let replacement;
             try {
                 const imageUrl = await generateMessageImageViaApi(prompt);

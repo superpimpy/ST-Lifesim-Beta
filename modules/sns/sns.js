@@ -13,7 +13,7 @@ import { loadData, saveData, getDefaultBinding, getExtensionSettings } from '../
 import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
-import { getContacts } from '../contacts/contacts.js';
+import { getContacts, getAppearanceTagsByName } from '../contacts/contacts.js';
 
 const MODULE_KEY = 'sns-feed';
 const AVATARS_KEY = 'sns-avatars';
@@ -485,8 +485,9 @@ export async function triggerNpcPosting() {
         // 캐릭터별 기본 이미지가 있으면 우선 사용하고, 없을 때만 프리셋으로 보완한다.
         let finalImageUrl = defaultImg || presetImg;
         let imageDescription = '';
-        const appearanceTags = String(promptSettings.characterAppearanceTags?.[pick.name] || '').trim();
-        const userAppearanceTags = String(promptSettings.characterAppearanceTags?.['{{user}}'] || '').trim();
+        const appearanceTags = getAppearanceTagsByName(pick.name) || String(promptSettings.characterAppearanceTags?.[pick.name] || '').trim();
+        const userName = freshCtx?.name1 || '{{user}}';
+        const userAppearanceTags = getAppearanceTagsByName(userName) || String(promptSettings.characterAppearanceTags?.['{{user}}'] || '').trim();
         let resolvedImagePrompt = '';
         if (promptSettings.snsImageMode) {
             const basePrompt = applyPromptTemplate(promptSettings.templates.imageDescription, {
