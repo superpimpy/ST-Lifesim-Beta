@@ -106,7 +106,9 @@ const DEFAULT_SETTINGS = {
     imageRadius: 10, // px
     defaultSnsImageUrl: '', // SNS 기본 이미지 URL
     snsImageMode: false, // SNS 게시물 이미지 자동 생성 여부
-    messageImageDisplayMode: 'image', // char 이미지 메시지 표시 방식 (image|text)
+    messageImageGenerationMode: false, // 메신저 이미지 자동 생성 여부 (ON: 이미지 API로 생성, OFF: 줄글 텍스트)
+    messageImageTextTemplate: '[사진: {description}]', // OFF일 때 줄글 형식 커스텀 템플릿
+    messageImageInjectionPrompt: '<image_generation_rule>\nWhen {{char}} would naturally send a photo or picture in the conversation (e.g., selfie, scenery, food, screenshot, etc.), insert a <pic prompt="image description in English for stable diffusion"> tag at that point in your response.\nOnly insert when it makes contextual sense. The prompt should describe the image visually.\n</image_generation_rule>',
     snsImagePrompt: 'Create a photo for {authorName}\'s SNS post. Appearance: {appearanceTags}. Scene should match the post content naturally. Photorealistic, casual daily life style.',
     messageImagePrompt: 'Generate an image that {charName} would send via messenger. Appearance: {appearanceTags}. The image should feel personal and candid, matching the conversation context.',
     characterAppearanceTags: {}, // { [charName]: "tag1, tag2" }
@@ -179,8 +181,24 @@ function getSettings() {
     if (ext[SETTINGS_KEY].themeColors == null) {
         ext[SETTINGS_KEY].themeColors = {};
     }
-    if (!['image', 'text'].includes(ext[SETTINGS_KEY].messageImageDisplayMode)) {
-        ext[SETTINGS_KEY].messageImageDisplayMode = DEFAULT_SETTINGS.messageImageDisplayMode;
+    // 메신저 이미지 생성 모드 (boolean)
+    if (typeof ext[SETTINGS_KEY].messageImageGenerationMode !== 'boolean') {
+        ext[SETTINGS_KEY].messageImageGenerationMode = DEFAULT_SETTINGS.messageImageGenerationMode;
+    }
+    // 메신저 이미지 OFF 시 줄글 텍스트 템플릿
+    if (typeof ext[SETTINGS_KEY].messageImageTextTemplate !== 'string') {
+        ext[SETTINGS_KEY].messageImageTextTemplate = DEFAULT_SETTINGS.messageImageTextTemplate;
+    }
+    // 메신저 이미지 생성 프롬프트 주입
+    if (typeof ext[SETTINGS_KEY].messageImageInjectionPrompt !== 'string') {
+        ext[SETTINGS_KEY].messageImageInjectionPrompt = DEFAULT_SETTINGS.messageImageInjectionPrompt;
+    }
+    // 하위 호환: 기존 messageImageDisplayMode가 남아있으면 마이그레이션
+    if (ext[SETTINGS_KEY].messageImageDisplayMode != null) {
+        if (ext[SETTINGS_KEY].messageImageGenerationMode == null || ext[SETTINGS_KEY].messageImageGenerationMode === DEFAULT_SETTINGS.messageImageGenerationMode) {
+            ext[SETTINGS_KEY].messageImageGenerationMode = ext[SETTINGS_KEY].messageImageDisplayMode === 'image';
+        }
+        delete ext[SETTINGS_KEY].messageImageDisplayMode;
     }
     if (typeof ext[SETTINGS_KEY].snsImagePrompt !== 'string') {
         ext[SETTINGS_KEY].snsImagePrompt = DEFAULT_SETTINGS.snsImagePrompt;
@@ -735,22 +753,93 @@ function openSettingsPanel(onBack) {
         wrapper.appendChild(snsImageRow);
 
         wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
-        const msgImageModeRow = document.createElement('div');
-        msgImageModeRow.className = 'slm-form-group';
-        const msgImageModeLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '💬 메신저 이미지 표시 모드' });
-        const msgImageModeSelect = document.createElement('select');
-        msgImageModeSelect.className = 'slm-select';
-        msgImageModeSelect.innerHTML = `
-            <option value="image">이미지로 표시</option>
-            <option value="text">줄글 텍스트로 표시</option>
-        `;
-        msgImageModeSelect.value = settings.messageImageDisplayMode || 'image';
-        msgImageModeSelect.onchange = () => {
-            settings.messageImageDisplayMode = msgImageModeSelect.value === 'text' ? 'text' : 'image';
+
+        // 메신저 이미지 생성 모드
+        const msgImageTitle = Object.assign(document.createElement('div'), {
+            className: 'slm-label',
+            textContent: '💬 메신저 이미지 생성 모드',
+        });
+        msgImageTitle.style.fontWeight = '600';
+        wrapper.appendChild(msgImageTitle);
+
+        const msgImageDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: 'ON: char 메시지에서 사진을 보낼만한 상황일 때 이미지 생성 API로 실제 이미지를 생성합니다.\nOFF: 이미지 생성 API를 호출하지 않으며 [사진: (상황설명)] 같은 줄글 텍스트로만 출력됩니다.',
+        });
+        msgImageDesc.style.whiteSpace = 'pre-line';
+        wrapper.appendChild(msgImageDesc);
+
+        const msgImageRow = document.createElement('div');
+        msgImageRow.className = 'slm-settings-row';
+        const msgImageLbl = document.createElement('label');
+        msgImageLbl.className = 'slm-toggle-label';
+        const msgImageChk = document.createElement('input');
+        msgImageChk.type = 'checkbox';
+        msgImageChk.checked = settings.messageImageGenerationMode === true;
+        msgImageChk.onchange = () => {
+            settings.messageImageGenerationMode = msgImageChk.checked;
+            saveSettings();
+            updateMessageImageInjection();
+            showToast(`메신저 이미지 생성 모드: ${settings.messageImageGenerationMode ? 'ON' : 'OFF'}`, 'success', 1500);
+        };
+        msgImageLbl.appendChild(msgImageChk);
+        msgImageLbl.appendChild(document.createTextNode(' 메신저 이미지 자동 생성 ON'));
+        msgImageRow.appendChild(msgImageLbl);
+        wrapper.appendChild(msgImageRow);
+
+        // 줄글 텍스트 템플릿 (OFF 모드일 때)
+        const textTemplateGroup = document.createElement('div');
+        textTemplateGroup.className = 'slm-form-group';
+        textTemplateGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '📝 OFF 모드 줄글 형식 (커스텀)' }));
+        const textTemplateDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: '이미지 생성 모드 OFF일 때 사진 대신 표시할 텍스트 형식입니다. {description}에 상황 설명이 들어갑니다.',
+        });
+        textTemplateGroup.appendChild(textTemplateDesc);
+        const textTemplateInput = document.createElement('input');
+        textTemplateInput.className = 'slm-input';
+        textTemplateInput.type = 'text';
+        textTemplateInput.placeholder = '예: [사진: {description}]';
+        textTemplateInput.value = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
+        textTemplateInput.oninput = () => { settings.messageImageTextTemplate = textTemplateInput.value; saveSettings(); };
+        textTemplateGroup.appendChild(textTemplateInput);
+        const textTemplateResetBtn = document.createElement('button');
+        textTemplateResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+        textTemplateResetBtn.textContent = '↺ 기본값';
+        textTemplateResetBtn.onclick = () => {
+            settings.messageImageTextTemplate = DEFAULT_SETTINGS.messageImageTextTemplate;
+            textTemplateInput.value = settings.messageImageTextTemplate;
             saveSettings();
         };
-        msgImageModeRow.append(msgImageModeLbl, msgImageModeSelect);
-        wrapper.appendChild(msgImageModeRow);
+        textTemplateGroup.appendChild(textTemplateResetBtn);
+        wrapper.appendChild(textTemplateGroup);
+
+        // 이미지 생성 프롬프트 주입 (AI에게 보내는 지시)
+        const injectionPromptGroup = document.createElement('div');
+        injectionPromptGroup.className = 'slm-form-group';
+        injectionPromptGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '🤖 이미지 생성 프롬프트 주입 (커스텀)' }));
+        const injectionPromptDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: 'AI에게 보내는 이미지 생성 지시 프롬프트입니다. AI가 사진을 보낼만한 상황에서 <pic prompt="설명"> 태그를 출력하도록 유도합니다.',
+        });
+        injectionPromptGroup.appendChild(injectionPromptDesc);
+        const injectionPromptInput = document.createElement('textarea');
+        injectionPromptInput.className = 'slm-textarea';
+        injectionPromptInput.rows = 4;
+        injectionPromptInput.placeholder = 'AI 이미지 생성 지시 프롬프트';
+        injectionPromptInput.value = settings.messageImageInjectionPrompt || DEFAULT_SETTINGS.messageImageInjectionPrompt;
+        injectionPromptInput.oninput = () => { settings.messageImageInjectionPrompt = injectionPromptInput.value; saveSettings(); };
+        injectionPromptGroup.appendChild(injectionPromptInput);
+        const injectionPromptResetBtn = document.createElement('button');
+        injectionPromptResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+        injectionPromptResetBtn.textContent = '↺ 기본값';
+        injectionPromptResetBtn.onclick = () => {
+            settings.messageImageInjectionPrompt = DEFAULT_SETTINGS.messageImageInjectionPrompt;
+            injectionPromptInput.value = settings.messageImageInjectionPrompt;
+            saveSettings();
+        };
+        injectionPromptGroup.appendChild(injectionPromptResetBtn);
+        wrapper.appendChild(injectionPromptGroup);
 
         const snsImagePromptGroup = document.createElement('div');
         snsImagePromptGroup.className = 'slm-form-group';
@@ -1602,38 +1691,149 @@ function syncQuickSendButtons() {
     }
 }
 
-function convertImageMessageToText(html, charName) {
-    const imageMatches = [...String(html || '').matchAll(/<img[^>]*src="([^"]+)"[^>]*>/gi)];
-    if (imageMatches.length === 0) return '';
+// ── 메신저 이미지 생성/텍스트 변환 로직 ──────────────────────────
+
+// 메신저 이미지 프롬프트 주입 태그
+const MSG_IMAGE_INJECT_TAG = 'st-lifesim-msg-image';
+
+// <pic prompt="..."> 패턴 감지 정규식
+const PIC_TAG_REGEX = /<pic\s[^>]*?prompt="([^"]*)"[^>]*?\/?>/gi;
+
+/**
+ * 메신저 이미지 모드에 따라 AI 프롬프트 주입을 업데이트한다
+ * ON: AI에게 사진 상황에서 <pic prompt="..."> 태그를 출력하도록 지시
+ * OFF: 주입을 제거하여 AI가 <pic> 태그를 출력하지 않도록 한다
+ */
+function updateMessageImageInjection() {
     const ctx = getContext();
-    const userName = ctx?.name1 || '{{user}}';
-    const appearanceTag = getSettings().characterAppearanceTags?.[charName] || '';
-    const userAppearanceTag = getSettings().characterAppearanceTags?.['{{user}}'] || '';
-    const promptLine = getSettings().messageImagePrompt
-        ? getSettings().messageImagePrompt
-            .replace(/\{charName\}/g, charName)
-            .replace(/\{appearanceTags\}/g, appearanceTag)
-            .replace(/\{\{user\}\}/g, userName)
-            .replace(/\{userAppearanceTags\}/g, userAppearanceTag)
-        : '';
-    const lines = imageMatches.map((m, i) => `📷 ${charName} 사진 ${i + 1}: ${m[1]}`);
-    if (promptLine) lines.push(`🧠 프롬프트: ${promptLine}`);
-    return lines.join('\n');
+    if (!ctx || typeof ctx.setExtensionPrompt !== 'function') return;
+    const settings = getSettings();
+    if (settings.messageImageGenerationMode) {
+        const prompt = settings.messageImageInjectionPrompt || DEFAULT_SETTINGS.messageImageInjectionPrompt;
+        ctx.setExtensionPrompt(MSG_IMAGE_INJECT_TAG, prompt, 1, 0);
+    } else {
+        // OFF 모드에서도 AI가 <pic> 태그를 출력하도록 유도
+        // (이후 텍스트로 변환 처리됨)
+        const offPrompt = `<image_generation_rule>\nWhen {{char}} would naturally send a photo or picture in the conversation (e.g., selfie, scenery, food, screenshot, etc.), insert a <pic prompt="image description in Korean for the photo situation"> tag at that point in your response.\nOnly insert when it makes contextual sense. The prompt should describe the image situation briefly.\n</image_generation_rule>`;
+        ctx.setExtensionPrompt(MSG_IMAGE_INJECT_TAG, offPrompt, 1, 0);
+    }
 }
 
+/**
+ * 메신저 이미지 생성 API를 사용하여 실제 이미지를 생성한다
+ * SillyTavern의 /sd 슬래시 커맨드를 사용한다
+ * @param {string} imagePrompt - 이미지 생성에 사용할 프롬프트
+ * @returns {Promise<string>} 생성된 이미지의 URL 또는 빈 문자열
+ */
+async function generateMessageImageViaApi(imagePrompt) {
+    if (!imagePrompt || !imagePrompt.trim()) return '';
+    try {
+        const ctx = getContext();
+        if (!ctx) return '';
+        if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
+            const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true ${imagePrompt}`, { showOutput: false });
+            const resultStr = String(result?.pipe || result || '').trim();
+            if (resultStr && (resultStr.startsWith('http') || resultStr.startsWith('/') || resultStr.startsWith('data:'))) {
+                return resultStr;
+            }
+        }
+        return '';
+    } catch (e) {
+        console.warn('[ST-LifeSim] 메신저 이미지 생성 API 호출 실패:', e);
+        return '';
+    }
+}
+
+/**
+ * char 메시지 렌더링 후 이미지 태그를 처리한다
+ * - ON: <pic prompt="..."> 태그를 감지하여 이미지 생성 API로 실제 이미지 생성
+ * - OFF: <pic prompt="..."> 태그를 줄글 텍스트 형식으로 변환
+ */
 async function applyCharacterImageDisplayMode() {
     const settings = getSettings();
-    if (settings.messageImageDisplayMode !== 'text') return;
     const ctx = getContext();
-    const lastMsg = ctx?.chat?.[ctx.chat.length - 1];
+    if (!ctx) return;
+    const lastMsg = ctx.chat?.[ctx.chat.length - 1];
     if (!lastMsg || lastMsg.is_user) return;
     const mes = String(lastMsg.mes || '');
-    if (!/<img[\s\S]*?>/i.test(mes)) return;
-    const converted = convertImageMessageToText(mes, String(lastMsg.name || ctx?.name2 || '{{char}}'));
-    if (!converted) return;
-    lastMsg.mes = escapeHtml(converted).replace(/\n/g, '<br>');
-    if (typeof ctx?.saveChat === 'function') {
-        await ctx.saveChat();
+
+    // <pic prompt="..."> 태그가 있는지 확인
+    const picMatches = [...mes.matchAll(PIC_TAG_REGEX)];
+    if (picMatches.length === 0) return;
+
+    const charName = String(lastMsg.name || ctx?.name2 || '{{char}}');
+    const msgIdx = ctx.chat.length - 1;
+
+    if (settings.messageImageGenerationMode) {
+        // ── ON 모드: 이미지 생성 API로 실제 이미지 생성 ──
+        showToast(`📷 ${picMatches.length}개 이미지 생성 중...`, 'info', 2000);
+        let updatedMes = mes;
+        const appearanceTags = settings.characterAppearanceTags?.[charName] || '';
+        for (const match of picMatches) {
+            const fullTag = match[0];
+            const rawPrompt = (match[1] || '').trim();
+            if (!rawPrompt) {
+                updatedMes = updatedMes.replace(fullTag, '');
+                continue;
+            }
+            // 외관 태그가 있으면 프롬프트에 추가
+            const prompt = appearanceTags ? `${rawPrompt}, ${appearanceTags}` : rawPrompt;
+            try {
+                const imageUrl = await generateMessageImageViaApi(prompt);
+                if (imageUrl) {
+                    const safeUrl = escapeHtml(imageUrl);
+                    const safePrompt = escapeHtml(rawPrompt);
+                    updatedMes = updatedMes.replace(fullTag, `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`);
+                } else {
+                    // 이미지 생성 실패 시 텍스트로 폴백
+                    const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
+                    updatedMes = updatedMes.replace(fullTag, template.replace(/\{description\}/g, rawPrompt));
+                }
+            } catch (err) {
+                console.warn('[ST-LifeSim] 메신저 이미지 개별 생성 실패:', err);
+                const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
+                updatedMes = updatedMes.replace(fullTag, template.replace(/\{description\}/g, rawPrompt));
+            }
+        }
+        if (updatedMes !== mes) {
+            lastMsg.mes = updatedMes;
+            if (typeof ctx.saveChat === 'function') {
+                await ctx.saveChat();
+            }
+            // UI 업데이트
+            try {
+                const msgEl = document.querySelector(`.mes[mesid="${msgIdx}"]`);
+                if (msgEl) {
+                    const mesTextEl = msgEl.querySelector('.mes_text');
+                    if (mesTextEl) mesTextEl.innerHTML = updatedMes;
+                }
+            } catch (uiErr) {
+                console.warn('[ST-LifeSim] 메시지 UI 업데이트 실패:', uiErr);
+            }
+        }
+        if (picMatches.length > 0) {
+            showToast(`📷 이미지 생성 완료`, 'success', 1500);
+        }
+    } else {
+        // ── OFF 모드: 줄글 텍스트로 변환 ──
+        let updatedMes = mes;
+        const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
+        for (const match of picMatches) {
+            const fullTag = match[0];
+            const prompt = (match[1] || '').trim();
+            if (!prompt) {
+                updatedMes = updatedMes.replace(fullTag, '');
+                continue;
+            }
+            const text = template.replace(/\{description\}/g, prompt);
+            updatedMes = updatedMes.replace(fullTag, text);
+        }
+        if (updatedMes !== mes) {
+            lastMsg.mes = updatedMes;
+            if (typeof ctx.saveChat === 'function') {
+                await ctx.saveChat();
+            }
+        }
     }
 }
 
@@ -1749,6 +1949,9 @@ async function init() {
         try { injectQuickSendButton(); } catch (e) { console.error('[ST-LifeSim] 퀵 센드 버튼 오류:', e); }
     }
 
+    // 메신저 이미지 생성 프롬프트 주입 설정
+    try { updateMessageImageInjection(); } catch (e) { console.error('[ST-LifeSim] 이미지 프롬프트 주입 오류:', e); }
+
     // ST-LifeSim 메뉴 버튼 삽입 (sendform 옆)
     try { injectLifeSimMenuButton(); } catch (e) { console.error('[ST-LifeSim] 메뉴 버튼 오류:', e); }
 
@@ -1772,6 +1975,7 @@ async function init() {
         evSrc.on(eventTypes.CHAT_CHANGED, async () => {
             if (isEnabled()) {
                 await injectContext().catch(e => console.error('[ST-LifeSim] 컨텍스트 주입 오류:', e));
+                try { updateMessageImageInjection(); } catch (e) { console.error('[ST-LifeSim] 이미지 프롬프트 재주입 오류:', e); }
             }
         });
     }
