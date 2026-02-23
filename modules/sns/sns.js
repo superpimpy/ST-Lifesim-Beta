@@ -552,7 +552,7 @@ export async function triggerNpcPosting() {
         let imageDescription = '';
         let resolvedImagePrompt = '';
         if (promptSettings.snsImageMode) {
-            // 통합 파이프라인: generateImageTags() → Image API (커스텀 프롬프트 불포함)
+            // 통합 파이프라인: generateImageTags() → Image API
             const allContactsList = [...getContacts('character'), ...getContacts('chat')];
             const tagResult = await generateImageTags(postContent, {
                 includeNames: [pick.name],
@@ -1555,7 +1555,7 @@ function openWritePostDialog(onSave) {
             const userImageDesc = aiImgDescInput.value.trim() || text;
             const fallbackImageUrl = getAuthorDefaultImageUrl(authorName) || '';
 
-            // 통합 파이프라인: generateImageTags() → Image API (커스텀 프롬프트 불포함)
+            // 통합 파이프라인: generateImageTags() → Image API
             showToast('🎨 이미지 생성 중...', 'info', 3000);
             postBtn.disabled = true;
 

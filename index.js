@@ -19,7 +19,7 @@ import { injectContext, clearContext } from './utils/context-inject.js';
 import { createPopup, createTabs, closePopup } from './utils/popup.js';
 import { showToast, showConfirm, escapeHtml } from './utils/ui.js';
 import { exportAllData, importAllData, clearAllData } from './utils/storage.js';
-import { renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEventGeneratorUI, renderVoiceMemoUI, triggerQuickSend, triggerReadReceipt, triggerNoContact, triggerUserImageGenerationAndSend } from './modules/quick-tools/quick-tools.js';
+import { renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEventGeneratorUI, renderVoiceMemoUI, triggerQuickSend, triggerReadReceipt, triggerNoContact, triggerUserImageGenerationAndSend, triggerVoiceMemoInsertion, triggerDeletedMessage } from './modules/quick-tools/quick-tools.js';
 import { startFirstMsgTimer, renderFirstMsgSettingsUI } from './modules/firstmsg/firstmsg.js';
 import { initEmoticon, openEmoticonPopup } from './modules/emoticon/emoticon.js';
 import { initContacts, openContactsPopup, getContacts, getAppearanceTagsByName } from './modules/contacts/contacts.js';
@@ -78,6 +78,13 @@ const SNS_PROMPT_DEFAULTS = {
     extraComment: 'Write exactly one additional SNS comment for this post.\nPost author: {{postAuthorName}} ({{postAuthorHandle}})\nPost: "{{postContent}}"\nComment author: {{extraAuthorName}} ({{extraAuthorHandle}})\nRules: one short sentence from {{extraAuthorName}}\'s perspective; use only fixed @handles if needed; use natural language fitting {{extraAuthorName}}\'s background; no explanations, quotes, or hashtags. Personality hint: {{extraPersonality}}.',
 };
 
+function normalizeQuickAccessImageUrl(value) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return '';
+    if (/^(https?:\/\/|data:image\/|\/)/i.test(trimmed)) return trimmed;
+    return '';
+}
+
 // 메시지 템플릿 기본값
 const DEFAULT_MESSAGE_TEMPLATES = {
     callStart_incoming: '📞 {charName}님께서 전화를 거셨습니다. {{user}}님께서 전화를 받으셨습니다.',
@@ -114,6 +121,8 @@ const DEFAULT_SETTINGS = {
     messageImageInjectionPrompt: '<image_generation_rule>\nWhen {{char}} would naturally send a photo or picture in the conversation, insert a <pic prompt="image description in English for stable diffusion"> tag at that point in your response.\nThink about whether the current context calls for a photo — not only when someone explicitly says "photo" or "picture," but also when the situation naturally suggests one (e.g., {{user}} asks {{char}} to pose or make a V sign, {{char}} wants to show something, a visually interesting moment occurs, {{user}} asks about {{char}}\'s current appearance or activity).\nRules:\n1) Default subject is {{char}} only. Always include {{char}}\'s name explicitly in the prompt.\n2) If other characters from the contacts are involved, include their names explicitly so their appearance can be resolved.\n3) Include {{user}} only when the context explicitly says both are together or the photo is clearly about {{user}}. Use {{user}}\'s name explicitly.\n4) Do not mix appearance traits of multiple people unless the scene explicitly includes multiple people.\n5) Keep the prompt visual and concise using Danbooru-style tag concepts.\n6) Each <pic> tag MUST describe a completely NEW unique scene. NEVER reuse, reference, or modify a previously generated image URL from the conversation. Always write a fresh description.\n7) Analyze visual intent from context — if the user implies a visual action (e.g., "do a V sign", "show me your outfit"), generate a <pic> tag even without the word "photo".\n</image_generation_rule>',
     snsImagePrompt: 'Create a photorealistic image for {authorName}\'s SNS post. Character appearance: {appearanceTags}. Post content: "{postContent}". The image must accurately depict the scene described in the post. Focus on matching the subject, setting, and mood of the post text. Style: casual daily-life smartphone photo, natural lighting, candid feel. Use Danbooru-style concepts and prefer spaces instead of underscores.',
     messageImagePrompt: 'Generate a photorealistic image that {charName} would send via messenger. Character appearance: {appearanceTags}. The image must reflect the character\'s physical appearance accurately based on the appearance tags. Style: personal candid photo matching the conversation context, natural and authentic feel. Use Danbooru-style concepts and prefer spaces instead of underscores.',
+    imageApiFullPromptTemplate: '{finalPrompt}',
+    tagGenerationFullPromptTemplate: '{basePrompt}\n{rawPrompt}',
     characterAppearanceTags: {}, // { [charName]: "tag1, tag2" }
     callAudio: {
         startSoundUrl: '',
@@ -158,14 +167,18 @@ const DEFAULT_SETTINGS = {
         enabled: true,
         columns: 1,             // 1, 2, or 3 column layout
         displayMode: 'full',    // 'full' | 'emojiOnly' | 'labelOnly'
+        iconSize: 24,           // px (16~64)
         customLabels: {},       // { [key]: string } - custom display names
         customImages: {},       // { [key]: string } - image URL replacement for emoji
-        order: ['userImage', 'callRequest', 'readReceipt', 'noContact', 'sns', 'quickSend'],
+        order: ['userImage', 'callRequest', 'readReceipt', 'noContact', 'voiceMemo', 'emoticon', 'deletedMessage', 'sns', 'quickSend'],
         items: {
             userImage: true,
             callRequest: true,
             readReceipt: true,
             noContact: true,
+            voiceMemo: true,
+            emoticon: true,
+            deletedMessage: true,
             sns: true,
             quickSend: true,
         },
@@ -225,6 +238,12 @@ function getSettings() {
     }
     if (typeof ext[SETTINGS_KEY].messageImagePrompt !== 'string') {
         ext[SETTINGS_KEY].messageImagePrompt = DEFAULT_SETTINGS.messageImagePrompt;
+    }
+    if (typeof ext[SETTINGS_KEY].imageApiFullPromptTemplate !== 'string') {
+        ext[SETTINGS_KEY].imageApiFullPromptTemplate = DEFAULT_SETTINGS.imageApiFullPromptTemplate;
+    }
+    if (typeof ext[SETTINGS_KEY].tagGenerationFullPromptTemplate !== 'string') {
+        ext[SETTINGS_KEY].tagGenerationFullPromptTemplate = DEFAULT_SETTINGS.tagGenerationFullPromptTemplate;
     }
     if (!ext[SETTINGS_KEY].characterAppearanceTags || typeof ext[SETTINGS_KEY].characterAppearanceTags !== 'object') {
         ext[SETTINGS_KEY].characterAppearanceTags = {};
@@ -357,12 +376,26 @@ function getSettings() {
     if (!['full', 'emojiOnly', 'labelOnly'].includes(ext[SETTINGS_KEY].quickAccess.displayMode)) {
         ext[SETTINGS_KEY].quickAccess.displayMode = DEFAULT_SETTINGS.quickAccess.displayMode;
     }
+    const parsedIconSize = Number(ext[SETTINGS_KEY].quickAccess.iconSize);
+    if (!Number.isFinite(parsedIconSize)) {
+        ext[SETTINGS_KEY].quickAccess.iconSize = DEFAULT_SETTINGS.quickAccess.iconSize;
+    } else {
+        ext[SETTINGS_KEY].quickAccess.iconSize = Math.max(16, Math.min(64, Math.round(parsedIconSize)));
+    }
     if (!ext[SETTINGS_KEY].quickAccess.customLabels || typeof ext[SETTINGS_KEY].quickAccess.customLabels !== 'object') {
         ext[SETTINGS_KEY].quickAccess.customLabels = {};
     }
     if (!ext[SETTINGS_KEY].quickAccess.customImages || typeof ext[SETTINGS_KEY].quickAccess.customImages !== 'object') {
         ext[SETTINGS_KEY].quickAccess.customImages = {};
     }
+    const customLabelEntries = Object.entries(ext[SETTINGS_KEY].quickAccess.customLabels)
+        .map(([key, value]) => [String(key || '').trim(), String(value || '').trim()])
+        .filter(([key, value]) => key && value);
+    ext[SETTINGS_KEY].quickAccess.customLabels = Object.fromEntries(customLabelEntries);
+    const customImageEntries = Object.entries(ext[SETTINGS_KEY].quickAccess.customImages)
+        .map(([key, value]) => [String(key || '').trim(), normalizeQuickAccessImageUrl(value)])
+        .filter(([key, value]) => key && value);
+    ext[SETTINGS_KEY].quickAccess.customImages = Object.fromEntries(customImageEntries);
     const qaOrder = ext[SETTINGS_KEY].quickAccess.order
         .map(v => String(v || '').trim())
         .filter(v => v && DEFAULT_SETTINGS.quickAccess.order.includes(v));
@@ -444,7 +477,15 @@ const QUICK_ACCESS_ITEMS = [
     } },
     { key: 'callRequest', icon: '📞', label: '통화 요청', moduleKey: 'call', action: async () => { await requestActiveCharacterCall(); } },
     { key: 'readReceipt', icon: '🔕', label: '읽씹하기', moduleKey: 'quickTools', action: async () => { await triggerReadReceipt(); } },
-    { key: 'noContact', icon: '📵', label: '연락 안 됨', moduleKey: 'quickTools', action: async () => { await triggerNoContact(); } },
+    { key: 'noContact', icon: '📵', label: '연락 안 됨(안읽씹)', moduleKey: 'quickTools', action: async () => { await triggerNoContact(); } },
+    { key: 'voiceMemo', icon: '🎤', label: '음성메모 삽입', moduleKey: 'quickTools', action: async () => {
+        const secRaw = window.prompt('음성메모 길이(초)를 입력하세요.', '30');
+        if (secRaw == null) return;
+        const hint = window.prompt('음성메모 내용 힌트(선택)') || '';
+        await triggerVoiceMemoInsertion(Number(secRaw), hint);
+    } },
+    { key: 'emoticon', icon: '😊', label: '이모티콘 열기', moduleKey: 'emoticon', action: () => openEmoticonPopup() },
+    { key: 'deletedMessage', icon: '🚫', label: '삭제된 메시지', moduleKey: 'quickTools', action: async () => { await triggerDeletedMessage(); } },
     { key: 'sns', icon: '📸', label: 'SNS 들어가기', moduleKey: 'sns', action: () => openSnsPopup() },
     { key: 'quickSend', icon: '💌', label: '트리거 없이 메세지 전송', moduleKey: 'quickTools', action: async () => { await triggerQuickSend(); } },
 ];
@@ -479,19 +520,23 @@ function openQuickAccessPopup() {
     const displayMode = settings.quickAccess?.displayMode || 'full';
     const customLabels = settings.quickAccess?.customLabels || {};
     const customImages = settings.quickAccess?.customImages || {};
+    const iconSize = Math.max(16, Math.min(64, Number(settings.quickAccess?.iconSize) || 24));
     if (quickItems.length > 0) {
+        const listContainer = document.createElement('div');
+        listContainer.className = 'slm-qa-column-container';
         const grid = document.createElement('div');
         grid.className = `slm-qa-grid slm-qa-cols-${columns}`;
+        grid.style.setProperty('--slm-qa-icon-size', `${iconSize}px`);
         quickItems.forEach((item) => {
             const btn = document.createElement('button');
             btn.className = `slm-qa-btn slm-qa-mode-${displayMode}`;
             const label = customLabels[item.key] || item.label;
-            const imgUrl = customImages[item.key] || '';
+            const imgUrl = normalizeQuickAccessImageUrl(customImages[item.key] || '');
             if (displayMode === 'emojiOnly') {
                 if (imgUrl) {
                     btn.innerHTML = `<img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(label)}" class="slm-qa-img">`;
                 } else {
-                    btn.textContent = item.icon;
+                    btn.innerHTML = `<span class="slm-qa-icon">${escapeHtml(item.icon)}</span>`;
                 }
                 btn.title = label;
             } else if (displayMode === 'labelOnly') {
@@ -501,7 +546,7 @@ function openQuickAccessPopup() {
                 if (imgUrl) {
                     btn.innerHTML = `<img src="${escapeHtml(imgUrl)}" alt="" class="slm-qa-img"> <span>${escapeHtml(label)}</span>`;
                 } else {
-                    btn.textContent = `${item.icon} ${label}`;
+                    btn.innerHTML = `<span class="slm-qa-icon">${escapeHtml(item.icon)}</span> <span>${escapeHtml(label)}</span>`;
                 }
             }
             btn.onclick = async () => {
@@ -510,7 +555,8 @@ function openQuickAccessPopup() {
             };
             grid.appendChild(btn);
         });
-        wrapper.appendChild(grid);
+        listContainer.appendChild(grid);
+        wrapper.appendChild(listContainer);
     } else {
         wrapper.appendChild(Object.assign(document.createElement('div'), {
             className: 'slm-desc',
@@ -901,6 +947,31 @@ function openSettingsPanel(onBack) {
         });
         wrapper.appendChild(modeRow);
 
+        const iconSizeRow = document.createElement('div');
+        iconSizeRow.className = 'slm-input-row';
+        iconSizeRow.style.marginTop = '10px';
+        const iconSizeLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '아이콘 크기:' });
+        const iconSizeInput = Object.assign(document.createElement('input'), {
+            className: 'slm-input slm-input-sm', type: 'number', min: '16', max: '64',
+            value: String(settings.quickAccess?.iconSize || 24),
+        });
+        iconSizeInput.style.width = '70px';
+        const iconSizePx = Object.assign(document.createElement('span'), { className: 'slm-label', textContent: 'px' });
+        const iconSizeBtn = Object.assign(document.createElement('button'), {
+            className: 'slm-btn slm-btn-primary slm-btn-sm',
+            textContent: '적용',
+        });
+        iconSizeBtn.onclick = () => {
+            if (!settings.quickAccess) settings.quickAccess = { ...DEFAULT_SETTINGS.quickAccess };
+            const nextSize = Math.max(16, Math.min(64, Number(iconSizeInput.value) || 24));
+            settings.quickAccess.iconSize = nextSize;
+            iconSizeInput.value = String(nextSize);
+            saveSettings();
+            refreshQuickAccessFab();
+        };
+        iconSizeRow.append(iconSizeLbl, iconSizeInput, iconSizePx, iconSizeBtn);
+        wrapper.appendChild(iconSizeRow);
+
         wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
 
         // ── 개별 항목 표시/숨김 + 순서 + 커스텀 이름/이미지 ──
@@ -991,7 +1062,11 @@ function openSettingsPanel(onBack) {
                     }
                     saveSettings();
                 };
-                row.appendChild(labelInput);
+                const labelRow = document.createElement('div');
+                labelRow.className = 'slm-input-row slm-qa-settings-field-row';
+                labelRow.appendChild(Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '표시명' }));
+                labelRow.appendChild(labelInput);
+                row.appendChild(labelRow);
 
                 // 커스텀 이미지 URL 입력 (이모지 대체)
                 const imgInput = document.createElement('input');
@@ -1003,7 +1078,7 @@ function openSettingsPanel(onBack) {
                 imgInput.oninput = () => {
                     if (!settings.quickAccess) settings.quickAccess = { ...DEFAULT_SETTINGS.quickAccess };
                     if (!settings.quickAccess.customImages) settings.quickAccess.customImages = {};
-                    const v = imgInput.value.trim();
+                    const v = normalizeQuickAccessImageUrl(imgInput.value);
                     if (v) {
                         settings.quickAccess.customImages[item.key] = v;
                     } else {
@@ -1011,7 +1086,11 @@ function openSettingsPanel(onBack) {
                     }
                     saveSettings();
                 };
-                row.appendChild(imgInput);
+                const imgRow = document.createElement('div');
+                imgRow.className = 'slm-input-row slm-qa-settings-field-row';
+                imgRow.appendChild(Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '이미지 URL' }));
+                imgRow.appendChild(imgInput);
+                row.appendChild(imgRow);
 
                 list.appendChild(row);
             });
@@ -1270,6 +1349,44 @@ function openSettingsPanel(onBack) {
         };
         messageImagePromptGroup.appendChild(messageImagePromptResetBtn);
         wrapper.appendChild(messageImagePromptGroup);
+
+        const imageApiFullPromptGroup = document.createElement('div');
+        imageApiFullPromptGroup.className = 'slm-form-group';
+        imageApiFullPromptGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '🧩 이미지 API 전체 프롬프트 (커스텀)' }));
+        imageApiFullPromptGroup.appendChild(Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: '{finalPrompt}, {sceneTags}, {appearanceTags} 변수를 사용할 수 있습니다.',
+        }));
+        const imageApiFullPromptInput = document.createElement('textarea');
+        imageApiFullPromptInput.className = 'slm-textarea';
+        imageApiFullPromptInput.rows = 3;
+        imageApiFullPromptInput.placeholder = '{finalPrompt}';
+        imageApiFullPromptInput.value = settings.imageApiFullPromptTemplate || DEFAULT_SETTINGS.imageApiFullPromptTemplate;
+        imageApiFullPromptInput.oninput = () => {
+            settings.imageApiFullPromptTemplate = imageApiFullPromptInput.value;
+            saveSettings();
+        };
+        imageApiFullPromptGroup.appendChild(imageApiFullPromptInput);
+        wrapper.appendChild(imageApiFullPromptGroup);
+
+        const tagApiFullPromptGroup = document.createElement('div');
+        tagApiFullPromptGroup.className = 'slm-form-group';
+        tagApiFullPromptGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '🏷️ 태그 생성 API 전체 프롬프트 (커스텀)' }));
+        tagApiFullPromptGroup.appendChild(Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: '{basePrompt}, {rawPrompt}, {prompt} 변수를 사용할 수 있습니다.',
+        }));
+        const tagApiFullPromptInput = document.createElement('textarea');
+        tagApiFullPromptInput.className = 'slm-textarea';
+        tagApiFullPromptInput.rows = 4;
+        tagApiFullPromptInput.placeholder = '{basePrompt}\n{rawPrompt}';
+        tagApiFullPromptInput.value = settings.tagGenerationFullPromptTemplate || DEFAULT_SETTINGS.tagGenerationFullPromptTemplate;
+        tagApiFullPromptInput.oninput = () => {
+            settings.tagGenerationFullPromptTemplate = tagApiFullPromptInput.value;
+            saveSettings();
+        };
+        tagApiFullPromptGroup.appendChild(tagApiFullPromptInput);
+        wrapper.appendChild(tagApiFullPromptGroup);
 
         // 외관 태그 안내 (연락처 탭으로 이동됨)
         const appearanceNotice = document.createElement('div');

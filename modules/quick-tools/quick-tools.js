@@ -117,6 +117,10 @@ async function handleDeletedMessage() {
     }
 }
 
+export async function triggerDeletedMessage() {
+    await handleDeletedMessage();
+}
+
 /**
  * 시간 구분선을 삽입하는 드롭다운 UI를 렌더링한다
  * @returns {HTMLElement}
@@ -611,7 +615,7 @@ export function renderVoiceMemoUI() {
 
 /**
  * 유저가 이미지를 생성하여 전송한다 (이미지 생성 API 호출)
- * 통합 파이프라인: generateImageTags() → Image API (커스텀 프롬프트 불포함)
+ * 통합 파이프라인: generateImageTags() → Image API
  * @param {string} prompt - 이미지 생성 프롬프트
  * @returns {Promise<string>} 생성된 이미지 URL 또는 빈 문자열
  */
@@ -698,4 +702,9 @@ async function handleVoiceMemo(seconds, hint, aiMode = false) {
     } catch (e) {
         showToast('음성메모 삽입 실패: ' + e.message, 'error');
     }
+}
+
+export async function triggerVoiceMemoInsertion(seconds = 30, hint = '') {
+    const safeSeconds = Math.max(1, Math.min(600, Number(seconds) || 30));
+    await handleVoiceMemo(safeSeconds, String(hint || ''), false);
 }
