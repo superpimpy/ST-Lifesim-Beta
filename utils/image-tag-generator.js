@@ -7,7 +7,6 @@
  *   - 태그는 영어 Danbooru 형식
  *   - 모든 이미지 생성 경로(메신저/SNS/유저)가 동일한 파이프라인을 사용
  *   - 최종 프롬프트 형식: scene tags | appearance1 | appearance2 | ...
- *   - 필요 시 설정값으로 태그 생성/API 전체 프롬프트를 커스터마이즈 가능
  */
 
 import { getContext } from './st-context.js';
@@ -133,46 +132,6 @@ function getTagGenRouteSettings() {
     };
 }
 
-function getPromptTemplateSettings() {
-    const ext = getExtensionSettings()?.['st-lifesim'];
-    return {
-        imageApiFullPromptTemplate: String(ext?.imageApiFullPromptTemplate || '').trim(),
-        tagGenerationFullPromptTemplate: String(ext?.tagGenerationFullPromptTemplate || '').trim(),
-    };
-}
-
-function applyTagGenerationPromptTemplate(basePrompt, rawPrompt) {
-    const prompt = `${basePrompt}\n${rawPrompt}`;
-    const { tagGenerationFullPromptTemplate: template } = getPromptTemplateSettings();
-    if (!template) return prompt;
-    const hasPlaceholder = /\{(?:basePrompt|rawPrompt|prompt)\}/.test(template);
-    const rendered = template
-        .replace(/\{basePrompt\}/g, basePrompt)
-        .replace(/\{rawPrompt\}/g, rawPrompt)
-        .replace(/\{prompt\}/g, prompt)
-        .trim();
-    if (!rendered) return prompt;
-    if (!hasPlaceholder) return `${rendered}\n${prompt}`.trim();
-    return rendered;
-}
-
-function applyImageApiPromptTemplate(finalPrompt, sceneTags, appearancePart) {
-    const { imageApiFullPromptTemplate: template } = getPromptTemplateSettings();
-    if (!template) return finalPrompt;
-    const hasPlaceholder = /\{(?:finalPrompt|sceneTags|appearanceTags)\}/.test(template);
-    const sceneWithAppearance = !sceneTags
-        ? appearancePart
-        : (appearancePart ? `${sceneTags} | ${appearancePart}` : sceneTags);
-    const rendered = template
-        .replace(/\{finalPrompt\}/g, finalPrompt)
-        .replace(/\{sceneTags\}/g, sceneWithAppearance)
-        .replace(/\{appearanceTags\}/g, appearancePart)
-        .trim();
-    if (!rendered) return finalPrompt;
-    if (!hasPlaceholder) return `${rendered}\n${finalPrompt}`.trim();
-    return rendered;
-}
-
 /**
  * Uses AI to convert a raw prompt (possibly Korean) into English Danbooru-style tags.
  * Returns empty string on failure.
@@ -208,7 +167,7 @@ export async function generateDanbooruTags(rawPrompt, options) {
         ? buildCharacterAwarePrompt(characters, appearanceVarMap)
         : TAG_CONVERSION_PROMPT;
 
-    const fullPrompt = applyTagGenerationPromptTemplate(promptBase, trimmed);
+    const fullPrompt = `${promptBase}\n${trimmed}`;
 
     try {
         let result = '';
@@ -284,7 +243,7 @@ export function buildImageApiPrompt(danbooruTags, appearanceTags) {
     const defaultPrompt = !cleanDanbooru
         ? appearancePart
         : (appearanceGroups.length === 0 ? cleanDanbooru : `${cleanDanbooru} | ${appearancePart}`);
-    return applyImageApiPromptTemplate(defaultPrompt, cleanDanbooru, appearancePart);
+    return defaultPrompt;
 }
 
 /**

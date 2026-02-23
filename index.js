@@ -121,8 +121,6 @@ const DEFAULT_SETTINGS = {
     messageImageInjectionPrompt: '<image_generation_rule>\nWhen {{char}} would naturally send a photo or picture in the conversation, insert a <pic prompt="image description in English for stable diffusion"> tag at that point in your response.\nThink about whether the current context calls for a photo — not only when someone explicitly says "photo" or "picture," but also when the situation naturally suggests one (e.g., {{user}} asks {{char}} to pose or make a V sign, {{char}} wants to show something, a visually interesting moment occurs, {{user}} asks about {{char}}\'s current appearance or activity).\nRules:\n1) Default subject is {{char}} only. Always include {{char}}\'s name explicitly in the prompt.\n2) If other characters from the contacts are involved, include their names explicitly so their appearance can be resolved.\n3) Include {{user}} only when the context explicitly says both are together or the photo is clearly about {{user}}. Use {{user}}\'s name explicitly.\n4) Do not mix appearance traits of multiple people unless the scene explicitly includes multiple people.\n5) Keep the prompt visual and concise using Danbooru-style tag concepts.\n6) Each <pic> tag MUST describe a completely NEW unique scene. NEVER reuse, reference, or modify a previously generated image URL from the conversation. Always write a fresh description.\n7) Analyze visual intent from context — if the user implies a visual action (e.g., "do a V sign", "show me your outfit"), generate a <pic> tag even without the word "photo".\n</image_generation_rule>',
     snsImagePrompt: 'Create a photorealistic image for {authorName}\'s SNS post. Character appearance: {appearanceTags}. Post content: "{postContent}". The image must accurately depict the scene described in the post. Focus on matching the subject, setting, and mood of the post text. Style: casual daily-life smartphone photo, natural lighting, candid feel. Use Danbooru-style concepts and prefer spaces instead of underscores.',
     messageImagePrompt: 'Generate a photorealistic image that {charName} would send via messenger. Character appearance: {appearanceTags}. The image must reflect the character\'s physical appearance accurately based on the appearance tags. Style: personal candid photo matching the conversation context, natural and authentic feel. Use Danbooru-style concepts and prefer spaces instead of underscores.',
-    imageApiFullPromptTemplate: '{finalPrompt}',
-    tagGenerationFullPromptTemplate: '{basePrompt}\n{rawPrompt}',
     characterAppearanceTags: {}, // { [charName]: "tag1, tag2" }
     callAudio: {
         startSoundUrl: '',
@@ -240,12 +238,6 @@ function getSettings() {
     }
     if (typeof ext[SETTINGS_KEY].messageImagePrompt !== 'string') {
         ext[SETTINGS_KEY].messageImagePrompt = DEFAULT_SETTINGS.messageImagePrompt;
-    }
-    if (typeof ext[SETTINGS_KEY].imageApiFullPromptTemplate !== 'string') {
-        ext[SETTINGS_KEY].imageApiFullPromptTemplate = DEFAULT_SETTINGS.imageApiFullPromptTemplate;
-    }
-    if (typeof ext[SETTINGS_KEY].tagGenerationFullPromptTemplate !== 'string') {
-        ext[SETTINGS_KEY].tagGenerationFullPromptTemplate = DEFAULT_SETTINGS.tagGenerationFullPromptTemplate;
     }
     if (!ext[SETTINGS_KEY].characterAppearanceTags || typeof ext[SETTINGS_KEY].characterAppearanceTags !== 'object') {
         ext[SETTINGS_KEY].characterAppearanceTags = {};
@@ -1564,44 +1556,6 @@ function openSettingsPanel(onBack) {
         };
         messageImagePromptGroup.appendChild(messageImagePromptResetBtn);
         wrapper.appendChild(messageImagePromptGroup);
-
-        const imageApiFullPromptGroup = document.createElement('div');
-        imageApiFullPromptGroup.className = 'slm-form-group';
-        imageApiFullPromptGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '🧩 이미지 API 전체 프롬프트 (커스텀)' }));
-        imageApiFullPromptGroup.appendChild(Object.assign(document.createElement('div'), {
-            className: 'slm-desc',
-            textContent: '{finalPrompt}, {sceneTags}, {appearanceTags} 변수를 사용할 수 있습니다.',
-        }));
-        const imageApiFullPromptInput = document.createElement('textarea');
-        imageApiFullPromptInput.className = 'slm-textarea';
-        imageApiFullPromptInput.rows = 3;
-        imageApiFullPromptInput.placeholder = '{finalPrompt}';
-        imageApiFullPromptInput.value = settings.imageApiFullPromptTemplate || DEFAULT_SETTINGS.imageApiFullPromptTemplate;
-        imageApiFullPromptInput.oninput = () => {
-            settings.imageApiFullPromptTemplate = imageApiFullPromptInput.value;
-            saveSettings();
-        };
-        imageApiFullPromptGroup.appendChild(imageApiFullPromptInput);
-        wrapper.appendChild(imageApiFullPromptGroup);
-
-        const tagApiFullPromptGroup = document.createElement('div');
-        tagApiFullPromptGroup.className = 'slm-form-group';
-        tagApiFullPromptGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '🏷️ 태그 생성 API 전체 프롬프트 (커스텀)' }));
-        tagApiFullPromptGroup.appendChild(Object.assign(document.createElement('div'), {
-            className: 'slm-desc',
-            textContent: '{basePrompt}, {rawPrompt}, {prompt} 변수를 사용할 수 있습니다.',
-        }));
-        const tagApiFullPromptInput = document.createElement('textarea');
-        tagApiFullPromptInput.className = 'slm-textarea';
-        tagApiFullPromptInput.rows = 4;
-        tagApiFullPromptInput.placeholder = '{basePrompt}\n{rawPrompt}';
-        tagApiFullPromptInput.value = settings.tagGenerationFullPromptTemplate || DEFAULT_SETTINGS.tagGenerationFullPromptTemplate;
-        tagApiFullPromptInput.oninput = () => {
-            settings.tagGenerationFullPromptTemplate = tagApiFullPromptInput.value;
-            saveSettings();
-        };
-        tagApiFullPromptGroup.appendChild(tagApiFullPromptInput);
-        wrapper.appendChild(tagApiFullPromptGroup);
 
         // 외관 태그 안내 (연락처 탭으로 이동됨)
         const appearanceNotice = document.createElement('div');
