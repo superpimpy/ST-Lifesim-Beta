@@ -745,7 +745,8 @@ export function getContacts(binding = 'chat') {
 
 /**
  * 이름으로 연락처의 외관 태그를 가져온다.
- * chat 바인딩과 character 바인딩 모두 검색한다.
+ * chat 바인딩과 character 바인딩 모두 검색하고,
+ * 연락처에 없으면 characterAppearanceTags 설정도 확인한다.
  * @param {string} name - 캐릭터/유저 이름
  * @returns {string} 외관 태그 문자열 (없으면 빈 문자열)
  */
@@ -753,7 +754,12 @@ export function getAppearanceTagsByName(name) {
     if (!name) return '';
     const allContacts = [...loadContacts('character'), ...loadContacts('chat')];
     const contact = allContacts.find(c => c.name === name || c.displayName === name);
-    return String(contact?.appearanceTags || '').trim();
+    const fromContact = String(contact?.appearanceTags || '').trim();
+    if (fromContact) return fromContact;
+    // 연락처에 외관 태그가 없으면 characterAppearanceTags 설정에서 확인
+    const ext = getExtensionSettings()?.['st-lifesim'];
+    const fromSettings = String(ext?.characterAppearanceTags?.[name] || '').trim();
+    return fromSettings;
 }
 
 function isAsciiToken(name) {
@@ -772,6 +778,7 @@ function isNameMentioned(textLower, name) {
 
 /**
  * 프롬프트에서 언급된 연락처 이름을 추적하여 외관 태그 목록을 반환한다.
+ * 연락처의 appearanceTags와 characterAppearanceTags 설정 양쪽을 확인한다.
  * @param {string} text
  * @param {{ includeNames?: string[] }} [options]
  * @returns {string[]}
@@ -792,14 +799,17 @@ export function collectAppearanceTagsFromText(text, options = {}) {
 
     includeNames.forEach((name) => pushTag(getAppearanceTagsByName(name)));
 
+    const checkedNames = new Set(includeNames.map(n => String(n || '').trim().toLowerCase()));
+
     allContacts.forEach((contact) => {
-        const appearanceTags = String(contact?.appearanceTags || '').trim();
-        if (!appearanceTags) return;
         const namesToCheck = [contact?.name, contact?.displayName]
             .map(v => String(v || '').trim())
             .filter(Boolean);
+        if (namesToCheck.some(n => checkedNames.has(n.toLowerCase()))) return;
         if (namesToCheck.some((name) => isNameMentioned(mentionSource, name))) {
-            pushTag(appearanceTags);
+            // getAppearanceTagsByName checks both contact record and settings fallback
+            const contactName = contact?.name || contact?.displayName || '';
+            pushTag(getAppearanceTagsByName(contactName));
         }
     });
 

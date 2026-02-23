@@ -378,13 +378,20 @@ function getBuiltinCharAvatarUrl() {
         ? ctx.characters[ctx.characterId]
         : null;
     const fromData = String(char?.avatar || '').trim();
-    if (fromData) return fromData;
+    if (fromData) {
+        // avatar 필드가 파일이름만 있으면 /characters/ 경로를 붙인다
+        if (fromData && !fromData.startsWith('http') && !fromData.startsWith('/') && !fromData.startsWith('data:')) {
+            return `/characters/${fromData}`;
+        }
+        return fromData;
+    }
     const fromDom = document.querySelector('#avatar_load_preview img, #avatar_div img, .mesAvatar img')?.getAttribute('src');
     return fromDom || '';
 }
 
 /**
  * 저자 이름에 대한 아바타 URL을 해결한다 (연락처 연동 고려)
+ * user와 char는 자동연동 설정과 무관하게 항상 연동된다.
  * @param {string} authorName
  * @param {Object} avatars - 수동 아바타 맵
  * @returns {string}
@@ -394,11 +401,19 @@ function resolveAvatar(authorName, avatars) {
     const ctx = getContext();
     const userName = ctx?.name1 || 'user';
     const charName = ctx?.name2 || '';
-    if (authorName === userName) return getBuiltinUserAvatarUrl();
-    if (charName && authorName === charName) return getBuiltinCharAvatarUrl();
-    if (loadContactLink()) {
-        const contacts = getContacts('chat');
-        const contact = contacts.find(c => c.name === authorName);
+    const isUserOrChar = authorName === userName || (charName && authorName === charName);
+    if (authorName === userName) {
+        const builtinUrl = getBuiltinUserAvatarUrl();
+        if (builtinUrl) return builtinUrl;
+    }
+    if (charName && authorName === charName) {
+        const builtinUrl = getBuiltinCharAvatarUrl();
+        if (builtinUrl) return builtinUrl;
+    }
+    // user/char는 contactLink 설정과 무관하게 연락처 아바타도 확인
+    if (isUserOrChar || loadContactLink()) {
+        const allContacts = [...getContacts('character'), ...getContacts('chat')];
+        const contact = allContacts.find(c => c.name === authorName);
         if (contact?.avatar) return contact.avatar;
     }
     return '';
@@ -1779,7 +1794,7 @@ function openAvatarSettingsDialog(onUpdate) {
     const postingEnabled = loadPostingEnabledMap();
     const authorLanguages = loadAuthorLanguages();
     const authorMinLikes = loadAuthorMinLikesMap();
-    const contacts = getContacts('chat');
+    const contacts = [...getContacts('character'), ...getContacts('chat')];
     const userName = getContext()?.name1 || 'user';
     const charName = getContext()?.name2 || '';
     const charProfile = charName
