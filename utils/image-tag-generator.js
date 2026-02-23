@@ -1,12 +1,14 @@
 /**
  * image-tag-generator.js
+ *
  * Korean/raw image prompts를 영어 Danbooru 형식 태그로 변환하는 유틸리티
+ *
  * 요구사항:
- *   - 한국어 원문은 절대 Image API에 직접 전달 금지
- *   - 태그 생성 단계가 반드시 선행
- *   - 태그는 영어 Danbooru 형식
- *   - 모든 이미지 생성 경로(메신저/SNS/유저)가 동일한 파이프라인을 사용
- *   - 최종 프롬프트 형식: scene tags | appearance1 | appearance2 | ...
+ *  - 한국어 원문은 절대 Image API에 직접 전달 금지
+ *  - 태그 생성 단계가 반드시 선행
+ *  - 태그는 영어 Danbooru 형식
+ *  - 모든 이미지 생성 경로(메신저/SNS/유저)가 동일한 파이프라인을 사용
+ *  - 최종 프롬프트 형식: scene tags, [name1 - appearance1], [name2 - appearance2], ...
  */
 
 import { getContext } from './st-context.js';
@@ -50,7 +52,8 @@ const TAG_CONVERSION_PROMPT = [
 /**
  * Build the tag generation prompt that includes character context.
  * The AI is instructed to output ONLY scene/situation tags;
- * character appearance tags are appended programmatically by the caller.
+ * character appearance tags are appended programmatically by the caller
+ * in the format: [name - appearance tags]
  *
  * @param {Array<{name: string, description?: string, appearanceTags?: string}>} characters
  * @param {{ [name: string]: string }} [appearanceVarMap] - (unused, kept for API compat)
@@ -80,15 +83,15 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap) {
         '',
         'Given an image description and a list of known characters, generate ONLY scene/situation/composition tags.',
         'Character appearance tags (hair, eyes, clothing, body features) are handled automatically by the system — do NOT include them in your output.',
-        'The system will automatically append each character\'s full appearance description after your tags, separated by " | ".',
-        'Final prompt format (built by the system): <your scene tags> | <CharName>: <appearance> | <CharName2>: <appearance> ...',
+        'The system will automatically append each character\'s full appearance description after your tags in the format: [CharName - appearance tags]',
+        'Final prompt format (built by the system): <your scene tags>, [CharName - appearance], [CharName2 - appearance]',
         '',
         'RULES:',
         '1) Output ONLY comma-separated Danbooru-style tags. No sentences, no Korean, no explanation.',
         '2) Replace underscores with spaces in all tags.',
         '3) NEVER output character appearance, clothing, hair color, eye color, or body feature tags — the system appends them automatically. Do NOT fabricate or guess any character appearance details.',
         '4) DO NOT output any {{appearanceTag:...}} variables or references.',
-        '5) DO NOT use the pipe character "|" in your output. The system uses "|" as a separator.',
+        '5) DO NOT use the pipe character "|" or square brackets "[" "]" in your output. The system uses these as separators.',
         '6) DO include character count tags: 1girl, 1boy, 2girls, 3boys, multiple boys, multiple girls, solo, etc.',
         '7) Include scene/environment tags: cafe, outdoor, indoor, classroom, bedroom, park, street, etc.',
         '8) Include pose/action tags: selfie, standing, sitting, looking at viewer, v sign, peace sign, holding phone, etc.',
@@ -102,7 +105,7 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap) {
         '* Input: "Alice and Bob go to cafe"',
         '* Known characters: Alice (girl), Bob (boy)',
         '* Output: 1girl, 1boy, cafe, sitting, table, indoor, warm lighting, upper body',
-        '  (system then appends: | Alice: <appearance> | Bob: <appearance>)',
+        '  (system then appends: , [Alice - <appearance>], [Bob - <appearance>])',
         '',
         'Known characters:',
         charList,
@@ -110,6 +113,7 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap) {
         'Image description:',
     ].join('\n');
 }
+
 
 /**
  * Check if text contains Korean characters.
@@ -120,6 +124,7 @@ export function containsKorean(text) {
     if (!text) return false;
     return KOREAN_REGEX.test(text);
 }
+
 
 /**
  * 태그 생성 AI 라우트 설정을 가져온다.
@@ -136,9 +141,11 @@ function getTagGenRouteSettings() {
     };
 }
 
+
 /**
  * Uses AI to convert a raw prompt (possibly Korean) into English Danbooru-style tags.
  * Returns empty string on failure.
+ *
  * @param {string} rawPrompt - The raw image prompt (possibly Korean)
  * @param {Object} [options] - Optional parameters
  * @param {Array<{name: string, description?: string, appearanceTags?: string}>} [options.characters] - Known characters for context-aware generation
@@ -155,7 +162,7 @@ export async function generateDanbooruTags(rawPrompt, options) {
     const appearanceVarMap = options?.appearanceVarMap || {};
 
     // Already looks like tag-style English input — keep as-is to avoid unnecessary AI rewriting
-    const looksLikeTagList = /,|\|/.test(trimmed);
+    const looksLikeTagList = /,|\[/.test(trimmed);
     if (!containsKorean(trimmed) && (looksLikeTagList || characters.length === 0)) {
         return sanitizeTags(trimmed);
     }
@@ -231,34 +238,43 @@ export async function generateDanbooruTags(rawPrompt, options) {
     }
 }
 
+
 /**
  * Build the final Image API prompt by combining Danbooru tags with appearance tags.
  * Korean text is never included.
+ * Format: scene tags, [name1 - appearance1], [name2 - appearance2], ...
+ *
  * @param {string} danbooruTags - Generated English Danbooru tags
- * @param {string|string[]} appearanceTags - Character appearance tags
+ * @param {string|string[]} appearanceTags - Character appearance groups (already formatted as "name - tags")
  * @returns {string} Final prompt for Image API
  */
 export function buildImageApiPrompt(danbooruTags, appearanceTags) {
     const cleanDanbooru = safeTags(danbooruTags);
+
     const appearanceGroups = Array.isArray(appearanceTags)
         ? appearanceTags.map(safeTags).filter(Boolean)
         : [safeTags(appearanceTags)].filter(Boolean);
-    const appearancePart = appearanceGroups.join(' | ');
-    const defaultPrompt = !cleanDanbooru
-        ? appearancePart
-        : (appearanceGroups.length === 0 ? cleanDanbooru : `${cleanDanbooru} | ${appearancePart}`);
-    return defaultPrompt;
+
+    // Wrap each appearance group in square brackets
+    const wrappedAppearance = appearanceGroups.map(a => `[${a}]`);
+
+    if (!cleanDanbooru && wrappedAppearance.length === 0) return '';
+    if (!cleanDanbooru) return wrappedAppearance.join(', ');
+    if (wrappedAppearance.length === 0) return cleanDanbooru;
+
+    return `${cleanDanbooru}, ${wrappedAppearance.join(', ')}`;
 }
+
 
 /**
  * Unified image tag generation pipeline.
  * All image generation paths (message, SNS, user) MUST use this function.
  *
  * Pipeline:
- *   1. Load all contacts (names, descriptions, appearance tags)
- *   2. Match characters mentioned in the input prompt
- *   3. Generate scene/situation Danbooru tags via AI (with character context)
- *   4. Combine: scene tags | appearance1 | appearance2 | ...
+ *  1. Load all contacts (names, descriptions, appearance tags)
+ *  2. Match characters mentioned in the input prompt
+ *  3. Generate scene/situation Danbooru tags via AI (with character context)
+ *  4. Combine: scene tags, [name1 - appearance1], [name2 - appearance2], ...
  *
  * Final output can be wrapped by optional user-defined template.
  *
@@ -361,7 +377,12 @@ export async function generateImageTags(rawPrompt, options = {}) {
     // ── Step 2b: If scene tag generation failed, collect appearance tags as fallback ──
     if (!sceneTags) {
         const fallbackAppearance = matched
-            .map(c => c.appearanceTags)
+            .map(c => {
+                const name = String(c?.name || '').trim();
+                const tags = String(c?.appearanceTags || '').trim();
+                if (!name || !tags) return '';
+                return `${name} - ${tags}`;
+            })
             .filter(Boolean);
         if (fallbackAppearance.length > 0) {
             const fallbackPrompt = buildImageApiPrompt('', fallbackAppearance);
@@ -370,31 +391,40 @@ export async function generateImageTags(rawPrompt, options = {}) {
         return emptyResult;
     }
 
-    // AI가 실수로 파이프를 출력할 경우 대비: 파이프로 분할하여 모두 장면 태그로 간주
-    const pipeParts = sceneTags.split(/\s*\|\s*/).map(s => s.trim()).filter(Boolean);
-    const finalSceneTags = pipeParts.join(', ');
+    // AI가 실수로 파이프나 대괄호를 출력할 경우 대비: 파이프/대괄호를 제거하고 장면 태그만 추출
+    const cleanedSceneTags = sceneTags
+        .replace(/\|/g, ',')               // 파이프를 쉼표로 변환
+        .replace(/\[.*?\]/g, '')           // 혹시 AI가 출력한 [] 블록 제거
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .join(', ');
 
     // ── Step 3: Collect appearance tag groups from ALL matched characters ──
+    // Format: "name - tags"  (buildImageApiPrompt will wrap these in [])
     const appearanceGroups = matched
         .map(c => {
             const name = String(c?.name || '').trim();
             const tags = String(c?.appearanceTags || '').trim();
             if (!name || !tags) return '';
-            return `${name}: ${tags}`;
+            return `${name} - ${tags}`;
         })
         .filter(Boolean);
 
     // ── Step 4: Build final prompt ──
-    const finalPrompt = buildImageApiPrompt(finalSceneTags, appearanceGroups);
+    // Result: "scene tags, [name1 - appearance1], [name2 - appearance2]"
+    const finalPrompt = buildImageApiPrompt(cleanedSceneTags, appearanceGroups);
 
-    return { sceneTags: finalSceneTags, appearanceGroups, finalPrompt };
+    return { sceneTags: cleanedSceneTags, appearanceGroups, finalPrompt };
 }
+
 
 // ── internal helpers ──
 
 /**
  * Sanitize AI output: strip non-tag noise, reject if Korean remains.
- * Preserves pipe-separated sections (scene | appearance1 | appearance2 format).
+ * Strips pipe characters and bracket content that the AI should not have produced.
+ *
  * @param {string} raw
  * @returns {string}
  */
@@ -404,7 +434,9 @@ function sanitizeTags(raw) {
     // Remove common AI preamble / markdown fences
     let cleaned = raw
         .replace(/```[^`]*```/gs, '')
-        .replace(/^[^a-zA-Z0-9_(|]*/, '') // 파이프 문자 허용
+        .replace(/\[.*?\]/g, '')           // AI가 실수로 [] 출력한 경우 제거
+        .replace(/\|/g, ',')               // 파이프를 쉼표로 변환
+        .replace(/^[^a-zA-Z0-9_(]*/, '')
         .trim();
 
     // Reject if Korean characters leaked through
@@ -413,25 +445,20 @@ function sanitizeTags(raw) {
         return '';
     }
 
-    // 파이프 섹션을 분리한 뒤 각 섹션 내부 태그만 정리 → 파이프 구조 보존
-    const sections = cleaned.split(/\s*\|\s*/);
-    const sanitizedSections = sections
-        .map(section =>
-            section
-                .split(',')
-                .map(t => t.replace(/_/g, ' ').trim().replace(/\s+/g, ' '))
-                .filter(Boolean)
-                .join(', ')
-        )
-        .filter(Boolean);
-
-    return sanitizedSections.join(' | ');
+    // 태그 정리: 쉼표로 분리 → 각 태그 언더스코어→공백, 공백 정규화
+    return cleaned
+        .split(',')
+        .map(t => t.replace(/_/g, ' ').trim().replace(/\s+/g, ' '))
+        .filter(Boolean)
+        .join(', ');
 }
+
 
 /**
  * Return trimmed tag string only if it is non-empty and Korean-free.
  * Appearance tags are expected to be English (e.g. "long hair, school uniform").
  * If Korean is found, it's discarded to enforce the no-Korean-to-Image-API rule.
+ *
  * @param {string} tags
  * @returns {string}
  */
@@ -442,6 +469,7 @@ function safeTags(tags) {
     return trimmed;
 }
 
+
 function resolveAppearanceTagRefs(text, appearanceVarMap = {}) {
     const source = String(text || '');
     if (!source) return '';
@@ -450,9 +478,9 @@ function resolveAppearanceTagRefs(text, appearanceVarMap = {}) {
             .map(([name, tags]) => [(name || '').trim().toLowerCase(), (tags || '').trim()])
             .filter(([name, tags]) => name && tags),
     );
-    const appearanceTagRefRegex = /\{\{appearanceTag:\s*([^}]+?)\s*\}\}(?:\s*['‘’]?s\s+description)?/gi;
+    const appearanceTagRefRegex = /{{appearanceTag:\s*([^}]+?)\s*}}(?:\s*[''']?s\s+description)?/gi;
     return source.replace(appearanceTagRefRegex, (match, rawName) => {
         const key = (rawName || '').trim().toLowerCase();
         return lookup.get(key) || '';
     });
-    }
+                                                                        }
