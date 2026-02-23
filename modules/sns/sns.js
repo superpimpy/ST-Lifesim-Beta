@@ -29,6 +29,7 @@ const SNS_REPLY_PROBABILITY = 0.7;
 const SNS_EXTRA_COMMENT_PROBABILITY = 0.35;
 const SNS_POST_TEXT_MAX = 280;
 const SNS_IMAGE_DESC_MAX = 220;
+const SNS_RANDOM_LIKES_BONUS_MAX = 30;
 const DEFAULT_SNS_PROMPTS = {
     postChar: 'Write exactly one SNS post for {{charName}}. Use natural language and tone that fit {{charName}}\'s nationality/background, personality, and current situation. Keep it 1-2 casual daily-life sentences. Avoid repeating topics or phrasing from recent posts. Do not include hashtags, image tags, quotation marks, other people\'s reactions/comments, or [caption: ...] blocks. Output only {{charName}}\'s own post text.',
     postContact: 'Write exactly one SNS post for {{authorName}}. Personality: {{personality}}. Use natural language and tone that fit {{authorName}}\'s nationality/background and daily context. Keep it 1-2 casual daily-life sentences and avoid repeating recent topics/phrasing. Do not include hashtags, image tags, quotation marks, other people\'s reactions/comments, or [caption: ...] blocks. Output only {{authorName}}\'s own post text.',
@@ -147,7 +148,7 @@ function saveAuthorMinLikesMap(map) {
 function getInitialLikes(authorName, fallback = 0) {
     const minLikes = Math.max(0, parseInt(loadAuthorMinLikesMap()?.[authorName], 10) || 0);
     if (minLikes <= 0) return Math.max(0, fallback);
-    return minLikes + 1 + Math.floor(Math.random() * 30);
+    return minLikes + 1 + Math.floor(Math.random() * SNS_RANDOM_LIKES_BONUS_MAX);
 }
 
 /**
@@ -554,6 +555,7 @@ export async function triggerNpcPosting() {
                     const generatedUrl = await generateImageViaApi(finalApiPrompt);
                     if (generatedUrl) {
                         finalImageUrl = generatedUrl;
+                        // OPINION 4 요구사항: AI 이미지 생성 시 사진설명은 비워둔다.
                         imageDescription = '';
                     }
                 } catch (imgErr) {
@@ -575,7 +577,7 @@ export async function triggerNpcPosting() {
             imageUrl: finalImageUrl,
             imageDescription,
             imagePrompt: resolvedImagePrompt,
-            likes: getInitialLikes(pick.name, Math.floor(Math.random() * 30)),
+            likes: getInitialLikes(pick.name, Math.floor(Math.random() * SNS_RANDOM_LIKES_BONUS_MAX)),
             likedByUser: false,
             comments: [],
             isStory: false,
