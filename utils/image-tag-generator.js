@@ -376,12 +376,12 @@ export async function generateImageTags(rawPrompt, options = {}) {
     // suffixes like "'s description" or "s description") — resolve them to actual tags.
     const appearanceLookup = new Map(
         Object.entries(appearanceVarMap)
-            .map(([name, tags]) => [String(name || '').trim().toLowerCase(), String(tags || '').trim()])
+            .map(([name, tags]) => [(name || '').trim().toLowerCase(), (tags || '').trim()])
             .filter(([name, tags]) => name && tags),
     );
     const appearanceTagRefRegex = /\{\{appearanceTag:\s*([^}]+?)\s*\}\}(?:['‘’]?s\s+description)?/gi;
     const resolvedSceneTags = sceneTags.replace(appearanceTagRefRegex, (match, rawName) => {
-        const key = String(rawName || '').trim().toLowerCase();
+        const key = (rawName || '').trim().toLowerCase();
         return appearanceLookup.get(key) || '';
     });
 
