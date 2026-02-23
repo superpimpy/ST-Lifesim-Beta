@@ -47,84 +47,47 @@ const TAG_CONVERSION_PROMPT = [
 ].join('\n');
 
 /**
- * Build the enhanced tag generation prompt that includes character context.
- * Introduces a multi-step reasoning chain:
- *   1. Understand the situation from the input
- *   2. Identify which characters are involved
- *   3. Determine their appearance tag variables
- *   4. Compose scene Danbooru tags
- *   5. Validate output format: sceneTags | {{appearanceTag:name1}} | {{appearanceTag:name2}}
- *   6. Cross-check consistency (e.g. character count vs gender tags)
- *   7. Ensure output is in English
+ * Build the tag generation prompt that includes character context.
+ * The AI is instructed to output ONLY scene/situation tags;
+ * character appearance tags are appended programmatically by the caller.
  *
  * @param {Array<{name: string, description?: string, appearanceTags?: string}>} characters
- * @param {{ [name: string]: string }} [appearanceVarMap] - Map of name -> appearance tag variable reference
+ * @param {{ [name: string]: string }} [appearanceVarMap] - (unused, kept for API compat)
  * @returns {string}
  */
 function buildCharacterAwarePrompt(characters, appearanceVarMap) {
     const charList = characters.length > 0
         ? characters.map(c => {
             const desc = c.description ? ` (${c.description})` : ''; // ✅ fix: desc 선언
-            const tags = c.appearanceTags ? ` [appearance: ${c.appearanceTags}]` : '';
-            return `  - ${c.name}${desc}${tags}`;
+            return `  - ${c.name}${desc}`;
         }).join('\n')
         : '  (none)';
 
-    // Build appearance tag variable reference list
-    const varRefLines = [];
-    if (appearanceVarMap && typeof appearanceVarMap === 'object') {
-        for (const [name, tags] of Object.entries(appearanceVarMap)) {
-            if (tags) {
-                varRefLines.push(`  * ${name}: {{appearanceTag:${name}}} → ${tags}`);
-            }
-        }
-    }
-    const varRefBlock = varRefLines.length > 0
-        ? `\nAppearance tag variable reference:\n${varRefLines.join('\n')}\n`
-        : '';
-
     return [
-        'You are a Danbooru-style tag generator for image creation with a structured reasoning process.',
+        'You are a Danbooru-style tag generator for image creation.',
         '',
-        'Given an image description and a list of known characters, follow these reasoning steps internally before producing output:',
-        '',
-        'REASONING STEPS (internal, do NOT output these):',
-        '1) SITUATION ANALYSIS: What is the situation described in the input? Describe it in detail as a narrative.',
-        '2) CHARACTER IDENTIFICATION: Which characters from the known list are mentioned or would naturally participate in this situation?',
-        '3) APPEARANCE VARIABLES: What are the appearance tag variables for each identified character? (referenced below)',
-        '4) TAG COMPOSITION: Compose Danbooru-style tags for the scene/situation (replace underscores with spaces).',
-        '5) FORMAT VALIDATION: Ensure the output follows the format: scene_tags | {{appearanceTag:char1}}s description | {{appearanceTag:char2}}s description',
-        '   Each section MUST be separated by " | " (pipe with spaces).',
-        '6) CONSISTENCY CHECK: Verify character count tags match the appearance tags.',
-        '   - If appearance tags indicate 2 males, do NOT output "1boy 1girl" — output "2boys" instead.',
-        '   - If inconsistencies are found, re-compose the tags.',
-        '7) LANGUAGE CHECK: The entire output MUST be in English. No Korean or other languages.',
+        'Given an image description and a list of known characters, generate ONLY scene/situation tags.',
+        'Character appearance tags are handled automatically by the system — do NOT include them in your output.',
         '',
         'RULES:',
-        '1) Output ONLY the final result. No explanations, no reasoning text, no Korean.',
+        '1) Output ONLY comma-separated Danbooru-style tags. No sentences, no Korean, no explanation.',
         '2) Replace underscores with spaces in all tags.',
-        '3) DO NOT output character appearance/clothing tags directly — use the {{appearanceTag:name}} variable references instead.',
-        '4) DO include character count tags: 1girl, 1boy, 2girls, 3boys, multiple boys, multiple girls, solo, etc.',
-        '5) Include scene/environment tags: cafe, outdoor, indoor, classroom, bedroom, park, street, etc.',
-        '6) Include pose/action tags: selfie, standing, sitting, looking at viewer, v sign, peace sign, etc.',
-        '7) Include mood/lighting/framing tags: warm lighting, natural lighting, upper body, close-up, full body, etc.',
-        '8) If characters from the known list are mentioned or implied, count them for the character count tags.',
+        '3) DO NOT output character appearance, clothing, hair, or eye tags — the system appends them automatically.',
+        '4) DO NOT output any {{appearanceTag:...}} variables or references.',
+        '5) DO include character count tags: 1girl, 1boy, 2girls, 3boys, multiple boys, multiple girls, solo, etc.',
+        '6) Include scene/environment tags: cafe, outdoor, indoor, classroom, bedroom, park, street, etc.',
+        '7) Include pose/action tags: selfie, standing, sitting, looking at viewer, v sign, peace sign, etc.',
+        '8) Include mood/lighting/framing tags: warm lighting, natural lighting, upper body, close-up, full body, etc.',
+        '9) Count characters from the known list when they are mentioned or implied in the description.',
+        '10) The entire output MUST be in English. No Korean or other languages.',
         '',
-        'OUTPUT FORMAT:',
-        'scene_and_situation_tags | ({{appearanceTag:character1_name}}s description) | ({{appearanceTag:character2_name}}s description)',
-        '(Only include appearance tag variables for characters that are actually participating in the scene)',
-        'In this context, expressions such as **{{appearanceTag:character1_name}}s description** do not mean that you should literally output the text **{{appearanceTag:character1_name}}s description**. Instead, they instruct you to provide the full physical appearance description corresponding to the specified character’s name. The term character1 is variable and used purely as an example; it is not an actual name.',
-        '',
-        'EXAMPLE FORMAT:',
-        '* Input: a and b go to cafe',
-        '* {{appearanceTag:a}}s description is girl, white hair, blue eyes',
-        '* {{appearanceTag:b}}s description is boy, black hair, white eyes',
-        '* Ai thinks and doing tag match Situation is: cafe, sitting, eating a cake',
-        'Then OUTPUT WILL BE: cafe, sitting, eating a cake | girl, white hair, blue eyes | boy, black hair, white eyes',
+        'EXAMPLE:',
+        '* Input: "Alice and Bob go to cafe"',
+        '* Known characters: Alice (girl), Bob (boy)',
+        '* Output: 1girl, 1boy, cafe, sitting, table, indoor, warm lighting, upper body',
         '',
         'Known characters:',
         charList,
-        varRefBlock,
         '',
         'Image description:',
     ].join('\n');
@@ -409,12 +372,23 @@ export async function generateImageTags(rawPrompt, options = {}) {
     }
 
     // ── Step 3: Resolve appearance tag variables in the AI output ──
-    // The AI may output {{appearanceTag:name}} references — resolve them to actual tags
+    // The AI may output {{appearanceTag:name}} references (possibly with trailing
+    // suffixes like "'s description" or "s description") — resolve them to actual tags.
     let resolvedSceneTags = sceneTags;
     for (const [name, tags] of Object.entries(appearanceVarMap)) {
-        const varPattern = new RegExp(`\\{\\{appearanceTag:${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}\\}`, 'gi');
+        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Match {{appearanceTag:name}} with optional trailing "'s description" / "s description"
+        const varPattern = new RegExp(
+            `\\{\\{appearanceTag:${escaped}\\}\\}(?:['\u2019]?s\\s+description)?`,
+            'gi',
+        );
         resolvedSceneTags = resolvedSceneTags.replace(varPattern, tags);
     }
+    // Strip any remaining unresolved {{appearanceTag:...}} references (with optional suffix)
+    resolvedSceneTags = resolvedSceneTags.replace(
+        /\{\{appearanceTag:[^}]+\}\}(?:['‘’]?s\s+description)?/gi,
+        '',
+    );
 
     // If AI output contains pipe-separated sections with resolved appearance tags,
     // split them out into appearance groups
