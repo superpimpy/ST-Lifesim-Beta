@@ -160,9 +160,12 @@ function applyImageApiPromptTemplate(finalPrompt, sceneTags, appearancePart) {
     const { imageApiFullPromptTemplate: template } = getPromptTemplateSettings();
     if (!template) return finalPrompt;
     const hasPlaceholder = /\{(?:finalPrompt|sceneTags|appearanceTags)\}/.test(template);
+    const sceneWithAppearance = !sceneTags
+        ? appearancePart
+        : (appearancePart ? `${sceneTags} | ${appearancePart}` : sceneTags);
     const rendered = template
         .replace(/\{finalPrompt\}/g, finalPrompt)
-        .replace(/\{sceneTags\}/g, sceneTags)
+        .replace(/\{sceneTags\}/g, sceneWithAppearance)
         .replace(/\{appearanceTags\}/g, appearancePart)
         .trim();
     if (!rendered) return finalPrompt;
@@ -424,7 +427,12 @@ export async function generateImageTags(rawPrompt, options = {}) {
     // Merge AI-extracted groups with matched character tags (deduplicate)
     const seenAppearance = new Set(aiAppearanceGroups.map(g => g.toLowerCase()));
     const extraGroups = matched
-        .map(c => c.appearanceTags)
+        .map(c => {
+            const name = String(c?.name || '').trim();
+            const tags = String(c?.appearanceTags || '').trim();
+            if (!name || !tags) return '';
+            return `${name}: ${tags}`;
+        })
         .filter(Boolean)
         .filter(g => !seenAppearance.has(g.toLowerCase()));
     const appearanceGroups = [...aiAppearanceGroups, ...extraGroups];
