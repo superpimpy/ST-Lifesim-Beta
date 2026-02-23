@@ -445,10 +445,6 @@ function getOrderedQuickAccessItems(includeDisabled = false) {
 
 function openQuickAccessPopup() {
     const settings = getSettings();
-    if (!settings.quickAccess?.enabled) {
-        openMainMenuPopup();
-        return;
-    }
     const wrapper = document.createElement('div');
     wrapper.className = 'slm-settings-wrapper slm-form';
     const mainBtn = document.createElement('button');
@@ -459,7 +455,8 @@ function openQuickAccessPopup() {
         openMainMenuPopup();
     };
     wrapper.appendChild(mainBtn);
-    getOrderedQuickAccessItems().forEach((item) => {
+    const quickItems = settings.quickAccess?.enabled ? getOrderedQuickAccessItems() : [];
+    quickItems.forEach((item) => {
         const btn = document.createElement('button');
         btn.className = 'slm-btn slm-btn-secondary';
         btn.textContent = `${item.icon} ${item.label}`;
@@ -469,6 +466,14 @@ function openQuickAccessPopup() {
         };
         wrapper.appendChild(btn);
     });
+    if (quickItems.length === 0) {
+        wrapper.appendChild(Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: settings.quickAccess?.enabled === false
+                ? '퀵 액세스가 비활성화되어 있습니다. 설정에서 다시 활성화할 수 있습니다.'
+                : '표시할 퀵 액세스 항목이 없습니다.',
+        }));
+    }
     createPopup({
         id: 'quick-access-menu',
         title: '⚡ 퀵 액세스',
@@ -2054,6 +2059,32 @@ function hasExplicitImageIntentAroundLatestMessage() {
     });
 }
 
+/**
+ * 외모 태그 그룹을 중복 없이 배열에 추가한다.
+ * @param {string[]} groups
+ * @param {string} tagGroup
+ * @returns {void}
+ */
+function pushUniqueTagGroup(groups, tagGroup) {
+    const clean = String(tagGroup || '').trim();
+    if (!clean) return;
+    if (!groups.includes(clean)) groups.push(clean);
+}
+
+/**
+ * 외모 태그 그룹을 중복 없이 배열 맨 앞에 배치한다.
+ * @param {string[]} groups
+ * @param {string} tagGroup
+ * @returns {void}
+ */
+function unshiftUniqueTagGroup(groups, tagGroup) {
+    const clean = String(tagGroup || '').trim();
+    if (!clean) return;
+    const existingIndex = groups.indexOf(clean);
+    if (existingIndex >= 0) groups.splice(existingIndex, 1);
+    groups.unshift(clean);
+}
+
 function syncQuickSendButtons() {
     const quickBtn = document.getElementById('slm-quick-send-btn');
     const deletedBtn = document.getElementById('slm-deleted-msg-btn');
@@ -2166,8 +2197,8 @@ async function applyCharacterImageDisplayMode() {
             const mentionsChar = charHintRegex.test(promptLower)
                 || (!!charNameRegex && charNameRegex.test(promptLower));
             const tags = collectAppearanceTagsFromText(rawPrompt, { includeNames: [charName] });
-            if (mentionsUser && userAppearanceTags) tags.unshift(String(userAppearanceTags).trim());
-            if (tags.length === 0 && appearanceTags) tags.push(String(appearanceTags).trim());
+            if (mentionsUser && userAppearanceTags) unshiftUniqueTagGroup(tags, userAppearanceTags);
+            if (tags.length === 0) pushUniqueTagGroup(tags, appearanceTags);
             const tagsToUse = tags.join(' | ');
             // STEP 1-2: Danbooru 태그 생성 (한국어 → 영어 태그 변환)
             // 메시지 이미지 프롬프트(커스텀)를 태그 생성 컨텍스트로 함께 전달
