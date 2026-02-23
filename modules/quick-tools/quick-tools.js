@@ -13,7 +13,7 @@ import { getContext } from '../../utils/st-context.js';
 import { slashSend, slashGen, slashSendAs } from '../../utils/slash.js';
 import { showToast, escapeHtml, generateId } from '../../utils/ui.js';
 import { loadData, saveData, getExtensionSettings } from '../../utils/storage.js';
-import { getAppearanceTagsByName } from '../contacts/contacts.js';
+import { getAppearanceTagsByName, collectAppearanceTagsFromText } from '../contacts/contacts.js';
 import { generateDanbooruTags, buildImageApiPrompt } from '../../utils/image-tag-generator.js';
 
 // 사건 기록 아카이브 저장 키
@@ -99,6 +99,10 @@ async function handleQuickSend() {
     } catch (e) {
         showToast('전송 실패: ' + e.message, 'error');
     }
+}
+
+export async function triggerQuickSend() {
+    await handleQuickSend();
 }
 
 /**
@@ -240,6 +244,10 @@ async function handleReadReceipt() {
     }
 }
 
+export async function triggerReadReceipt() {
+    await handleReadReceipt();
+}
+
 /**
  * 연락 안 됨 연출 UI를 렌더링한다
  * (char가 user에게 연락했지만 user가 보지 않음)
@@ -292,6 +300,10 @@ async function handleNoContact() {
     } catch (e) {
         showToast('연락 안 됨 연출 실패: ' + e.message, 'error');
     }
+}
+
+export async function triggerNoContact() {
+    await handleNoContact();
 }
 
 /**
@@ -612,7 +624,11 @@ async function generateUserImage(prompt) {
             return '';
         }
         const userName = ctx?.name1 || '';
-        const userAppearanceTags = getAppearanceTagsByName(userName) || getAppearanceTagsByName('{{user}}') || getExtensionSettings()?.['st-lifesim']?.characterAppearanceTags?.['{{user}}'] || '';
+        const appearanceTagGroups = collectAppearanceTagsFromText(prompt, { includeNames: [userName, '{{user}}'] });
+        if (appearanceTagGroups.length === 0) {
+            const fallbackUserTags = getAppearanceTagsByName(userName) || getAppearanceTagsByName('{{user}}') || getExtensionSettings()?.['st-lifesim']?.characterAppearanceTags?.['{{user}}'] || '';
+            if (fallbackUserTags) appearanceTagGroups.push(String(fallbackUserTags).trim());
+        }
 
         // STEP 1-2: Danbooru 태그 생성 (한국어 → 영어 태그 변환)
         const danbooruTags = await generateDanbooruTags(prompt.trim());
@@ -623,7 +639,7 @@ async function generateUserImage(prompt) {
         }
 
         // STEP 3: 생성된 태그 + 외모 태그 조합
-        const finalPrompt = buildImageApiPrompt(danbooruTags, String(userAppearanceTags).trim());
+        const finalPrompt = buildImageApiPrompt(danbooruTags, appearanceTagGroups);
 
         if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
             const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true ${finalPrompt}`, { showOutput: false });
@@ -637,6 +653,17 @@ async function generateUserImage(prompt) {
         console.warn('[ST-LifeSim] 유저 이미지 생성 API 호출 실패:', e);
         return '';
     }
+}
+
+export async function triggerUserImageGenerationAndSend(prompt) {
+    const trimmed = String(prompt || '').trim();
+    if (!trimmed) return false;
+    const imageUrl = await generateUserImage(trimmed);
+    if (!imageUrl) return false;
+    const radius = getImageRadius();
+    await slashSend(`<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(trimmed)}" class="slm-quick-image" style="border-radius:${radius}px">`);
+    showToast('이미지 생성 및 전송 완료', 'success', 1500);
+    return true;
 }
 
 /**

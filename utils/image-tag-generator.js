@@ -36,6 +36,7 @@ const MODEL_KEY_BY_SOURCE = {
 const TAG_CONVERSION_PROMPT = [
     'Convert the following image description into Danbooru-style English tags.',
     'Output ONLY comma-separated tags. No sentences, no Korean, no explanation.',
+    'Use spaces instead of underscores inside tags whenever possible.',
     'Example output: 1girl, selfie, looking_at_viewer, phone_in_hand, casual_smile, indoor, upper_body',
     '',
     'Description:',
@@ -83,7 +84,7 @@ export async function generateDanbooruTags(rawPrompt, options) {
 
     // Already looks like English-only tags — return as-is
     if (!containsKorean(trimmed)) {
-        return trimmed;
+        return sanitizeTags(trimmed);
     }
 
     const context = getContext();
@@ -165,15 +166,13 @@ export async function generateDanbooruTags(rawPrompt, options) {
  * @returns {string} Final prompt for Image API
  */
 export function buildImageApiPrompt(danbooruTags, appearanceTags) {
-    const parts = [];
-
     const cleanDanbooru = safeTags(danbooruTags);
-    const cleanAppearance = safeTags(appearanceTags);
-
-    if (cleanDanbooru) parts.push(cleanDanbooru);
-    if (cleanAppearance) parts.push(cleanAppearance);
-
-    return parts.join(', ');
+    const appearanceGroups = Array.isArray(appearanceTags)
+        ? appearanceTags.map(safeTags).filter(Boolean)
+        : [safeTags(appearanceTags)].filter(Boolean);
+    if (!cleanDanbooru) return appearanceGroups.join(' | ');
+    if (appearanceGroups.length === 0) return cleanDanbooru;
+    return `${cleanDanbooru} | ${appearanceGroups.join(' | ')}`;
 }
 
 // ── internal helpers ──
@@ -201,7 +200,7 @@ function sanitizeTags(raw) {
     // Normalize whitespace around commas
     cleaned = cleaned
         .split(',')
-        .map(t => t.trim())
+        .map(t => t.replace(/_/g, ' ').trim().replace(/\s+/g, ' '))
         .filter(Boolean)
         .join(', ');
 

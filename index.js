@@ -19,11 +19,11 @@ import { injectContext, clearContext } from './utils/context-inject.js';
 import { createPopup, createTabs, closePopup } from './utils/popup.js';
 import { showToast, showConfirm, escapeHtml } from './utils/ui.js';
 import { exportAllData, importAllData, clearAllData } from './utils/storage.js';
-import { injectQuickSendButton, renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEventGeneratorUI, renderVoiceMemoUI } from './modules/quick-tools/quick-tools.js';
+import { renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEventGeneratorUI, renderVoiceMemoUI, triggerQuickSend, triggerReadReceipt, triggerNoContact, triggerUserImageGenerationAndSend } from './modules/quick-tools/quick-tools.js';
 import { startFirstMsgTimer, renderFirstMsgSettingsUI } from './modules/firstmsg/firstmsg.js';
 import { initEmoticon, openEmoticonPopup } from './modules/emoticon/emoticon.js';
-import { initContacts, openContactsPopup, getAppearanceTagsByName } from './modules/contacts/contacts.js';
-import { initCall, onCharacterMessageRenderedForProactiveCall, openCallLogsPopup, triggerProactiveIncomingCall } from './modules/call/call.js';
+import { initContacts, openContactsPopup, getAppearanceTagsByName, collectAppearanceTagsFromText } from './modules/contacts/contacts.js';
+import { initCall, onCharacterMessageRenderedForProactiveCall, openCallLogsPopup, triggerProactiveIncomingCall, requestActiveCharacterCall } from './modules/call/call.js';
 import { initWallet, openWalletPopup } from './modules/wallet/wallet.js';
 import { initSns, openSnsPopup, triggerNpcPosting, triggerPendingCommentReaction, hasPendingCommentReaction } from './modules/sns/sns.js';
 import { initCalendar, openCalendarPopup } from './modules/calendar/calendar.js';
@@ -112,8 +112,8 @@ const DEFAULT_SETTINGS = {
     messageImageGenerationMode: false, // 메신저 이미지 자동 생성 여부 (ON: 이미지 API로 생성, OFF: 줄글 텍스트)
     messageImageTextTemplate: '[사진: {description}]', // OFF일 때 줄글 형식 커스텀 템플릿
     messageImageInjectionPrompt: '<image_generation_rule>\nWhen {{char}} would naturally send a photo or picture in the conversation (e.g., selfie, scenery, food, screenshot, etc.), insert a <pic prompt="image description in English for stable diffusion"> tag at that point in your response.\nRules:\n1) Default subject is {{char}} only.\n2) Include {{user}} only when the context explicitly says both are together or the photo is clearly about {{user}}.\n3) Do not mix appearance traits of multiple people unless the scene explicitly includes multiple people.\n4) Keep the prompt visual and concise.\n</image_generation_rule>',
-    snsImagePrompt: 'Create a photorealistic image for {authorName}\'s SNS post. Character appearance: {appearanceTags}. Post content: "{postContent}". The image must accurately depict the scene described in the post. Focus on matching the subject, setting, and mood of the post text. Style: casual daily-life smartphone photo, natural lighting, candid feel.',
-    messageImagePrompt: 'Generate a photorealistic image that {charName} would send via messenger. Character appearance: {appearanceTags}. The image must reflect the character\'s physical appearance accurately based on the appearance tags. Style: personal candid photo matching the conversation context, natural and authentic feel.',
+    snsImagePrompt: 'Create a photorealistic image for {authorName}\'s SNS post. Character appearance: {appearanceTags}. Post content: "{postContent}". The image must accurately depict the scene described in the post. Focus on matching the subject, setting, and mood of the post text. Style: casual daily-life smartphone photo, natural lighting, candid feel. Use Danbooru-style concepts and prefer spaces instead of underscores.',
+    messageImagePrompt: 'Generate a photorealistic image that {charName} would send via messenger. Character appearance: {appearanceTags}. The image must reflect the character\'s physical appearance accurately based on the appearance tags. Style: personal candid photo matching the conversation context, natural and authentic feel. Use Danbooru-style concepts and prefer spaces instead of underscores.',
     characterAppearanceTags: {}, // { [charName]: "tag1, tag2" }
     callAudio: {
         startSoundUrl: '',
@@ -156,15 +156,14 @@ const DEFAULT_SETTINGS = {
     },
     quickAccess: {
         enabled: true,
+        order: ['userImage', 'callRequest', 'readReceipt', 'noContact', 'sns', 'quickSend'],
         items: {
-            emoticon: true,
-            contacts: true,
-            call: true,
+            userImage: true,
+            callRequest: true,
+            readReceipt: true,
+            noContact: true,
             sns: true,
-            gifticon: true,
-            quickTools: true,
-            wallet: true,
-            calendar: true,
+            quickSend: true,
         },
     },
 };
@@ -330,14 +329,33 @@ function getSettings() {
     }
     // 신규: 퀵 액세스 설정
     if (!ext[SETTINGS_KEY].quickAccess || typeof ext[SETTINGS_KEY].quickAccess !== 'object') {
-        ext[SETTINGS_KEY].quickAccess = { ...DEFAULT_SETTINGS.quickAccess, items: { ...DEFAULT_SETTINGS.quickAccess.items } };
+        ext[SETTINGS_KEY].quickAccess = {
+            ...DEFAULT_SETTINGS.quickAccess,
+            order: [...DEFAULT_SETTINGS.quickAccess.order],
+            items: { ...DEFAULT_SETTINGS.quickAccess.items },
+        };
     }
     if (ext[SETTINGS_KEY].quickAccess.items == null) {
         ext[SETTINGS_KEY].quickAccess.items = { ...DEFAULT_SETTINGS.quickAccess.items };
     }
+    if (!Array.isArray(ext[SETTINGS_KEY].quickAccess.order)) {
+        ext[SETTINGS_KEY].quickAccess.order = [...DEFAULT_SETTINGS.quickAccess.order];
+    }
     if (typeof ext[SETTINGS_KEY].quickAccess.enabled !== 'boolean') {
         ext[SETTINGS_KEY].quickAccess.enabled = DEFAULT_SETTINGS.quickAccess.enabled;
     }
+    const qaOrder = ext[SETTINGS_KEY].quickAccess.order
+        .map(v => String(v || '').trim())
+        .filter(v => v && DEFAULT_SETTINGS.quickAccess.order.includes(v));
+    DEFAULT_SETTINGS.quickAccess.order.forEach((key) => {
+        if (!qaOrder.includes(key)) qaOrder.push(key);
+    });
+    ext[SETTINGS_KEY].quickAccess.order = qaOrder;
+    Object.keys(DEFAULT_SETTINGS.quickAccess.items).forEach((key) => {
+        if (typeof ext[SETTINGS_KEY].quickAccess.items[key] !== 'boolean') {
+            ext[SETTINGS_KEY].quickAccess.items[key] = DEFAULT_SETTINGS.quickAccess.items[key];
+        }
+    });
     return ext[SETTINGS_KEY];
 }
 
@@ -388,106 +406,86 @@ function injectLifeSimMenuButton() {
     btn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (document.getElementById('slm-overlay-main-menu')) {
-            closePopup('main-menu');
+        if (document.getElementById('slm-overlay-quick-access-menu')) {
+            closePopup('quick-access-menu');
         } else {
-            openMainMenuPopup();
+            openQuickAccessPopup();
         }
     });
 
     sendBtn.parentNode.insertBefore(btn, sendBtn);
 }
 
-// ── 퀵 액세스 플로팅 버튼 (2단계 토글 구조) ──────────────────────
 const QUICK_ACCESS_ITEMS = [
-    { key: 'emoticon', icon: '😊', label: '이모티콘', action: () => openEmoticonPopup() },
-    { key: 'contacts', icon: '📋', label: '연락처', action: () => openContactsPopup() },
-    { key: 'call', icon: '📞', label: '통화', action: () => openCallLogsPopup() },
-    { key: 'sns', icon: '📸', label: 'SNS', action: () => openSnsPopup() },
-    { key: 'gifticon', icon: '🎁', label: '기프티콘', action: () => openGifticonPopup() },
-    { key: 'quickTools', icon: '🛠️', label: '퀵 도구', action: () => openQuickToolsPanel() },
-    { key: 'wallet', icon: '💰', label: '지갑', action: () => openWalletPopup() },
-    { key: 'calendar', icon: '📅', label: '캘린더', action: () => openCalendarPopup() },
+    { key: 'userImage', icon: '🎨', label: '유저 이미지 전송', moduleKey: 'quickTools', action: async () => {
+        const prompt = window.prompt('생성할 이미지 설명을 입력하세요.');
+        if (!prompt) return;
+        const ok = await triggerUserImageGenerationAndSend(prompt);
+        if (!ok) showToast('이미지 생성에 실패했습니다.', 'error', 2000);
+    } },
+    { key: 'callRequest', icon: '📞', label: '통화 요청', moduleKey: 'call', action: async () => { await requestActiveCharacterCall(); } },
+    { key: 'readReceipt', icon: '🔕', label: '읽씹하기', moduleKey: 'quickTools', action: async () => { await triggerReadReceipt(); } },
+    { key: 'noContact', icon: '📵', label: '연락 안 됨', moduleKey: 'quickTools', action: async () => { await triggerNoContact(); } },
+    { key: 'sns', icon: '📸', label: 'SNS 들어가기', moduleKey: 'sns', action: () => openSnsPopup() },
+    { key: 'quickSend', icon: '💌', label: '트리거 없이 메세지 전송', moduleKey: 'quickTools', action: async () => { await triggerQuickSend(); } },
 ];
 
-/**
- * 퀵 액세스 플로팅 버튼 (FAB)을 화면 우하단에 삽입한다.
- * 1단계: 아이콘 버튼 클릭 → 2단계: 퀵 액세스 리스트 펼침 → 항목 클릭 시 해당 패널/모달 바로 열림
- */
-function injectQuickAccessFab() {
-    if (document.getElementById('slm-qa-fab')) return;
-
+function getOrderedQuickAccessItems(includeDisabled = false) {
     const settings = getSettings();
-    if (!settings.quickAccess?.enabled) return;
-
-    // FAB 컨테이너
-    const container = document.createElement('div');
-    container.id = 'slm-qa-fab';
-    container.className = 'slm-qa-fab';
-
-    // 메인 FAB 버튼
-    const fab = document.createElement('button');
-    fab.className = 'slm-qa-fab-btn';
-    fab.innerHTML = '⚡';
-    fab.title = '퀵 액세스';
-    fab.setAttribute('aria-label', '퀵 액세스 열기');
-
-    // 퀵 액세스 리스트 (세로)
-    const list = document.createElement('div');
-    list.className = 'slm-qa-list';
-    list.style.display = 'none';
-
-    const qaItems = settings.quickAccess?.items || {};
-    QUICK_ACCESS_ITEMS.forEach(item => {
-        if (qaItems[item.key] === false) return;
-        if (!isModuleEnabled(item.key)) return;
-
-        const itemBtn = document.createElement('button');
-        itemBtn.className = 'slm-qa-item';
-        itemBtn.innerHTML = item.icon;
-        itemBtn.title = item.label;
-        itemBtn.setAttribute('aria-label', item.label);
-        itemBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            list.style.display = 'none';
-            fab.classList.remove('slm-qa-fab-open');
-            item.action();
-        });
-        list.appendChild(itemBtn);
-    });
-
-    // FAB 토글
-    fab.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const isOpen = list.style.display !== 'none';
-        list.style.display = isOpen ? 'none' : 'flex';
-        fab.classList.toggle('slm-qa-fab-open', !isOpen);
-    });
-
-    // 외부 클릭 시 닫기 (container가 DOM에 있을 때만 동작)
-    const closeOnOutsideClick = () => {
-        if (!document.body.contains(container)) {
-            document.removeEventListener('click', closeOnOutsideClick);
-            return;
-        }
-        list.style.display = 'none';
-        fab.classList.remove('slm-qa-fab-open');
-    };
-    document.addEventListener('click', closeOnOutsideClick);
-    container.addEventListener('click', (e) => e.stopPropagation());
-
-    container.appendChild(list);
-    container.appendChild(fab);
-    document.body.appendChild(container);
+    const itemMap = new Map(QUICK_ACCESS_ITEMS.map(item => [item.key, item]));
+    const order = Array.isArray(settings.quickAccess?.order) ? settings.quickAccess.order : [];
+    const orderedKeys = [...order, ...QUICK_ACCESS_ITEMS.map(item => item.key)]
+        .filter((key, idx, arr) => key && arr.indexOf(key) === idx);
+    return orderedKeys
+        .map(key => itemMap.get(key))
+        .filter(Boolean)
+        .filter((item) => includeDisabled || settings.quickAccess?.items?.[item.key] !== false)
+        .filter((item) => !item.moduleKey || isModuleEnabled(item.moduleKey));
 }
 
-/**
- * 퀵 액세스 FAB을 갱신한다 (설정 변경 시 호출)
- */
+function openQuickAccessPopup() {
+    const settings = getSettings();
+    const wrapper = document.createElement('div');
+    wrapper.className = 'slm-settings-wrapper slm-form';
+    const mainBtn = document.createElement('button');
+    mainBtn.className = 'slm-btn slm-btn-primary';
+    mainBtn.textContent = '📱 메인패널로 이동';
+    mainBtn.onclick = () => {
+        closePopup('quick-access-menu');
+        openMainMenuPopup();
+    };
+    wrapper.appendChild(mainBtn);
+    const quickItems = settings.quickAccess?.enabled ? getOrderedQuickAccessItems() : [];
+    quickItems.forEach((item) => {
+        const btn = document.createElement('button');
+        btn.className = 'slm-btn slm-btn-secondary';
+        btn.textContent = `${item.icon} ${item.label}`;
+        btn.onclick = async () => {
+            closePopup('quick-access-menu');
+            await item.action();
+        };
+        wrapper.appendChild(btn);
+    });
+    if (quickItems.length === 0) {
+        wrapper.appendChild(Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: settings.quickAccess?.enabled === false
+                ? '퀵 액세스가 비활성화되어 있습니다. 설정에서 다시 활성화할 수 있습니다.'
+                : '표시할 퀵 액세스 항목이 없습니다.',
+        }));
+    }
+    createPopup({
+        id: 'quick-access-menu',
+        title: '⚡ 퀵 액세스',
+        content: wrapper,
+        className: 'slm-sub-panel',
+    });
+}
+
 function refreshQuickAccessFab() {
-    const old = document.getElementById('slm-qa-fab');
-    if (old) old.remove();
-    if (isEnabled()) injectQuickAccessFab();
+    if (document.getElementById('slm-overlay-quick-access-menu')) {
+        closePopup('quick-access-menu');
+    }
 }
 
 /**
@@ -791,34 +789,73 @@ function openSettingsPanel(onBack) {
 
         wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
 
-        // 개별 항목 표시/숨김
+        // 개별 항목 표시/숨김 + 순서
         const itemsTitle = document.createElement('div');
         itemsTitle.className = 'slm-label';
-        itemsTitle.textContent = '⚡ 퀵 액세스 항목 표시 설정';
+        itemsTitle.textContent = '⚡ 퀵 액세스 항목 표시/순서 설정';
         itemsTitle.style.fontWeight = '600';
         itemsTitle.style.marginBottom = '6px';
         wrapper.appendChild(itemsTitle);
-
-        QUICK_ACCESS_ITEMS.forEach(item => {
-            const row = document.createElement('div');
-            row.className = 'slm-settings-row';
-            const lbl = document.createElement('label');
-            lbl.className = 'slm-toggle-label';
-            const chk = document.createElement('input');
-            chk.type = 'checkbox';
-            chk.checked = settings.quickAccess?.items?.[item.key] !== false;
-            chk.onchange = () => {
-                if (!settings.quickAccess) settings.quickAccess = { ...DEFAULT_SETTINGS.quickAccess };
-                if (!settings.quickAccess.items) settings.quickAccess.items = { ...DEFAULT_SETTINGS.quickAccess.items };
-                settings.quickAccess.items[item.key] = chk.checked;
-                saveSettings();
-                refreshQuickAccessFab();
-            };
-            lbl.appendChild(chk);
-            lbl.appendChild(document.createTextNode(` ${item.icon} ${item.label}`));
-            row.appendChild(lbl);
-            wrapper.appendChild(row);
+        const hint = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: '항목을 드래그하여 순서를 변경할 수 있습니다.',
         });
+        wrapper.appendChild(hint);
+
+        const list = document.createElement('div');
+        list.className = 'slm-form';
+        wrapper.appendChild(list);
+
+        const renderItems = () => {
+            list.innerHTML = '';
+            const ordered = getOrderedQuickAccessItems(true);
+            QUICK_ACCESS_ITEMS
+                .filter(item => !ordered.some(v => v.key === item.key))
+                .forEach(item => ordered.push(item));
+            ordered.forEach((item) => {
+                const row = document.createElement('div');
+                row.className = 'slm-settings-row';
+                row.draggable = true;
+                row.dataset.qaKey = item.key;
+
+                row.addEventListener('dragstart', (e) => {
+                    e.dataTransfer?.setData('text/plain', item.key);
+                });
+                row.addEventListener('dragover', (e) => e.preventDefault());
+                row.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const fromKey = e.dataTransfer?.getData('text/plain');
+                    const toKey = item.key;
+                    if (!fromKey || fromKey === toKey) return;
+                    if (!settings.quickAccess?.order) settings.quickAccess.order = [...DEFAULT_SETTINGS.quickAccess.order];
+                    const nextOrder = settings.quickAccess.order.filter(k => k !== fromKey);
+                    const targetIdx = nextOrder.indexOf(toKey);
+                    if (targetIdx === -1) nextOrder.push(fromKey);
+                    else nextOrder.splice(targetIdx, 0, fromKey);
+                    settings.quickAccess.order = nextOrder;
+                    saveSettings();
+                    renderItems();
+                });
+
+                const lbl = document.createElement('label');
+                lbl.className = 'slm-toggle-label';
+                const chk = document.createElement('input');
+                chk.type = 'checkbox';
+                chk.checked = settings.quickAccess?.items?.[item.key] !== false;
+                chk.onchange = () => {
+                    if (!settings.quickAccess) settings.quickAccess = { ...DEFAULT_SETTINGS.quickAccess };
+                    if (!settings.quickAccess.items) settings.quickAccess.items = { ...DEFAULT_SETTINGS.quickAccess.items };
+                    settings.quickAccess.items[item.key] = chk.checked;
+                    saveSettings();
+                    refreshQuickAccessFab();
+                };
+                lbl.appendChild(chk);
+                lbl.appendChild(document.createTextNode(` ${item.icon} ${item.label}`));
+                row.appendChild(lbl);
+                list.appendChild(row);
+            });
+        };
+        renderItems();
 
         return wrapper;
     }
@@ -2022,17 +2059,37 @@ function hasExplicitImageIntentAroundLatestMessage() {
     });
 }
 
+/**
+ * 외모 태그 그룹을 중복 없이 배열에 추가한다.
+ * @param {string[]} groups
+ * @param {string} tagGroup
+ * @returns {void}
+ */
+function pushUniqueTagGroup(groups, tagGroup) {
+    const clean = String(tagGroup || '').trim();
+    if (!clean) return;
+    if (!groups.includes(clean)) groups.push(clean);
+}
+
+/**
+ * 외모 태그 그룹을 중복 없이 배열 맨 앞에 배치한다.
+ * @param {string[]} groups
+ * @param {string} tagGroup
+ * @returns {void}
+ */
+function unshiftUniqueTagGroup(groups, tagGroup) {
+    const clean = String(tagGroup || '').trim();
+    if (!clean) return;
+    const existingIndex = groups.indexOf(clean);
+    if (existingIndex >= 0) groups.splice(existingIndex, 1);
+    groups.unshift(clean);
+}
+
 function syncQuickSendButtons() {
     const quickBtn = document.getElementById('slm-quick-send-btn');
     const deletedBtn = document.getElementById('slm-deleted-msg-btn');
-    if (!isEnabled()) {
-        quickBtn?.remove();
-        deletedBtn?.remove();
-        return;
-    }
-    if (isModuleEnabled('quickTools')) {
-        injectQuickSendButton();
-    }
+    quickBtn?.remove();
+    deletedBtn?.remove();
 }
 
 // ── 메신저 이미지 생성/텍스트 변환 로직 ──────────────────────────
@@ -2139,13 +2196,10 @@ async function applyCharacterImageDisplayMode() {
                 || (!!userNameRegex && userNameRegex.test(promptLower));
             const mentionsChar = charHintRegex.test(promptLower)
                 || (!!charNameRegex && charNameRegex.test(promptLower));
-            const tags = [];
-            if (mentionsUser && !mentionsChar && userAppearanceTags) tags.push(userAppearanceTags);
-            else {
-                if (appearanceTags) tags.push(appearanceTags);
-                if (mentionsUser && userAppearanceTags) tags.push(userAppearanceTags);
-            }
-            const tagsToUse = tags.join(', ');
+            const tags = collectAppearanceTagsFromText(rawPrompt, { includeNames: [charName] });
+            if (mentionsUser && userAppearanceTags) unshiftUniqueTagGroup(tags, userAppearanceTags);
+            if (tags.length === 0) pushUniqueTagGroup(tags, appearanceTags);
+            const tagsToUse = tags.join(' | ');
             // STEP 1-2: Danbooru 태그 생성 (한국어 → 영어 태그 변환)
             // 메시지 이미지 프롬프트(커스텀)를 태그 생성 컨텍스트로 함께 전달
             const messageImageCustomPrompt = (settings.messageImagePrompt || DEFAULT_SETTINGS.messageImagePrompt)
@@ -2165,7 +2219,7 @@ async function applyCharacterImageDisplayMode() {
                 replacement = template.replace(/\{description\}/g, rawPrompt);
             } else {
                 // STEP 3: 생성된 태그 + 외모 태그 조합 → Image API 전달
-                const finalPrompt = buildImageApiPrompt(danbooruTags, tagsToUse);
+                const finalPrompt = buildImageApiPrompt(danbooruTags, tags);
                 try {
                     const imageUrl = await generateMessageImageViaApi(finalPrompt);
                     if (imageUrl) {
@@ -2367,19 +2421,11 @@ async function init() {
         }
     }
 
-    // 퀵 센드 버튼 삽입 (sendform 전송 버튼 옆)
-    if (isEnabled() && isModuleEnabled('quickTools')) {
-        try { injectQuickSendButton(); } catch (e) { console.error('[ST-LifeSim] 퀵 센드 버튼 오류:', e); }
-    }
-
     // 메신저 이미지 생성 프롬프트 주입 설정
     try { updateMessageImageInjection(); } catch (e) { console.error('[ST-LifeSim] 이미지 프롬프트 주입 오류:', e); }
 
     // ST-LifeSim 메뉴 버튼 삽입 (sendform 옆)
     try { injectLifeSimMenuButton(); } catch (e) { console.error('[ST-LifeSim] 메뉴 버튼 오류:', e); }
-
-    // 퀵 액세스 플로팅 버튼 삽입
-    try { injectQuickAccessFab(); } catch (e) { console.error('[ST-LifeSim] 퀵 액세스 FAB 오류:', e); }
 
     // 선톡 타이머 시작 (활성화된 경우)
     try { startFirstMsgTimer(settings.firstMsg); } catch (e) { console.error('[ST-LifeSim] 선톡 타이머 오류:', e); }
