@@ -48,16 +48,20 @@ const TAG_CONVERSION_PROMPT = [
 
 /**
  * Build the enhanced tag generation prompt that includes character context.
- * The AI receives all known characters so it can:
- * - Correctly identify characters mentioned in the scene
- * - Generate accurate count tags (1girl, 3boys, multiple boys, etc.)
- * - Generate scene/situation/pose/action tags
- * - NOT output appearance tags (those are appended separately via pipe separator)
+ * Introduces a multi-step reasoning chain:
+ *   1. Understand the situation from the input
+ *   2. Identify which characters are involved
+ *   3. Determine their appearance tag variables
+ *   4. Compose scene Danbooru tags
+ *   5. Validate output format: sceneTags | {{appearanceTag:name1}} | {{appearanceTag:name2}}
+ *   6. Cross-check consistency (e.g. character count vs gender tags)
+ *   7. Ensure output is in English
  *
  * @param {Array<{name: string, description?: string, appearanceTags?: string}>} characters
+ * @param {{ [name: string]: string }} [appearanceVarMap] - Map of name -> appearance tag variable reference
  * @returns {string}
  */
-function buildCharacterAwarePrompt(characters) {
+function buildCharacterAwarePrompt(characters, appearanceVarMap) {
     const charList = characters.length > 0
         ? characters.map(c => {
             const desc = c.description ? ` (${c.description})` : '';
@@ -66,26 +70,55 @@ function buildCharacterAwarePrompt(characters) {
         }).join('\n')
         : '  (none)';
 
+    // Build appearance tag variable reference list
+    const varRefLines = [];
+    if (appearanceVarMap && typeof appearanceVarMap === 'object') {
+        for (const [name, tags] of Object.entries(appearanceVarMap)) {
+            if (tags) {
+                varRefLines.push(`  * ${name}: {{appearanceTag:${name}}} → ${tags}`);
+            }
+        }
+    }
+    const varRefBlock = varRefLines.length > 0
+        ? `\nAppearance tag variable reference:\n${varRefLines.join('\n')}\n`
+        : '';
+
     return [
-        'You are a Danbooru-style tag generator for image creation.',
+        'You are a Danbooru-style tag generator for image creation with a structured reasoning process.',
         '',
-        'Given an image description and a list of known characters, generate ONLY scene/situation tags.',
+        'Given an image description and a list of known characters, follow these reasoning steps internally before producing output:',
+        '',
+        'REASONING STEPS (internal, do NOT output these):',
+        '1) SITUATION ANALYSIS: What is the situation described in the input? Describe it in detail as a narrative.',
+        '2) CHARACTER IDENTIFICATION: Which characters from the known list are mentioned or would naturally participate in this situation?',
+        '3) APPEARANCE VARIABLES: What are the appearance tag variables for each identified character? (referenced below)',
+        '4) TAG COMPOSITION: Compose Danbooru-style tags for the scene/situation (replace underscores with spaces).',
+        '5) FORMAT VALIDATION: Ensure the output follows the format: scene_tags | {{appearanceTag:char1}} | {{appearanceTag:char2}}',
+        '   Each section MUST be separated by " | " (pipe with spaces).',
+        '6) CONSISTENCY CHECK: Verify character count tags match the appearance tags.',
+        '   - If appearance tags indicate 2 males, do NOT output "1boy 1girl" — output "2boys" instead.',
+        '   - If inconsistencies are found, re-compose the tags.',
+        '7) LANGUAGE CHECK: The entire output MUST be in English. No Korean or other languages.',
         '',
         'RULES:',
-        '1) Output ONLY comma-separated Danbooru-style English tags. No sentences, no Korean, no explanation.',
+        '1) Output ONLY the final result. No explanations, no reasoning text, no Korean.',
         '2) Replace underscores with spaces in all tags.',
-        '3) DO NOT output character appearance/clothing tags — those are handled separately.',
+        '3) DO NOT output character appearance/clothing tags directly — use the {{appearanceTag:name}} variable references instead.',
         '4) DO include character count tags: 1girl, 1boy, 2girls, 3boys, multiple boys, multiple girls, solo, etc.',
         '5) Include scene/environment tags: cafe, outdoor, indoor, classroom, bedroom, park, street, etc.',
         '6) Include pose/action tags: selfie, standing, sitting, looking at viewer, v sign, peace sign, etc.',
         '7) Include mood/lighting/framing tags: warm lighting, natural lighting, upper body, close-up, full body, etc.',
         '8) If characters from the known list are mentioned or implied, count them for the character count tags.',
         '',
+        'OUTPUT FORMAT:',
+        'scene_and_situation_tags | {{appearanceTag:character1_name}} | {{appearanceTag:character2_name}}',
+        '(Only include appearance tag variables for characters that are actually participating in the scene)',
+        '',
         'Known characters:',
         charList,
-        '',
+        varRefBlock,
         'Example: If 3 male characters a, b, c take a selfie at a cafe →',
-        '3boys, selfie, multiple boys, cafe, indoor, looking at viewer, upper body, warm lighting, casual',
+        '3boys, selfie, multiple boys, cafe, indoor, looking at viewer, upper body, warm lighting, casual | {{appearanceTag:a}} | {{appearanceTag:b}} | {{appearanceTag:c}}',
         '',
         'Image description:',
     ].join('\n');
@@ -159,6 +192,7 @@ function applyImageApiPromptTemplate(finalPrompt, sceneTags, appearancePart) {
  * @param {string} rawPrompt - The raw image prompt (possibly Korean)
  * @param {Object} [options] - Optional parameters
  * @param {Array<{name: string, description?: string, appearanceTags?: string}>} [options.characters] - Known characters for context-aware generation
+ * @param {{ [name: string]: string }} [options.appearanceVarMap] - Appearance tag variable map for reference
  * @returns {Promise<string>} English Danbooru tags, comma-separated
  */
 export async function generateDanbooruTags(rawPrompt, options) {
@@ -168,6 +202,7 @@ export async function generateDanbooruTags(rawPrompt, options) {
 
     const trimmed = rawPrompt.trim();
     const characters = Array.isArray(options?.characters) ? options.characters : [];
+    const appearanceVarMap = options?.appearanceVarMap || {};
 
     // Already looks like English-only tags and no character context — return as-is
     if (!containsKorean(trimmed) && characters.length === 0) {
@@ -182,7 +217,7 @@ export async function generateDanbooruTags(rawPrompt, options) {
 
     // Use character-aware prompt when characters are provided
     const promptBase = characters.length > 0
-        ? buildCharacterAwarePrompt(characters)
+        ? buildCharacterAwarePrompt(characters, appearanceVarMap)
         : TAG_CONVERSION_PROMPT;
 
     const fullPrompt = applyTagGenerationPromptTemplate(promptBase, trimmed);
@@ -281,6 +316,7 @@ export function buildImageApiPrompt(danbooruTags, appearanceTags) {
  * @param {string[]} [options.includeNames] - Force-include these character names
  * @param {Array<{name: string, displayName?: string, description?: string, appearanceTags?: string}>} [options.contacts] - All available contacts
  * @param {(name: string) => string} [options.getAppearanceTagsByName] - Lookup function for appearance tags
+ * @param {{ [name: string]: string }} [options.appearanceVarMap] - Pre-built appearance tag variable map
  * @returns {Promise<{sceneTags: string, appearanceGroups: string[], finalPrompt: string}>}
  */
 export async function generateImageTags(rawPrompt, options = {}) {
@@ -294,6 +330,17 @@ export async function generateImageTags(rawPrompt, options = {}) {
         ? options.getAppearanceTagsByName
         : () => '';
     const includeNames = Array.isArray(options.includeNames) ? options.includeNames : [];
+
+    // Build appearance variable map from all contacts for the prompt
+    const appearanceVarMap = options.appearanceVarMap || {};
+    if (Object.keys(appearanceVarMap).length === 0) {
+        for (const contact of allContacts) {
+            const name = String(contact?.name || '').trim();
+            if (!name) continue;
+            const tags = String(getAppearanceFn(name) || '').trim();
+            if (tags) appearanceVarMap[name] = tags;
+        }
+    }
 
     // ── Step 1: Match mentioned characters ──
     const textLower = rawPrompt.toLowerCase();
@@ -346,7 +393,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
     // ── Step 2: Generate scene/situation tags via AI ──
     let sceneTags = '';
     try {
-        sceneTags = await generateDanbooruTags(rawPrompt, { characters: matched });
+        sceneTags = await generateDanbooruTags(rawPrompt, { characters: matched, appearanceVarMap });
     } catch (err) {
         console.warn('[image-tag-generator] Scene tag generation failed:', err);
     }
@@ -355,13 +402,31 @@ export async function generateImageTags(rawPrompt, options = {}) {
         return emptyResult;
     }
 
-    // ── Step 3: Collect appearance tag groups ──
-    const appearanceGroups = matched
-        .map(c => c.appearanceTags)
-        .filter(Boolean);
+    // ── Step 3: Resolve appearance tag variables in the AI output ──
+    // The AI may output {{appearanceTag:name}} references — resolve them to actual tags
+    let resolvedSceneTags = sceneTags;
+    for (const [name, tags] of Object.entries(appearanceVarMap)) {
+        const varPattern = new RegExp(`\\{\\{appearanceTag:${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}\\}`, 'gi');
+        resolvedSceneTags = resolvedSceneTags.replace(varPattern, tags);
+    }
 
-    // ── Step 4: Build final prompt ──
-    const finalPrompt = buildImageApiPrompt(sceneTags, appearanceGroups);
+    // If AI output contains pipe-separated sections with resolved appearance tags,
+    // split them out into appearance groups
+    const pipeParts = resolvedSceneTags.split(/\s*\|\s*/).map(s => s.trim()).filter(Boolean);
+    let finalSceneTags = pipeParts[0] || resolvedSceneTags;
+    const aiAppearanceGroups = pipeParts.length > 1 ? pipeParts.slice(1) : [];
+
+    // ── Step 4: Collect appearance tag groups ──
+    // Merge AI-extracted groups with matched character tags (deduplicate)
+    const seenAppearance = new Set(aiAppearanceGroups.map(g => g.toLowerCase()));
+    const extraGroups = matched
+        .map(c => c.appearanceTags)
+        .filter(Boolean)
+        .filter(g => !seenAppearance.has(g.toLowerCase()));
+    const appearanceGroups = [...aiAppearanceGroups, ...extraGroups];
+
+    // ── Step 5: Build final prompt ──
+    const finalPrompt = buildImageApiPrompt(finalSceneTags, appearanceGroups);
 
     return { sceneTags, appearanceGroups, finalPrompt };
 }

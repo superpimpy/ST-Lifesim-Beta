@@ -762,6 +762,45 @@ export function getAppearanceTagsByName(name) {
     return fromSettings;
 }
 
+/**
+ * 등록된 모든 연락처의 외모태그 변수 맵을 반환한다.
+ * 예: { "kariv": "long hair, blue eyes, ..." }
+ * 변수 형식: {{appearanceTag:name}}
+ * @returns {{ [name: string]: string }}
+ */
+export function buildAppearanceTagVariableMap() {
+    const allContacts = [...loadContacts('character'), ...loadContacts('chat')];
+    const map = {};
+    for (const c of allContacts) {
+        const name = String(c.name || '').trim();
+        if (!name) continue;
+        const tags = getAppearanceTagsByName(name);
+        if (tags) map[name] = tags;
+        const displayName = String(c.displayName || '').trim();
+        if (displayName && displayName !== name) {
+            if (tags) map[displayName] = tags;
+        }
+    }
+    return map;
+}
+
+/**
+ * 텍스트 내의 {{appearanceTag:name}} 변수를 실제 외모태그로 치환한다.
+ * @param {string} text
+ * @returns {string}
+ */
+export function resolveAppearanceTagVariables(text) {
+    if (!text || typeof text !== 'string') return text || '';
+    const varMap = buildAppearanceTagVariableMap();
+    return text.replace(/\{\{appearanceTag:([^}]+)\}\}/gi, (match, name) => {
+        const trimmed = name.trim();
+        if (varMap[trimmed]) return varMap[trimmed];
+        // case-insensitive fallback
+        const lowerKey = Object.keys(varMap).find(k => k.toLowerCase() === trimmed.toLowerCase());
+        return lowerKey ? varMap[lowerKey] : match;
+    });
+}
+
 function isAsciiToken(name) {
     return /^[a-z0-9_]+$/i.test(name);
 }
