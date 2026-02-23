@@ -370,25 +370,11 @@ export async function generateImageTags(rawPrompt, options = {}) {
         return emptyResult;
     }
 
-    // ── Step 3: Resolve appearance tag variables in the AI output ──
-    // The AI may output {{appearanceTag:name}} references (possibly with trailing
-    // suffixes like "'s description" or "s description") — resolve them to actual tags.
-    const appearanceLookup = new Map(
-        Object.entries(appearanceVarMap)
-            .map(([name, tags]) => [(name || '').trim().toLowerCase(), (tags || '').trim()])
-            .filter(([name, tags]) => name && tags),
-    );
-    const resolvedSceneTags = resolveAppearanceTagRefs(sceneTags, Object.fromEntries(appearanceLookup));
-
-    // If AI output contains pipe-separated sections, treat them all as scene tags.
-    // The AI is instructed NOT to use "|", but if it does, merge all sections back
-    // into a single comma-separated scene tag string.
-    const pipeParts = resolvedSceneTags.split(/\s*\|\s*/).map(s => s.trim()).filter(Boolean);
+    // AI가 실수로 파이프를 출력할 경우 대비: 파이프로 분할하여 모두 장면 태그로 간주
+    const pipeParts = sceneTags.split(/\s*\|\s*/).map(s => s.trim()).filter(Boolean);
     const finalSceneTags = pipeParts.join(', ');
 
-    // ── Step 4: Collect appearance tag groups from ALL matched characters ──
-    // Character appearances are ALWAYS appended programmatically (pipe-separated)
-    // so the Image API receives: scene tags | Name1: appearance | Name2: appearance ...
+    // ── Step 3: Collect appearance tag groups from ALL matched characters ──
     const appearanceGroups = matched
         .map(c => {
             const name = String(c?.name || '').trim();
@@ -398,7 +384,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
         })
         .filter(Boolean);
 
-    // ── Step 5: Build final prompt ──
+    // ── Step 4: Build final prompt ──
     const finalPrompt = buildImageApiPrompt(finalSceneTags, appearanceGroups);
 
     return { sceneTags: finalSceneTags, appearanceGroups, finalPrompt };
@@ -418,7 +404,7 @@ function sanitizeTags(raw) {
     // Remove common AI preamble / markdown fences
     let cleaned = raw
         .replace(/```[^`]*```/gs, '')
-        .replace(/^[^a-zA-Z0-9_(|]*/, '') // ✅ fix: 파이프 문자를 허용 문자에 포함
+        .replace(/^[^a-zA-Z0-9_(|]*/, '') // 파이프 문자 허용
         .trim();
 
     // Reject if Korean characters leaked through
@@ -427,7 +413,7 @@ function sanitizeTags(raw) {
         return '';
     }
 
-    // ✅ fix: 파이프 섹션을 분리한 뒤 각 섹션 내부 태그만 정리 → 파이프 구조 보존
+    // 파이프 섹션을 분리한 뒤 각 섹션 내부 태그만 정리 → 파이프 구조 보존
     const sections = cleaned.split(/\s*\|\s*/);
     const sanitizedSections = sections
         .map(section =>
@@ -469,4 +455,4 @@ function resolveAppearanceTagRefs(text, appearanceVarMap = {}) {
         const key = (rawName || '').trim().toLowerCase();
         return lookup.get(key) || '';
     });
-}
+    }
