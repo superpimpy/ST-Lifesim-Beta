@@ -476,7 +476,12 @@ function injectLifeSimMenuButton() {
         }
     });
 
-    sendBtn.parentNode.insertBefore(btn, sendBtn);
+    const leftSendForm = document.getElementById('leftSendForm');
+    if (leftSendForm) {
+        leftSendForm.appendChild(btn);
+    } else {
+        sendBtn.parentNode.insertBefore(btn, sendBtn);
+    }
 }
 
 const QUICK_ACCESS_ITEMS = [
