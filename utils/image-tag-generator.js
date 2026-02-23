@@ -173,8 +173,9 @@ export async function generateDanbooruTags(rawPrompt, options) {
     const characters = Array.isArray(options?.characters) ? options.characters : [];
     const appearanceVarMap = options?.appearanceVarMap || {};
 
-    // Already looks like English-only tags and no character context — return as-is
-    if (!containsKorean(trimmed) && characters.length === 0) {
+    // Already looks like tag-style English input — keep as-is to avoid unnecessary AI rewriting
+    const looksLikeTagList = /,|\|/.test(trimmed);
+    if (!containsKorean(trimmed) && (looksLikeTagList || characters.length === 0)) {
         return sanitizeTags(trimmed);
     }
 
@@ -309,10 +310,18 @@ export async function generateImageTags(rawPrompt, options = {}) {
             const tags = String(getAppearanceFn(name) || '').trim();
             if (tags) appearanceVarMap[name] = tags;
         }
+        for (const name of includeNames) {
+            const cleanName = String(name || '').trim();
+            if (!cleanName || appearanceVarMap[cleanName]) continue;
+            const tags = String(getAppearanceFn(cleanName) || '').trim();
+            if (tags) appearanceVarMap[cleanName] = tags;
+        }
     }
 
+    const resolvedRawPrompt = resolveAppearanceTagRefs(rawPrompt, appearanceVarMap);
+
     // ── Step 1: Match mentioned characters ──
-    const textLower = rawPrompt.toLowerCase();
+    const textLower = resolvedRawPrompt.toLowerCase();
     const matched = [];
     const matchedNamesLower = new Set();
 
@@ -362,7 +371,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
     // ── Step 2: Generate scene/situation tags via AI ──
     let sceneTags = '';
     try {
-        sceneTags = await generateDanbooruTags(rawPrompt, { characters: matched, appearanceVarMap });
+        sceneTags = await generateDanbooruTags(resolvedRawPrompt, { characters: matched, appearanceVarMap });
     } catch (err) {
         console.warn('[image-tag-generator] Scene tag generation failed:', err);
     }
@@ -379,11 +388,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
             .map(([name, tags]) => [(name || '').trim().toLowerCase(), (tags || '').trim()])
             .filter(([name, tags]) => name && tags),
     );
-    const appearanceTagRefRegex = /\{\{appearanceTag:\s*([^}]+?)\s*\}\}(?:['‘’]?s\s+description)?/gi;
-    const resolvedSceneTags = sceneTags.replace(appearanceTagRefRegex, (match, rawName) => {
-        const key = (rawName || '').trim().toLowerCase();
-        return appearanceLookup.get(key) || '';
-    });
+    const resolvedSceneTags = resolveAppearanceTagRefs(sceneTags, Object.fromEntries(appearanceLookup));
 
     // If AI output contains pipe-separated sections with resolved appearance tags,
     // split them out into appearance groups
@@ -456,4 +461,19 @@ function safeTags(tags) {
     const trimmed = tags.trim();
     if (containsKorean(trimmed)) return '';
     return trimmed;
+}
+
+function resolveAppearanceTagRefs(text, appearanceVarMap = {}) {
+    const source = String(text || '');
+    if (!source) return '';
+    const lookup = new Map(
+        Object.entries(appearanceVarMap || {})
+            .map(([name, tags]) => [(name || '').trim().toLowerCase(), (tags || '').trim()])
+            .filter(([name, tags]) => name && tags),
+    );
+    const appearanceTagRefRegex = /\{\{appearanceTag:\s*([^}]+?)\s*\}\}(?:\s*['‘’]?s\s+description)?/gi;
+    return source.replace(appearanceTagRefRegex, (match, rawName) => {
+        const key = (rawName || '').trim().toLowerCase();
+        return lookup.get(key) || '';
+    });
 }

@@ -444,7 +444,18 @@ function isModuleEnabled(moduleKey) {
  * ST-LifeSim 메뉴 버튼을 sendform의 전송 버튼(#send_but) 바로 앞에 삽입한다
  */
 function injectLifeSimMenuButton() {
-    if (document.getElementById('slm-menu-btn')) return;
+    const existingBtn = document.getElementById('slm-menu-btn');
+    const leftSendFormElement = document.getElementById('leftSendForm') || document.getElementById('leftsendform');
+    if (existingBtn) {
+        if (
+            leftSendFormElement
+            && existingBtn.parentElement === leftSendFormElement
+            && existingBtn !== leftSendFormElement.lastElementChild
+        ) {
+            leftSendFormElement.appendChild(existingBtn); // 항상 맨 오른쪽(마지막)으로 유지
+        }
+        return;
+    }
 
     const sendBtn = document.getElementById('send_but');
     if (!sendBtn) {
@@ -476,7 +487,6 @@ function injectLifeSimMenuButton() {
         }
     });
 
-    const leftSendFormElement = document.getElementById('leftSendForm');
     if (leftSendFormElement) {
         btn.style.marginLeft = 'auto';
         leftSendFormElement.appendChild(btn);
@@ -604,6 +614,7 @@ function refreshQuickAccessFab() {
 function injectRightSendFormIcons() {
     // 기존 삽입된 아이콘 제거
     document.querySelectorAll('.slm-rsf-icon').forEach(el => el.remove());
+    if (!isEnabled()) return;
 
     const settings = getSettings();
     const rsfItems = settings.quickAccess?.rightSendFormItems || {};
@@ -775,8 +786,11 @@ function openSettingsPanel(onBack) {
             saveSettings();
             if (!settings.enabled) {
                 clearContext();
+                document.querySelectorAll('.slm-rsf-icon').forEach(el => el.remove());
                 showToast('ST-LifeSim 비활성화됨', 'info');
             } else {
+                injectLifeSimMenuButton();
+                injectRightSendFormIcons();
                 showToast('ST-LifeSim 활성화됨', 'success');
             }
             syncQuickSendButtons();
