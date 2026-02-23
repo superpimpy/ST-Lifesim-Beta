@@ -247,8 +247,8 @@ function getSettings() {
     if (!ext[SETTINGS_KEY].characterAppearanceTags || typeof ext[SETTINGS_KEY].characterAppearanceTags !== 'object') {
         ext[SETTINGS_KEY].characterAppearanceTags = {};
     }
-    // 태그 가중치 (기본 5)
-    if (!Number.isFinite(ext[SETTINGS_KEY].tagWeight) || ext[SETTINGS_KEY].tagWeight < 1) {
+    // 태그 가중치 (기본 5, 0은 비활성화)
+    if (!Number.isFinite(ext[SETTINGS_KEY].tagWeight) || ext[SETTINGS_KEY].tagWeight < 0) {
         ext[SETTINGS_KEY].tagWeight = DEFAULT_SETTINGS.tagWeight;
     }
     if (!ext[SETTINGS_KEY].callAudio || typeof ext[SETTINGS_KEY].callAudio !== 'object') {
