@@ -2183,3 +2183,71 @@ body[data-theme="dark"],
     grid-template-columns: 1fr;
   }
 }
+
+/* ──────────────────────────────────────────
+   퀵 액세스 플로팅 버튼 (FAB) — 2단계 토글 구조
+────────────────────────────────────────── */
+.slm-qa-fab {
+  position: fixed;
+  bottom: 80px;
+  right: 16px;
+  z-index: 9998;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 8px;
+}
+.slm-qa-fab-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  background: var(--slm-accent, #007aff);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 12px rgba(0,0,0,.25);
+  transition: transform 0.2s, background 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.slm-qa-fab-btn:hover {
+  background: var(--slm-accent-hover, #005ecb);
+  transform: scale(1.08);
+}
+.slm-qa-fab-btn.slm-qa-fab-open {
+  transform: rotate(45deg);
+}
+.slm-qa-list {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 6px;
+  animation: slm-qa-slide-in 0.18s ease-out;
+}
+@keyframes slm-qa-slide-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.slm-qa-item {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--slm-border, #333);
+  background: var(--slm-bg, #1c1c1e);
+  color: var(--slm-text, #fff);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.18);
+  transition: transform 0.15s, box-shadow 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.slm-qa-item:hover {
+  transform: scale(1.12);
+  box-shadow: 0 3px 12px rgba(0,0,0,.28);
+}

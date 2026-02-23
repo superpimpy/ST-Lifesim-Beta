@@ -14,6 +14,7 @@ import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
 import { getContacts, getAppearanceTagsByName } from '../contacts/contacts.js';
+import { generateDanbooruTags, buildImageApiPrompt } from '../../utils/image-tag-generator.js';
 
 const MODULE_KEY = 'sns-feed';
 const AVATARS_KEY = 'sns-avatars';
@@ -502,21 +503,32 @@ export async function triggerNpcPosting() {
                     .replace(/\{\{user\}\}/g, freshCtx?.name1 || '{{user}}')
                     .replace(/\{userAppearanceTags\}/g, userAppearanceTags)
                 : basePrompt;
-            const descPrompt = appearanceTags ? `${resolvedImagePrompt}\nAppearance tags: ${appearanceTags}` : resolvedImagePrompt;
-
-            // 이미지 API를 사용하여 실제 이미지 생성 시도
+            // Danbooru 태그 생성 → Image API 전달 (한국어 직접 전달 금지)
+            // SNS 이미지 프롬프트(커스텀)를 태그 생성 컨텍스트로 함께 전달
+            let danbooruTags = '';
             try {
-                const generatedUrl = await generateImageViaApi(descPrompt);
-                if (generatedUrl) {
-                    finalImageUrl = generatedUrl;
+                danbooruTags = await generateDanbooruTags(resolvedImagePrompt, { customPrompt: promptSettings.snsImagePrompt || '' });
+            } catch (tagErr) {
+                console.warn('[ST-LifeSim] SNS Danbooru 태그 생성 실패:', tagErr);
+            }
+
+            if (danbooruTags) {
+                const finalApiPrompt = buildImageApiPrompt(danbooruTags, appearanceTags);
+                try {
+                    const generatedUrl = await generateImageViaApi(finalApiPrompt);
+                    if (generatedUrl) {
+                        finalImageUrl = generatedUrl;
+                    }
+                } catch (imgErr) {
+                    console.warn('[ST-LifeSim] SNS 이미지 생성 실패, 기본 이미지 사용:', imgErr);
                 }
-            } catch (imgErr) {
-                console.warn('[ST-LifeSim] SNS 이미지 생성 실패, 기본 이미지 사용:', imgErr);
+            } else {
+                console.warn('[ST-LifeSim] SNS 태그 생성 결과 없음, 이미지 생성 건너뜀');
             }
 
             // 이미지 설명 텍스트 생성
             if (typeof freshCtx.generateQuietPrompt === 'function' || typeof freshCtx.generateRaw === 'function') {
-                imageDescription = normalizeSnsText(await generateSnsText(freshCtx, enforceSnsLanguage(descPrompt, authorLanguage), `${pick.name}-image-desc`), SNS_IMAGE_DESC_MAX);
+                imageDescription = normalizeSnsText(await generateSnsText(freshCtx, enforceSnsLanguage(resolvedImagePrompt, authorLanguage), `${pick.name}-image-desc`), SNS_IMAGE_DESC_MAX);
             }
         }
         if (!imageDescription && inlineCaption) imageDescription = inlineCaption;
@@ -1378,26 +1390,63 @@ function openWritePostDialog(onSave) {
 
     const imgLabel = document.createElement('label');
     imgLabel.className = 'slm-label';
-    imgLabel.textContent = '이미지 URL (선택)';
+    imgLabel.textContent = '이미지';
+
+    // ── 이미지 소스 선택: 기본이미지 / URL 직접입력 / AI 생성 ──
+    const imgSourceRow = document.createElement('div');
+    imgSourceRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px';
 
     const useDefaultLabel = document.createElement('label');
     useDefaultLabel.className = 'slm-toggle-label';
-    useDefaultLabel.style.marginBottom = '4px';
-    const useDefaultCheck = document.createElement('input');
-    useDefaultCheck.type = 'checkbox';
-    useDefaultCheck.checked = true;
-    useDefaultLabel.appendChild(useDefaultCheck);
-    useDefaultLabel.appendChild(document.createTextNode(' 기본 이미지 사용'));
+    const useDefaultRadio = document.createElement('input');
+    useDefaultRadio.type = 'radio';
+    useDefaultRadio.name = 'slm-img-source';
+    useDefaultRadio.value = 'default';
+    useDefaultRadio.checked = true;
+    useDefaultLabel.appendChild(useDefaultRadio);
+    useDefaultLabel.appendChild(document.createTextNode(' 기본 이미지'));
+
+    const useUrlLabel = document.createElement('label');
+    useUrlLabel.className = 'slm-toggle-label';
+    const useUrlRadio = document.createElement('input');
+    useUrlRadio.type = 'radio';
+    useUrlRadio.name = 'slm-img-source';
+    useUrlRadio.value = 'url';
+    useUrlLabel.appendChild(useUrlRadio);
+    useUrlLabel.appendChild(document.createTextNode(' URL 직접입력'));
+
+    const useAiLabel = document.createElement('label');
+    useAiLabel.className = 'slm-toggle-label';
+    const useAiRadio = document.createElement('input');
+    useAiRadio.type = 'radio';
+    useAiRadio.name = 'slm-img-source';
+    useAiRadio.value = 'ai';
+    useAiLabel.appendChild(useAiRadio);
+    useAiLabel.appendChild(document.createTextNode(' 🎨 AI 이미지 생성'));
+
+    imgSourceRow.appendChild(useDefaultLabel);
+    imgSourceRow.appendChild(useUrlLabel);
+    imgSourceRow.appendChild(useAiLabel);
 
     const imgInput = document.createElement('input');
     imgInput.className = 'slm-input';
     imgInput.type = 'url';
     imgInput.placeholder = 'https://...';
-    imgInput.style.display = useDefaultCheck.checked ? 'none' : '';
+    imgInput.style.display = 'none';
 
-    useDefaultCheck.onchange = () => {
-        imgInput.style.display = useDefaultCheck.checked ? 'none' : '';
-    };
+    const aiImgDescInput = document.createElement('textarea');
+    aiImgDescInput.className = 'slm-textarea';
+    aiImgDescInput.rows = 2;
+    aiImgDescInput.placeholder = '생성할 이미지 설명 (예: 카페에서 셀카를 찍는 모습)';
+    aiImgDescInput.style.display = 'none';
+
+    function updateImgSourceVisibility() {
+        imgInput.style.display = useUrlRadio.checked ? '' : 'none';
+        aiImgDescInput.style.display = useAiRadio.checked ? '' : 'none';
+    }
+    useDefaultRadio.onchange = updateImgSourceVisibility;
+    useUrlRadio.onchange = updateImgSourceVisibility;
+    useAiRadio.onchange = updateImgSourceVisibility;
 
     const imgDescLabel = document.createElement('label');
     imgDescLabel.className = 'slm-label';
@@ -1411,8 +1460,9 @@ function openWritePostDialog(onSave) {
     wrapper.appendChild(contentLabel);
     wrapper.appendChild(contentInput);
     wrapper.appendChild(imgLabel);
-    wrapper.appendChild(useDefaultLabel);
+    wrapper.appendChild(imgSourceRow);
     wrapper.appendChild(imgInput);
+    wrapper.appendChild(aiImgDescInput);
     wrapper.appendChild(imgDescLabel);
     wrapper.appendChild(imgDescInput);
 
@@ -1447,9 +1497,59 @@ function openWritePostDialog(onSave) {
 
         const freshCtx = getContext();
         const authorName = freshCtx?.name1 || 'user';
-        const finalImageUrl = useDefaultCheck.checked
-            ? (getAuthorDefaultImageUrl(authorName) || '')
-            : imgInput.value.trim();
+        const promptSettings = getSnsPromptSettings();
+        let finalImageUrl = '';
+        let imageDescription = imgDescInput.value.trim();
+        let resolvedImagePrompt = '';
+
+        if (useDefaultRadio.checked) {
+            finalImageUrl = getAuthorDefaultImageUrl(authorName) || '';
+        } else if (useUrlRadio.checked) {
+            finalImageUrl = imgInput.value.trim();
+        } else if (useAiRadio.checked) {
+            // AI 이미지 생성 (NPC 게시글과 동일한 파이프라인)
+            const userImageDesc = aiImgDescInput.value.trim() || text;
+            const userTags = getAppearanceTagsByName(authorName) || getAppearanceTagsByName('{{user}}') || '';
+            const appearanceTags = userTags || String(promptSettings.characterAppearanceTags?.['{{user}}'] || '').trim();
+            const fallbackImageUrl = getAuthorDefaultImageUrl(authorName) || '';
+
+            resolvedImagePrompt = promptSettings.snsImagePrompt
+                ? promptSettings.snsImagePrompt
+                    .replace(/\{authorName\}/g, authorName)
+                    .replace(/\{postContent\}/g, userImageDesc)
+                    .replace(/\{appearanceTags\}/g, appearanceTags)
+                    .replace(/\{\{user\}\}/g, authorName)
+                    .replace(/\{userAppearanceTags\}/g, appearanceTags)
+                : `Create a photorealistic image for ${authorName}'s SNS post. Appearance: ${appearanceTags}. Post: "${userImageDesc}". Style: casual daily-life smartphone photo.`;
+
+            showToast('🎨 이미지 생성 중...', 'info', 3000);
+            postBtn.disabled = true;
+
+            try {
+                let danbooruTags = '';
+                try {
+                    danbooruTags = await generateDanbooruTags(resolvedImagePrompt, { customPrompt: promptSettings.snsImagePrompt || '' });
+                } catch (tagErr) {
+                    console.warn('[ST-LifeSim] 유저 SNS Danbooru 태그 생성 실패:', tagErr);
+                }
+
+                if (danbooruTags) {
+                    const finalApiPrompt = buildImageApiPrompt(danbooruTags, appearanceTags);
+                    const generatedUrl = await generateImageViaApi(finalApiPrompt);
+                    finalImageUrl = generatedUrl || fallbackImageUrl;
+                    if (!generatedUrl) showToast('이미지 생성 결과가 없습니다. 기본 이미지를 사용합니다.', 'warn', 2500);
+                } else {
+                    showToast('태그 변환 실패. 기본 이미지를 사용합니다.', 'warn', 2500);
+                    finalImageUrl = fallbackImageUrl;
+                }
+            } catch (imgErr) {
+                console.warn('[ST-LifeSim] 유저 SNS 이미지 생성 실패:', imgErr);
+                showToast('이미지 생성 실패. 기본 이미지를 사용합니다.', 'warn', 2500);
+                finalImageUrl = fallbackImageUrl;
+            } finally {
+                postBtn.disabled = false;
+            }
+        }
 
         const feed = loadFeed();
         feed.push({
@@ -1459,7 +1559,8 @@ function openWritePostDialog(onSave) {
             date: new Date().toISOString(),
             content: text,
             imageUrl: finalImageUrl,
-            imageDescription: imgDescInput.value.trim(),
+            imageDescription,
+            imagePrompt: resolvedImagePrompt,
             likes: 0,
             likedByUser: false,
             comments: [],

@@ -14,6 +14,7 @@ import { slashSend, slashGen, slashSendAs } from '../../utils/slash.js';
 import { showToast, escapeHtml, generateId } from '../../utils/ui.js';
 import { loadData, saveData, getExtensionSettings } from '../../utils/storage.js';
 import { getAppearanceTagsByName } from '../contacts/contacts.js';
+import { generateDanbooruTags, buildImageApiPrompt } from '../../utils/image-tag-generator.js';
 
 // 사건 기록 아카이브 저장 키
 const ARCHIVE_KEY = 'event-archive';
@@ -598,6 +599,7 @@ export function renderVoiceMemoUI() {
 
 /**
  * 유저가 이미지를 생성하여 전송한다 (이미지 생성 API 호출)
+ * Danbooru 태그 변환 단계를 거친 후 Image API에 전달한다.
  * @param {string} prompt - 이미지 생성 프롬프트
  * @returns {Promise<string>} 생성된 이미지 URL 또는 빈 문자열
  */
@@ -611,10 +613,20 @@ async function generateUserImage(prompt) {
         }
         const userName = ctx?.name1 || '';
         const userAppearanceTags = getAppearanceTagsByName(userName) || getAppearanceTagsByName('{{user}}') || getExtensionSettings()?.['st-lifesim']?.characterAppearanceTags?.['{{user}}'] || '';
-        const finalPrompt = userAppearanceTags ? `${prompt.trim()}, ${String(userAppearanceTags).trim()}` : prompt.trim();
+
+        // STEP 1-2: Danbooru 태그 생성 (한국어 → 영어 태그 변환)
+        const danbooruTags = await generateDanbooruTags(prompt.trim());
+        if (!danbooruTags) {
+            console.warn('[ST-LifeSim] 유저 이미지 Danbooru 태그 생성 실패, 이미지 생성 건너뜀');
+            showToast('이미지 태그 변환 실패: 이미지 생성을 건너뜁니다', 'warn', 2500);
+            return '';
+        }
+
+        // STEP 3: 생성된 태그 + 외모 태그 조합
+        const finalPrompt = buildImageApiPrompt(danbooruTags, String(userAppearanceTags).trim());
+
         if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
             const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true ${finalPrompt}`, { showOutput: false });
-            // result.pipe: 신규 SillyTavern API 반환값, result: 구버전 폴백
             const resultStr = String(result?.pipe || result || '').trim();
             if (resultStr && (resultStr.startsWith('http') || resultStr.startsWith('/') || resultStr.startsWith('data:'))) {
                 return resultStr;
