@@ -755,3 +755,53 @@ export function getAppearanceTagsByName(name) {
     const contact = allContacts.find(c => c.name === name || c.displayName === name);
     return String(contact?.appearanceTags || '').trim();
 }
+
+function isAsciiToken(name) {
+    return /^[a-z0-9_]+$/i.test(name);
+}
+
+function isNameMentioned(textLower, name) {
+    const normalized = String(name || '').trim().toLowerCase();
+    if (!normalized) return false;
+    if (isAsciiToken(normalized)) {
+        const re = new RegExp(`(^|[^a-z0-9_])${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9_]|$)`, 'i');
+        return re.test(textLower);
+    }
+    return textLower.includes(normalized);
+}
+
+/**
+ * 프롬프트에서 언급된 연락처 이름을 추적하여 외관 태그 목록을 반환한다.
+ * @param {string} text
+ * @param {{ includeNames?: string[] }} [options]
+ * @returns {string[]}
+ */
+export function collectAppearanceTagsFromText(text, options = {}) {
+    const allContacts = [...loadContacts('character'), ...loadContacts('chat')];
+    const mentionSource = String(text || '').toLowerCase();
+    const includeNames = Array.isArray(options.includeNames) ? options.includeNames : [];
+    const tags = [];
+    const seen = new Set();
+
+    const pushTag = (tag) => {
+        const clean = String(tag || '').trim();
+        if (!clean || seen.has(clean)) return;
+        seen.add(clean);
+        tags.push(clean);
+    };
+
+    includeNames.forEach((name) => pushTag(getAppearanceTagsByName(name)));
+
+    allContacts.forEach((contact) => {
+        const appearanceTags = String(contact?.appearanceTags || '').trim();
+        if (!appearanceTags) return;
+        const namesToCheck = [contact?.name, contact?.displayName]
+            .map(v => String(v || '').trim())
+            .filter(Boolean);
+        if (namesToCheck.some((name) => isNameMentioned(mentionSource, name))) {
+            pushTag(appearanceTags);
+        }
+    });
+
+    return tags;
+}

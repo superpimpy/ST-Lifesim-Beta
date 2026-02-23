@@ -13,7 +13,7 @@ import { loadData, saveData, getDefaultBinding, getExtensionSettings } from '../
 import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
-import { getContacts, getAppearanceTagsByName } from '../contacts/contacts.js';
+import { getContacts, getAppearanceTagsByName, collectAppearanceTagsFromText } from '../contacts/contacts.js';
 import { generateDanbooruTags, buildImageApiPrompt } from '../../utils/image-tag-generator.js';
 
 const MODULE_KEY = 'sns-feed';
@@ -24,6 +24,7 @@ const AUTHOR_DEFAULT_IMAGE_KEY = 'sns-author-default-images'; // { authorName: i
 const IMAGE_PRESETS_KEY = 'sns-image-presets'; // {id,name,url}[]
 const POSTING_ENABLED_KEY = 'sns-posting-enabled'; // { authorName: boolean }
 const AUTHOR_LANGUAGE_KEY = 'sns-author-languages'; // { authorName: ko|en|ja|zh }
+const AUTHOR_MIN_LIKES_KEY = 'sns-author-min-likes'; // { authorName: number }
 const SNS_REPLY_PROBABILITY = 0.7;
 const SNS_EXTRA_COMMENT_PROBABILITY = 0.35;
 const SNS_POST_TEXT_MAX = 280;
@@ -133,6 +134,20 @@ function loadPostingEnabledMap() {
 
 function savePostingEnabledMap(map) {
     saveData(POSTING_ENABLED_KEY, map, getDefaultBinding());
+}
+
+function loadAuthorMinLikesMap() {
+    return loadData(AUTHOR_MIN_LIKES_KEY, {}, getDefaultBinding());
+}
+
+function saveAuthorMinLikesMap(map) {
+    saveData(AUTHOR_MIN_LIKES_KEY, map, getDefaultBinding());
+}
+
+function getInitialLikes(authorName, fallback = 0) {
+    const minLikes = Math.max(0, parseInt(loadAuthorMinLikesMap()?.[authorName], 10) || 0);
+    if (minLikes <= 0) return Math.max(0, fallback);
+    return minLikes + 1 + Math.floor(Math.random() * 30);
 }
 
 /**
@@ -356,6 +371,17 @@ function getBuiltinUserAvatarUrl() {
     return '/img/user-default.png';
 }
 
+function getBuiltinCharAvatarUrl() {
+    const ctx = getContext();
+    const char = (typeof ctx?.characterId === 'number' && Array.isArray(ctx?.characters))
+        ? ctx.characters[ctx.characterId]
+        : null;
+    const fromData = String(char?.avatar || '').trim();
+    if (fromData) return fromData;
+    const fromDom = document.querySelector('#avatar_load_preview img, #avatar_div img, .mesAvatar img')?.getAttribute('src');
+    return fromDom || '';
+}
+
 /**
  * 저자 이름에 대한 아바타 URL을 해결한다 (연락처 연동 고려)
  * @param {string} authorName
@@ -364,6 +390,11 @@ function getBuiltinUserAvatarUrl() {
  */
 function resolveAvatar(authorName, avatars) {
     if (avatars[authorName]) return avatars[authorName];
+    const ctx = getContext();
+    const userName = ctx?.name1 || 'user';
+    const charName = ctx?.name2 || '';
+    if (authorName === userName) return getBuiltinUserAvatarUrl();
+    if (charName && authorName === charName) return getBuiltinCharAvatarUrl();
     if (loadContactLink()) {
         const contacts = getContacts('chat');
         const contact = contacts.find(c => c.name === authorName);
@@ -486,7 +517,12 @@ export async function triggerNpcPosting() {
         // 캐릭터별 기본 이미지가 있으면 우선 사용하고, 없을 때만 프리셋으로 보완한다.
         let finalImageUrl = defaultImg || presetImg;
         let imageDescription = '';
-        const appearanceTags = getAppearanceTagsByName(pick.name) || String(promptSettings.characterAppearanceTags?.[pick.name] || '').trim();
+        const appearanceTagGroups = collectAppearanceTagsFromText(postContent, { includeNames: [pick.name] });
+        if (appearanceTagGroups.length === 0) {
+            const fallbackTags = getAppearanceTagsByName(pick.name) || String(promptSettings.characterAppearanceTags?.[pick.name] || '').trim();
+            if (fallbackTags) appearanceTagGroups.push(fallbackTags);
+        }
+        const appearanceTags = appearanceTagGroups.join(' | ');
         const userName = freshCtx?.name1 || '{{user}}';
         const userAppearanceTags = getAppearanceTagsByName(userName) || String(promptSettings.characterAppearanceTags?.['{{user}}'] || '').trim();
         let resolvedImagePrompt = '';
@@ -513,22 +549,18 @@ export async function triggerNpcPosting() {
             }
 
             if (danbooruTags) {
-                const finalApiPrompt = buildImageApiPrompt(danbooruTags, appearanceTags);
+                const finalApiPrompt = buildImageApiPrompt(danbooruTags, appearanceTagGroups);
                 try {
                     const generatedUrl = await generateImageViaApi(finalApiPrompt);
                     if (generatedUrl) {
                         finalImageUrl = generatedUrl;
+                        imageDescription = '';
                     }
                 } catch (imgErr) {
                     console.warn('[ST-LifeSim] SNS 이미지 생성 실패, 기본 이미지 사용:', imgErr);
                 }
             } else {
                 console.warn('[ST-LifeSim] SNS 태그 생성 결과 없음, 이미지 생성 건너뜀');
-            }
-
-            // 이미지 설명 텍스트 생성
-            if (typeof freshCtx.generateQuietPrompt === 'function' || typeof freshCtx.generateRaw === 'function') {
-                imageDescription = normalizeSnsText(await generateSnsText(freshCtx, enforceSnsLanguage(resolvedImagePrompt, authorLanguage), `${pick.name}-image-desc`), SNS_IMAGE_DESC_MAX);
             }
         }
         if (!imageDescription && inlineCaption) imageDescription = inlineCaption;
@@ -543,7 +575,7 @@ export async function triggerNpcPosting() {
             imageUrl: finalImageUrl,
             imageDescription,
             imagePrompt: resolvedImagePrompt,
-            likes: Math.floor(Math.random() * 30),
+            likes: getInitialLikes(pick.name, Math.floor(Math.random() * 30)),
             likedByUser: false,
             comments: [],
             isStory: false,
@@ -1509,8 +1541,12 @@ function openWritePostDialog(onSave) {
         } else if (useAiRadio.checked) {
             // AI 이미지 생성 (NPC 게시글과 동일한 파이프라인)
             const userImageDesc = aiImgDescInput.value.trim() || text;
-            const userTags = getAppearanceTagsByName(authorName) || getAppearanceTagsByName('{{user}}') || '';
-            const appearanceTags = userTags || String(promptSettings.characterAppearanceTags?.['{{user}}'] || '').trim();
+            const appearanceTagGroups = collectAppearanceTagsFromText(userImageDesc, { includeNames: [authorName, '{{user}}'] });
+            if (appearanceTagGroups.length === 0) {
+                const fallbackTags = getAppearanceTagsByName(authorName) || getAppearanceTagsByName('{{user}}') || String(promptSettings.characterAppearanceTags?.['{{user}}'] || '').trim();
+                if (fallbackTags) appearanceTagGroups.push(fallbackTags);
+            }
+            const appearanceTags = appearanceTagGroups.join(' | ');
             const fallbackImageUrl = getAuthorDefaultImageUrl(authorName) || '';
 
             resolvedImagePrompt = promptSettings.snsImagePrompt
@@ -1534,9 +1570,10 @@ function openWritePostDialog(onSave) {
                 }
 
                 if (danbooruTags) {
-                    const finalApiPrompt = buildImageApiPrompt(danbooruTags, appearanceTags);
+                    const finalApiPrompt = buildImageApiPrompt(danbooruTags, appearanceTagGroups);
                     const generatedUrl = await generateImageViaApi(finalApiPrompt);
                     finalImageUrl = generatedUrl || fallbackImageUrl;
+                    if (generatedUrl) imageDescription = '';
                     if (!generatedUrl) showToast('이미지 생성 결과가 없습니다. 기본 이미지를 사용합니다.', 'warn', 2500);
                 } else {
                     showToast('태그 변환 실패. 기본 이미지를 사용합니다.', 'warn', 2500);
@@ -1561,7 +1598,7 @@ function openWritePostDialog(onSave) {
             imageUrl: finalImageUrl,
             imageDescription,
             imagePrompt: resolvedImagePrompt,
-            likes: 0,
+            likes: getInitialLikes(authorName, 0),
             likedByUser: false,
             comments: [],
             isStory: false,
@@ -1739,9 +1776,14 @@ function openAvatarSettingsDialog(onUpdate) {
     const defaultImages = loadAuthorDefaultImages();
     const postingEnabled = loadPostingEnabledMap();
     const authorLanguages = loadAuthorLanguages();
+    const authorMinLikes = loadAuthorMinLikesMap();
     const contacts = getContacts('chat');
     const userName = getContext()?.name1 || 'user';
-    const allProfiles = [{ name: userName, avatar: avatars[userName] || getBuiltinUserAvatarUrl(), personality: 'user' }, ...contacts]
+    const charName = getContext()?.name2 || '';
+    const charProfile = charName
+        ? [{ name: charName, avatar: avatars[charName] || getBuiltinCharAvatarUrl(), personality: 'char' }]
+        : [];
+    const allProfiles = [{ name: userName, avatar: avatars[userName] || getBuiltinUserAvatarUrl(), personality: 'user' }, ...charProfile, ...contacts]
         .filter((c, i, arr) => arr.findIndex(x => x.name === c.name) === i);
 
     allProfiles.forEach(c => {
@@ -1749,11 +1791,13 @@ function openAvatarSettingsDialog(onUpdate) {
         if (c.avatar && !avatars[c.name]) avatars[c.name] = c.avatar;
         if (c.name !== userName && postingEnabled[c.name] == null) postingEnabled[c.name] = true;
         if (!['ko', 'en', 'ja', 'zh'].includes(authorLanguages[c.name])) authorLanguages[c.name] = 'ko';
+        if (authorMinLikes[c.name] == null || Number.isNaN(Number(authorMinLikes[c.name]))) authorMinLikes[c.name] = 0;
     });
     saveUserIds(userIds);
     saveAvatars(avatars);
     savePostingEnabledMap(postingEnabled);
     saveAuthorLanguages(authorLanguages);
+    saveAuthorMinLikesMap(authorMinLikes);
 
     const contactList = document.createElement('div');
     contactList.className = 'slm-form';
@@ -1853,12 +1897,26 @@ function openAvatarSettingsDialog(onUpdate) {
                 saveAuthorLanguages(authorLanguages);
             };
 
+            const minLikesInput = document.createElement('input');
+            minLikesInput.className = 'slm-input';
+            minLikesInput.type = 'number';
+            minLikesInput.min = '0';
+            minLikesInput.max = '1000000';
+            minLikesInput.value = String(Math.max(0, parseInt(authorMinLikes[c.name], 10) || 0));
+            minLikesInput.onchange = () => {
+                authorMinLikes[c.name] = Math.max(0, parseInt(minLikesInput.value, 10) || 0);
+                minLikesInput.value = String(authorMinLikes[c.name]);
+                saveAuthorMinLikesMap(authorMinLikes);
+            };
+
             item.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '아이디(@핸들)' }));
             item.appendChild(handleInput);
             item.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '프로필 이미지 URL' }));
             item.appendChild(avatarInput);
             item.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '게시글/댓글 출력 언어' }));
             item.appendChild(languageSelect);
+            item.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '최소 좋아요 수' }));
+            item.appendChild(minLikesInput);
             item.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '게시글 기본 이미지 프리셋' }));
             item.appendChild(presetSelect);
             if (c.name !== userName) item.appendChild(postToggle);

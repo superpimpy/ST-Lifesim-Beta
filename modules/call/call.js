@@ -993,6 +993,16 @@ function buildCallDecisionPrompt({ charName, userName, isMainChar, matchedContac
     return `${charName} is NOT {{char}}. ${charName} is a contact of {{user}}.${personality}${relation} Decide if ${charName} accepts the incoming call from ${userName}. If ${activeChar} is mentioned, refer to ${activeChar} indirectly. Reply with only one word: "ACCEPT" or "REJECT".`;
 }
 
+export async function requestActiveCharacterCall() {
+    const ctx = getContext();
+    const charName = String(ctx?.name2 || '').trim();
+    if (!charName) {
+        showToast('통화할 캐릭터를 찾을 수 없습니다.', 'warn', 1800);
+        return;
+    }
+    await initiateCallWithAiDecision(charName);
+}
+
 
 export function openCallLogsPopup(onBack) {
     const content = buildCallLogsContent();
