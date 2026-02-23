@@ -114,8 +114,10 @@ export async function generateDanbooruTags(rawPrompt, options) {
                 chatSettings.chat_completion_source = aiRoute.chatSource;
             }
             if (chatSettings) {
-                modelKey = aiRoute.modelSettingKey || MODEL_KEY_BY_SOURCE[aiRoute.chatSource || sourceBefore] || '';
-                if (modelKey && typeof aiRoute.model === 'string' && aiRoute.model.length > 0) {
+                const effectiveSource = aiRoute.chatSource || sourceBefore;
+                modelKey = aiRoute.modelSettingKey || MODEL_KEY_BY_SOURCE[effectiveSource] || '';
+                const hasModelOverride = modelKey && typeof aiRoute.model === 'string' && aiRoute.model.length > 0;
+                if (hasModelOverride) {
                     modelBefore = chatSettings[modelKey];
                     chatSettings[modelKey] = aiRoute.model;
                 }
@@ -133,7 +135,8 @@ export async function generateDanbooruTags(rawPrompt, options) {
                 if (chatSettings && aiRoute.chatSource) {
                     chatSettings.chat_completion_source = sourceBefore;
                 }
-                if (chatSettings && modelKey && typeof aiRoute.model === 'string' && aiRoute.model.length > 0) {
+                const hasModelOverride = modelKey && typeof aiRoute.model === 'string' && aiRoute.model.length > 0;
+                if (chatSettings && hasModelOverride) {
                     chatSettings[modelKey] = modelBefore;
                 }
             }

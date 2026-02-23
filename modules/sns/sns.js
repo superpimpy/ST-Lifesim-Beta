@@ -1508,17 +1508,19 @@ function openWritePostDialog(onSave) {
             finalImageUrl = imgInput.value.trim();
         } else if (useAiRadio.checked) {
             // AI 이미지 생성 (NPC 게시글과 동일한 파이프라인)
-            const aiDesc = aiImgDescInput.value.trim() || text;
-            const appearanceTags = getAppearanceTagsByName(authorName) || getAppearanceTagsByName('{{user}}') || String(promptSettings.characterAppearanceTags?.['{{user}}'] || '').trim();
+            const userImageDesc = aiImgDescInput.value.trim() || text;
+            const userTags = getAppearanceTagsByName(authorName) || getAppearanceTagsByName('{{user}}') || '';
+            const appearanceTags = userTags || String(promptSettings.characterAppearanceTags?.['{{user}}'] || '').trim();
+            const fallbackImageUrl = getAuthorDefaultImageUrl(authorName) || '';
 
             resolvedImagePrompt = promptSettings.snsImagePrompt
                 ? promptSettings.snsImagePrompt
                     .replace(/\{authorName\}/g, authorName)
-                    .replace(/\{postContent\}/g, aiDesc)
+                    .replace(/\{postContent\}/g, userImageDesc)
                     .replace(/\{appearanceTags\}/g, appearanceTags)
                     .replace(/\{\{user\}\}/g, authorName)
                     .replace(/\{userAppearanceTags\}/g, appearanceTags)
-                : `Create a photorealistic image for ${authorName}'s SNS post. Appearance: ${appearanceTags}. Post: "${aiDesc}". Style: casual daily-life smartphone photo.`;
+                : `Create a photorealistic image for ${authorName}'s SNS post. Appearance: ${appearanceTags}. Post: "${userImageDesc}". Style: casual daily-life smartphone photo.`;
 
             showToast('🎨 이미지 생성 중...', 'info', 3000);
             postBtn.disabled = true;
@@ -1534,20 +1536,16 @@ function openWritePostDialog(onSave) {
                 if (danbooruTags) {
                     const finalApiPrompt = buildImageApiPrompt(danbooruTags, appearanceTags);
                     const generatedUrl = await generateImageViaApi(finalApiPrompt);
-                    if (generatedUrl) {
-                        finalImageUrl = generatedUrl;
-                    } else {
-                        showToast('이미지 생성 결과가 없습니다. 기본 이미지를 사용합니다.', 'warn', 2500);
-                        finalImageUrl = getAuthorDefaultImageUrl(authorName) || '';
-                    }
+                    finalImageUrl = generatedUrl || fallbackImageUrl;
+                    if (!generatedUrl) showToast('이미지 생성 결과가 없습니다. 기본 이미지를 사용합니다.', 'warn', 2500);
                 } else {
                     showToast('태그 변환 실패. 기본 이미지를 사용합니다.', 'warn', 2500);
-                    finalImageUrl = getAuthorDefaultImageUrl(authorName) || '';
+                    finalImageUrl = fallbackImageUrl;
                 }
             } catch (imgErr) {
                 console.warn('[ST-LifeSim] 유저 SNS 이미지 생성 실패:', imgErr);
                 showToast('이미지 생성 실패. 기본 이미지를 사용합니다.', 'warn', 2500);
-                finalImageUrl = getAuthorDefaultImageUrl(authorName) || '';
+                finalImageUrl = fallbackImageUrl;
             } finally {
                 postBtn.disabled = false;
             }
