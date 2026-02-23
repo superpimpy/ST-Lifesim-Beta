@@ -476,9 +476,9 @@ function injectLifeSimMenuButton() {
         }
     });
 
-    const leftSendForm = document.getElementById('leftSendForm');
-    if (leftSendForm) {
-        leftSendForm.appendChild(btn);
+    const leftSendFormElement = document.getElementById('leftSendForm');
+    if (leftSendFormElement) {
+        leftSendFormElement.appendChild(btn);
     } else {
         sendBtn.parentNode.insertBefore(btn, sendBtn);
     }
