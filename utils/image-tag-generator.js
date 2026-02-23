@@ -52,19 +52,16 @@ const TAG_CONVERSION_PROMPT = [
 /**
  * Build the tag generation prompt that includes character context.
  * The AI is instructed to output ONLY scene/situation tags;
- * character appearance tags are appended programmatically by the caller
- * in the format: [name - appearance tags]
+ * character appearance tags are appended programmatically by the caller.
+ * Profile descriptions are NOT sent — only appearance tags are provided as reference.
  *
- * @param {Array<{name: string, description?: string, appearanceTags?: string}>} characters
+ * @param {Array<{name: string, appearanceTags?: string}>} characters
  * @param {{ [name: string]: string }} [appearanceVarMap] - (unused, kept for API compat)
  * @returns {string}
  */
 function buildCharacterAwarePrompt(characters, appearanceVarMap) {
     const charList = characters.length > 0
-        ? characters.map(c => {
-            const desc = c.description ? ` (${c.description})` : '';
-            return `  - ${c.name}${desc}`;
-        }).join('\n')
+        ? characters.map(c => `  - ${c.name}`).join('\n')
         : '  (none)';
 
     // Provide character appearance as READ-ONLY reference so the AI can compose
@@ -242,21 +239,26 @@ export async function generateDanbooruTags(rawPrompt, options) {
 /**
  * Build the final Image API prompt by combining Danbooru tags with appearance tags.
  * Korean text is never included.
- * Format: scene tags, [name1 - appearance1], [name2 - appearance2], ...
+ * Format: scene tags, weight::(name1 - appearance1)::, weight::(name2 - appearance2)::, ...
  *
  * @param {string} danbooruTags - Generated English Danbooru tags
  * @param {string|string[]} appearanceTags - Character appearance groups (already formatted as "name - tags")
+ * @param {Object} [options]
+ * @param {number} [options.tagWeight] - Weight multiplier for appearance tags (e.g. 5 → "5::(tags)::")
  * @returns {string} Final prompt for Image API
  */
-export function buildImageApiPrompt(danbooruTags, appearanceTags) {
+export function buildImageApiPrompt(danbooruTags, appearanceTags, options) {
     const cleanDanbooru = safeTags(danbooruTags);
+    const tagWeight = Number(options?.tagWeight) || 0;
 
     const appearanceGroups = Array.isArray(appearanceTags)
         ? appearanceTags.map(safeTags).filter(Boolean)
         : [safeTags(appearanceTags)].filter(Boolean);
 
-    // Wrap each appearance group in square brackets
-    const wrappedAppearance = appearanceGroups.map(a => `[${a}]`);
+    // Wrap each appearance group with weight syntax if tagWeight > 0
+    const wrappedAppearance = appearanceGroups.map(a =>
+        tagWeight > 0 ? `${tagWeight}::(${a})::` : `[${a}]`,
+    );
 
     if (!cleanDanbooru && wrappedAppearance.length === 0) return '';
     if (!cleanDanbooru) return wrappedAppearance.join(', ');
@@ -272,18 +274,22 @@ export function buildImageApiPrompt(danbooruTags, appearanceTags) {
  *
  * Pipeline:
  *  1. Load all contacts (names, descriptions, appearance tags)
- *  2. Match characters mentioned in the input prompt
+ *  2. Match characters mentioned in the input prompt (name/displayName/subName)
  *  3. Generate scene/situation Danbooru tags via AI (with character context)
- *  4. Combine: scene tags, [name1 - appearance1], [name2 - appearance2], ...
+ *  4. Combine: scene tags, weight::(name1 - appearance1)::, weight::(name2 - appearance2)::
+ *
+ * Only characters whose names (including subName) are detected in the input/context
+ * will have their appearance tags included. Characters not mentioned are excluded.
  *
  * Final output can be wrapped by optional user-defined template.
  *
  * @param {string} rawPrompt - Raw image description / prompt
  * @param {Object} options
- * @param {string[]} [options.includeNames] - Force-include these character names
- * @param {Array<{name: string, displayName?: string, description?: string, appearanceTags?: string}>} [options.contacts] - All available contacts
+ * @param {string[]} [options.includeNames] - Hint names to check for mention (still requires detection in prompt)
+ * @param {Array<{name: string, displayName?: string, subName?: string, description?: string, appearanceTags?: string}>} [options.contacts] - All available contacts
  * @param {(name: string) => string} [options.getAppearanceTagsByName] - Lookup function for appearance tags
  * @param {{ [name: string]: string }} [options.appearanceVarMap] - Pre-built appearance tag variable map
+ * @param {number} [options.tagWeight] - Weight multiplier for appearance tags (e.g. 5 → "5::(tags)::")
  * @returns {Promise<{sceneTags: string, appearanceGroups: string[], finalPrompt: string}>}
  */
 export async function generateImageTags(rawPrompt, options = {}) {
@@ -297,6 +303,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
         ? options.getAppearanceTagsByName
         : () => '';
     const includeNames = Array.isArray(options.includeNames) ? options.includeNames : [];
+    const tagWeight = Number(options.tagWeight) || 0;
 
     // Build appearance variable map from all contacts for the prompt
     const appearanceVarMap = options.appearanceVarMap || {};
@@ -318,25 +325,43 @@ export async function generateImageTags(rawPrompt, options = {}) {
     const resolvedRawPrompt = resolveAppearanceTagRefs(rawPrompt, appearanceVarMap);
 
     // ── Step 1: Match mentioned characters ──
+    // Only include characters whose name, displayName, or subName is detected in the input.
+    // includeNames are also checked for mention — they are NOT blindly force-included.
     const textLower = resolvedRawPrompt.toLowerCase();
     const matched = [];
     const matchedNamesLower = new Set();
 
-    // Force-include specified names first
+    /** Check if a name is mentioned in the prompt text */
+    function isNameMentioned(name) {
+        if (!name) return false;
+        const norm = name.toLowerCase();
+        if (/^[a-z0-9_]+$/i.test(norm)) {
+            const re = new RegExp(`(^|[^a-z0-9_])${norm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9_]|$)`, 'i');
+            return re.test(textLower);
+        }
+        return textLower.includes(norm);
+    }
+
+    // Check includeNames — only include if actually mentioned in prompt
     for (const name of includeNames) {
         if (!name) continue;
         const normalized = String(name).trim().toLowerCase();
         if (matchedNamesLower.has(normalized)) continue;
-        matchedNamesLower.add(normalized);
         const contact = allContacts.find(c =>
             String(c.name || '').trim().toLowerCase() === normalized
             || String(c.displayName || '').trim().toLowerCase() === normalized
             || String(c.subName || '').trim().toLowerCase() === normalized
         );
+        // Check if any of the contact's names (name, displayName, subName) are mentioned
+        const namesToCheck = contact
+            ? [contact.name, contact.displayName, contact.subName, name].map(v => String(v || '').trim()).filter(Boolean)
+            : [String(name).trim()];
+        const mentioned = namesToCheck.some(n => isNameMentioned(n));
+        if (!mentioned) continue;
+        matchedNamesLower.add(normalized);
         const appearance = getAppearanceFn(name);
         matched.push({
             name: String(name).trim(),
-            description: String(contact?.description || '').trim(),
             appearanceTags: String(appearance || '').trim(),
         });
     }
@@ -347,20 +372,12 @@ export async function generateImageTags(rawPrompt, options = {}) {
             .map(v => String(v || '').trim())
             .filter(Boolean);
         if (names.some(n => matchedNamesLower.has(n.toLowerCase()))) continue;
-        const mentioned = names.some(n => {
-            const norm = n.toLowerCase();
-            if (/^[a-z0-9_]+$/i.test(norm)) {
-                const re = new RegExp(`(^|[^a-z0-9_])${norm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9_]|$)`, 'i');
-                return re.test(textLower);
-            }
-            return textLower.includes(norm);
-        });
+        const mentioned = names.some(n => isNameMentioned(n));
         if (mentioned) {
             const contactName = String(contact?.name || contact?.displayName || '').trim();
             matchedNamesLower.add(contactName.toLowerCase());
             matched.push({
                 name: contactName,
-                description: String(contact?.description || '').trim(),
                 appearanceTags: String(getAppearanceFn(contactName) || '').trim(),
             });
         }
@@ -385,7 +402,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
             })
             .filter(Boolean);
         if (fallbackAppearance.length > 0) {
-            const fallbackPrompt = buildImageApiPrompt('', fallbackAppearance);
+            const fallbackPrompt = buildImageApiPrompt('', fallbackAppearance, { tagWeight });
             return { sceneTags: '', appearanceGroups: fallbackAppearance, finalPrompt: fallbackPrompt };
         }
         return emptyResult;
@@ -412,8 +429,8 @@ export async function generateImageTags(rawPrompt, options = {}) {
         .filter(Boolean);
 
     // ── Step 4: Build final prompt ──
-    // Result: "scene tags, [name1 - appearance1], [name2 - appearance2]"
-    const finalPrompt = buildImageApiPrompt(cleanedSceneTags, appearanceGroups);
+    // Result: "scene tags, weight::(name1 - appearance1)::, weight::(name2 - appearance2)::"
+    const finalPrompt = buildImageApiPrompt(cleanedSceneTags, appearanceGroups, { tagWeight });
 
     return { sceneTags: cleanedSceneTags, appearanceGroups, finalPrompt };
 }
