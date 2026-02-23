@@ -152,6 +152,7 @@ const DEFAULT_SETTINGS = {
         snsTranslation: { ...AI_ROUTE_DEFAULTS },
         callSummary: { ...AI_ROUTE_DEFAULTS },
         contactProfile: { ...AI_ROUTE_DEFAULTS },
+        tagGeneration: { ...AI_ROUTE_DEFAULTS },
     },
     quickAccess: {
         enabled: true,
@@ -297,9 +298,10 @@ function getSettings() {
             snsTranslation: { ...AI_ROUTE_DEFAULTS },
             callSummary: { ...AI_ROUTE_DEFAULTS },
             contactProfile: { ...AI_ROUTE_DEFAULTS },
+            tagGeneration: { ...AI_ROUTE_DEFAULTS },
         };
     }
-    ['sns', 'snsTranslation', 'callSummary', 'contactProfile'].forEach((feature) => {
+    ['sns', 'snsTranslation', 'callSummary', 'contactProfile', 'tagGeneration'].forEach((feature) => {
         if (!ext[SETTINGS_KEY].aiRoutes[feature] || typeof ext[SETTINGS_KEY].aiRoutes[feature] !== 'object') {
             ext[SETTINGS_KEY].aiRoutes[feature] = { ...AI_ROUTE_DEFAULTS };
         }
@@ -1592,11 +1594,12 @@ function openSettingsPanel(onBack) {
         snsSection.className = 'slm-settings-wrapper slm-form';
         const messageSection = document.createElement('div');
         messageSection.className = 'slm-settings-wrapper slm-form';
-        if (!settings.aiRoutes) settings.aiRoutes = { sns: { ...AI_ROUTE_DEFAULTS }, snsTranslation: { ...AI_ROUTE_DEFAULTS }, callSummary: { ...AI_ROUTE_DEFAULTS }, contactProfile: { ...AI_ROUTE_DEFAULTS } };
+        if (!settings.aiRoutes) settings.aiRoutes = { sns: { ...AI_ROUTE_DEFAULTS }, snsTranslation: { ...AI_ROUTE_DEFAULTS }, callSummary: { ...AI_ROUTE_DEFAULTS }, contactProfile: { ...AI_ROUTE_DEFAULTS }, tagGeneration: { ...AI_ROUTE_DEFAULTS } };
         if (!settings.aiRoutes.sns) settings.aiRoutes.sns = { ...AI_ROUTE_DEFAULTS };
         if (!settings.aiRoutes.snsTranslation) settings.aiRoutes.snsTranslation = { ...AI_ROUTE_DEFAULTS };
         if (!settings.aiRoutes.callSummary) settings.aiRoutes.callSummary = { ...AI_ROUTE_DEFAULTS };
         if (!settings.aiRoutes.contactProfile) settings.aiRoutes.contactProfile = { ...AI_ROUTE_DEFAULTS };
+        if (!settings.aiRoutes.tagGeneration) settings.aiRoutes.tagGeneration = { ...AI_ROUTE_DEFAULTS };
 
         const apiRouteTitle = Object.assign(document.createElement('div'), {
             className: 'slm-label',
@@ -1739,6 +1742,7 @@ function openSettingsPanel(onBack) {
         buildAiRouteEditor('SNS 번역 라우팅', settings.aiRoutes.snsTranslation);
         buildAiRouteEditor('통화 요약 라우팅', settings.aiRoutes.callSummary);
         buildAiRouteEditor('연락처 AI 생성 라우팅', settings.aiRoutes.contactProfile);
+        buildAiRouteEditor('🏷️ 이미지 태그 생성 라우팅', settings.aiRoutes.tagGeneration);
         routeSection.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
 
         const endpointRow = document.createElement('div');
@@ -2143,9 +2147,13 @@ async function applyCharacterImageDisplayMode() {
             }
             const tagsToUse = tags.join(', ');
             // STEP 1-2: Danbooru 태그 생성 (한국어 → 영어 태그 변환)
+            // 메시지 이미지 프롬프트(커스텀)를 태그 생성 컨텍스트로 함께 전달
+            const messageImageCustomPrompt = (settings.messageImagePrompt || DEFAULT_SETTINGS.messageImagePrompt)
+                .replace(/\{charName\}/g, charName)
+                .replace(/\{appearanceTags\}/g, tagsToUse);
             let danbooruTags = '';
             try {
-                danbooruTags = await generateDanbooruTags(rawPrompt);
+                danbooruTags = await generateDanbooruTags(rawPrompt, { customPrompt: messageImageCustomPrompt });
             } catch (tagErr) {
                 console.warn('[ST-LifeSim] Danbooru 태그 생성 실패:', tagErr);
             }
