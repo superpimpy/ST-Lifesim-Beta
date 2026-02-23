@@ -600,13 +600,8 @@ function openContactDialog(existing, defaultBinding, onSave) {
         }
         saveContacts(targetContacts, targetBinding);
 
-        // 유저 자동 연락처: 외모 태그/서브이름을 글로벌에 동기화
-        if (isUserAuto) {
-            saveGlobalUserProfile({
-                appearanceTags: data.appearanceTags,
-                subName: data.subName,
-            });
-        }
+        // 유저 자동 연락처: 편집 내용은 현재 캐릭터(페르소나)에만 저장
+        // 글로벌 프로필 동기화를 하지 않으므로 다른 페르소나에 영향을 주지 않는다
 
         // 채팅 바인딩 연락처의 서브이름을 캐릭터 바인딩 연락처에도 동기화
         if (!isUserAuto && !isCharAuto && targetBinding === 'chat' && data.subName) {

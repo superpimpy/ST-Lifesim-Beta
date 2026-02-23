@@ -637,10 +637,12 @@ async function generateUserImage(prompt) {
         // 프롬프트에서 명시적으로 언급된 연락처 캐릭터는 generateImageTags 내부에서 자동 감지됨
 
         // 통합 이미지 태그 생성 (캐릭터 컨텍스트 기반)
+        const tagWeight = Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0;
         const tagResult = await generateImageTags(prompt.trim(), {
             includeNames,
             contacts: allContactsList,
             getAppearanceTagsByName,
+            tagWeight,
         });
 
         if (!tagResult.finalPrompt) {

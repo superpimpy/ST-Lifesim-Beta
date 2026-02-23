@@ -560,6 +560,7 @@ export async function triggerNpcPosting() {
                 includeNames: [pick.name],
                 contacts: allContactsList,
                 getAppearanceTagsByName,
+                tagWeight: Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0,
             });
             resolvedImagePrompt = imageInputPrompt;
 
@@ -1569,6 +1570,7 @@ function openWritePostDialog(onSave) {
                     includeNames: [authorName].filter(Boolean),
                     contacts: allContactsList,
                     getAppearanceTagsByName,
+                    tagWeight: Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0,
                 });
                 resolvedImagePrompt = userImageDesc;
 

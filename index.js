@@ -122,6 +122,7 @@ const DEFAULT_SETTINGS = {
     snsImagePrompt: 'Create a photorealistic image for {authorName}\'s SNS post. Character appearance: {appearanceTags}. Post content: "{postContent}". The image must accurately depict the scene described in the post. Focus on matching the subject, setting, and mood of the post text. Style: casual daily-life smartphone photo, natural lighting, candid feel. Use Danbooru-style concepts and prefer spaces instead of underscores.',
     messageImagePrompt: 'Generate a photorealistic image that {charName} would send via messenger. Character appearance: {appearanceTags}. The image must reflect the character\'s physical appearance accurately based on the appearance tags. Style: personal candid photo matching the conversation context, natural and authentic feel. Use Danbooru-style concepts and prefer spaces instead of underscores.',
     characterAppearanceTags: {}, // { [charName]: "tag1, tag2" }
+    tagWeight: 5, // 태그 가중치 (예: 5 → "5::(tags)::")
     callAudio: {
         startSoundUrl: '',
         endSoundUrl: '',
@@ -241,6 +242,10 @@ function getSettings() {
     }
     if (!ext[SETTINGS_KEY].characterAppearanceTags || typeof ext[SETTINGS_KEY].characterAppearanceTags !== 'object') {
         ext[SETTINGS_KEY].characterAppearanceTags = {};
+    }
+    // 태그 가중치 (기본 5)
+    if (!Number.isFinite(ext[SETTINGS_KEY].tagWeight) || ext[SETTINGS_KEY].tagWeight < 1) {
+        ext[SETTINGS_KEY].tagWeight = DEFAULT_SETTINGS.tagWeight;
     }
     if (!ext[SETTINGS_KEY].callAudio || typeof ext[SETTINGS_KEY].callAudio !== 'object') {
         ext[SETTINGS_KEY].callAudio = { ...DEFAULT_SETTINGS.callAudio };
@@ -1507,6 +1512,41 @@ function openSettingsPanel(onBack) {
         injectionPromptGroup.appendChild(injectionPromptResetBtn);
         wrapper.appendChild(injectionPromptGroup);
 
+        // ── 태그 가중치 설정 ──
+        wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
+        const tagWeightTitle = Object.assign(document.createElement('div'), {
+            className: 'slm-label',
+            textContent: '⚖️ 태그 가중치',
+        });
+        tagWeightTitle.style.fontWeight = '600';
+        wrapper.appendChild(tagWeightTitle);
+        const tagWeightDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: '외모 태그에 적용할 가중치입니다. 예: 5 → "5::(태그)::" 형식으로 출력됩니다. 0으로 설정하면 가중치 없이 [태그] 형식을 사용합니다.',
+        });
+        wrapper.appendChild(tagWeightDesc);
+        const tagWeightRow = document.createElement('div');
+        tagWeightRow.className = 'slm-input-row';
+        tagWeightRow.style.marginTop = '6px';
+        const tagWeightInput = Object.assign(document.createElement('input'), {
+            className: 'slm-input slm-input-sm', type: 'number', min: '0', max: '20',
+            value: String(settings.tagWeight ?? DEFAULT_SETTINGS.tagWeight),
+        });
+        tagWeightInput.style.width = '70px';
+        const tagWeightApplyBtn = Object.assign(document.createElement('button'), {
+            className: 'slm-btn slm-btn-primary slm-btn-sm',
+            textContent: '적용',
+        });
+        tagWeightApplyBtn.onclick = () => {
+            const val = Math.max(0, Math.min(20, parseInt(tagWeightInput.value) || 0));
+            settings.tagWeight = val;
+            tagWeightInput.value = String(val);
+            saveSettings();
+            showToast(`태그 가중치: ${val}${val > 0 ? ` → ${val}::(tags)::` : ' (비활성화)'}`, 'success', 1500);
+        };
+        tagWeightRow.append(tagWeightInput, tagWeightApplyBtn);
+        wrapper.appendChild(tagWeightRow);
+
         return wrapper;
         }
 
@@ -2676,6 +2716,7 @@ async function applyCharacterImageDisplayMode() {
                 includeNames,
                 contacts: allContactsList,
                 getAppearanceTagsByName,
+                tagWeight: Number(settings.tagWeight) || 0,
             });
             let replacement;
             if (!tagResult.finalPrompt) {
