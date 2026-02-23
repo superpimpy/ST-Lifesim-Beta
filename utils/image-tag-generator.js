@@ -374,21 +374,16 @@ export async function generateImageTags(rawPrompt, options = {}) {
     // ── Step 3: Resolve appearance tag variables in the AI output ──
     // The AI may output {{appearanceTag:name}} references (possibly with trailing
     // suffixes like "'s description" or "s description") — resolve them to actual tags.
-    let resolvedSceneTags = sceneTags;
-    for (const [name, tags] of Object.entries(appearanceVarMap)) {
-        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        // Match {{appearanceTag:name}} with optional trailing "'s description" / "s description"
-        const varPattern = new RegExp(
-            `\\{\\{appearanceTag:${escaped}\\}\\}(?:['\u2019]?s\\s+description)?`,
-            'gi',
-        );
-        resolvedSceneTags = resolvedSceneTags.replace(varPattern, tags);
-    }
-    // Strip any remaining unresolved {{appearanceTag:...}} references (with optional suffix)
-    resolvedSceneTags = resolvedSceneTags.replace(
-        /\{\{appearanceTag:[^}]+\}\}(?:['‘’]?s\s+description)?/gi,
-        '',
+    const appearanceLookup = new Map(
+        Object.entries(appearanceVarMap)
+            .map(([name, tags]) => [String(name || '').trim().toLowerCase(), String(tags || '').trim()])
+            .filter(([name, tags]) => name && tags),
     );
+    const appearanceTagRefRegex = /\{\{appearanceTag:\s*([^}]+?)\s*\}\}(?:['‘’]?s\s+description)?/gi;
+    const resolvedSceneTags = sceneTags.replace(appearanceTagRefRegex, (match, rawName) => {
+        const key = String(rawName || '').trim().toLowerCase();
+        return appearanceLookup.get(key) || '';
+    });
 
     // If AI output contains pipe-separated sections with resolved appearance tags,
     // split them out into appearance groups

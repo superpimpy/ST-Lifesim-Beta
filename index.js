@@ -478,6 +478,7 @@ function injectLifeSimMenuButton() {
 
     const leftSendFormElement = document.getElementById('leftSendForm');
     if (leftSendFormElement) {
+        btn.style.marginLeft = 'auto';
         leftSendFormElement.appendChild(btn);
     } else {
         sendBtn.parentNode.insertBefore(btn, sendBtn);
@@ -606,7 +607,7 @@ function injectRightSendFormIcons() {
 
     const settings = getSettings();
     const rsfItems = settings.quickAccess?.rightSendFormItems || {};
-    const activeKeys = Object.keys(rsfItems).filter(k => rsfItems[k] && k === 'callRequest');
+    const activeKeys = Object.keys(rsfItems).filter(k => rsfItems[k]);
     if (activeKeys.length === 0) return;
 
     const sendBtn = document.getElementById('send_but');
