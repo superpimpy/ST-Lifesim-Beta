@@ -13,8 +13,8 @@ import { getContext } from '../../utils/st-context.js';
 import { slashSend, slashGen, slashSendAs } from '../../utils/slash.js';
 import { showToast, escapeHtml, generateId } from '../../utils/ui.js';
 import { loadData, saveData, getExtensionSettings } from '../../utils/storage.js';
-import { getAppearanceTagsByName, collectAppearanceTagsFromText, getContacts } from '../contacts/contacts.js';
-import { generateDanbooruTags, buildImageApiPrompt, generateImageTags } from '../../utils/image-tag-generator.js';
+import { getAppearanceTagsByName, getContacts } from '../contacts/contacts.js';
+import { generateImageTags } from '../../utils/image-tag-generator.js';
 
 // 사건 기록 아카이브 저장 키
 const ARCHIVE_KEY = 'event-archive';

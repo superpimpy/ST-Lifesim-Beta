@@ -13,8 +13,8 @@ import { loadData, saveData, getDefaultBinding, getExtensionSettings } from '../
 import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
-import { getContacts, getAppearanceTagsByName, collectAppearanceTagsFromText } from '../contacts/contacts.js';
-import { generateDanbooruTags, buildImageApiPrompt, generateImageTags } from '../../utils/image-tag-generator.js';
+import { getContacts, getAppearanceTagsByName } from '../contacts/contacts.js';
+import { generateImageTags } from '../../utils/image-tag-generator.js';
 
 const MODULE_KEY = 'sns-feed';
 const AVATARS_KEY = 'sns-avatars';

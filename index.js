@@ -22,13 +22,13 @@ import { exportAllData, importAllData, clearAllData } from './utils/storage.js';
 import { renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEventGeneratorUI, renderVoiceMemoUI, triggerQuickSend, triggerReadReceipt, triggerNoContact, triggerUserImageGenerationAndSend } from './modules/quick-tools/quick-tools.js';
 import { startFirstMsgTimer, renderFirstMsgSettingsUI } from './modules/firstmsg/firstmsg.js';
 import { initEmoticon, openEmoticonPopup } from './modules/emoticon/emoticon.js';
-import { initContacts, openContactsPopup, getContacts, getAppearanceTagsByName, collectAppearanceTagsFromText } from './modules/contacts/contacts.js';
+import { initContacts, openContactsPopup, getContacts, getAppearanceTagsByName } from './modules/contacts/contacts.js';
 import { initCall, onCharacterMessageRenderedForProactiveCall, openCallLogsPopup, triggerProactiveIncomingCall, requestActiveCharacterCall } from './modules/call/call.js';
 import { initWallet, openWalletPopup } from './modules/wallet/wallet.js';
 import { initSns, openSnsPopup, triggerNpcPosting, triggerPendingCommentReaction, hasPendingCommentReaction } from './modules/sns/sns.js';
 import { initCalendar, openCalendarPopup } from './modules/calendar/calendar.js';
 import { initGifticon, openGifticonPopup, trackGifticonUsageFromCharacterMessage } from './modules/gifticon/gifticon.js';
-import { generateDanbooruTags, buildImageApiPrompt, containsKorean, generateImageTags } from './utils/image-tag-generator.js';
+import { generateImageTags } from './utils/image-tag-generator.js';
 
 // 설정 키
 const SETTINGS_KEY = 'st-lifesim';
@@ -156,6 +156,10 @@ const DEFAULT_SETTINGS = {
     },
     quickAccess: {
         enabled: true,
+        columns: 1,             // 1, 2, or 3 column layout
+        displayMode: 'full',    // 'full' | 'emojiOnly' | 'labelOnly'
+        customLabels: {},       // { [key]: string } - custom display names
+        customImages: {},       // { [key]: string } - image URL replacement for emoji
         order: ['userImage', 'callRequest', 'readReceipt', 'noContact', 'sns', 'quickSend'],
         items: {
             userImage: true,
@@ -333,6 +337,8 @@ function getSettings() {
             ...DEFAULT_SETTINGS.quickAccess,
             order: [...DEFAULT_SETTINGS.quickAccess.order],
             items: { ...DEFAULT_SETTINGS.quickAccess.items },
+            customLabels: {},
+            customImages: {},
         };
     }
     if (ext[SETTINGS_KEY].quickAccess.items == null) {
@@ -343,6 +349,19 @@ function getSettings() {
     }
     if (typeof ext[SETTINGS_KEY].quickAccess.enabled !== 'boolean') {
         ext[SETTINGS_KEY].quickAccess.enabled = DEFAULT_SETTINGS.quickAccess.enabled;
+    }
+    // 신규: 퀵 액세스 커스터마이징 설정 마이그레이션
+    if (![1, 2, 3].includes(ext[SETTINGS_KEY].quickAccess.columns)) {
+        ext[SETTINGS_KEY].quickAccess.columns = DEFAULT_SETTINGS.quickAccess.columns;
+    }
+    if (!['full', 'emojiOnly', 'labelOnly'].includes(ext[SETTINGS_KEY].quickAccess.displayMode)) {
+        ext[SETTINGS_KEY].quickAccess.displayMode = DEFAULT_SETTINGS.quickAccess.displayMode;
+    }
+    if (!ext[SETTINGS_KEY].quickAccess.customLabels || typeof ext[SETTINGS_KEY].quickAccess.customLabels !== 'object') {
+        ext[SETTINGS_KEY].quickAccess.customLabels = {};
+    }
+    if (!ext[SETTINGS_KEY].quickAccess.customImages || typeof ext[SETTINGS_KEY].quickAccess.customImages !== 'object') {
+        ext[SETTINGS_KEY].quickAccess.customImages = {};
     }
     const qaOrder = ext[SETTINGS_KEY].quickAccess.order
         .map(v => String(v || '').trim())
@@ -456,17 +475,43 @@ function openQuickAccessPopup() {
     };
     wrapper.appendChild(mainBtn);
     const quickItems = settings.quickAccess?.enabled ? getOrderedQuickAccessItems() : [];
-    quickItems.forEach((item) => {
-        const btn = document.createElement('button');
-        btn.className = 'slm-btn slm-btn-secondary';
-        btn.textContent = `${item.icon} ${item.label}`;
-        btn.onclick = async () => {
-            closePopup('quick-access-menu');
-            await item.action();
-        };
-        wrapper.appendChild(btn);
-    });
-    if (quickItems.length === 0) {
+    const columns = settings.quickAccess?.columns || 1;
+    const displayMode = settings.quickAccess?.displayMode || 'full';
+    const customLabels = settings.quickAccess?.customLabels || {};
+    const customImages = settings.quickAccess?.customImages || {};
+    if (quickItems.length > 0) {
+        const grid = document.createElement('div');
+        grid.className = `slm-qa-grid slm-qa-cols-${columns}`;
+        quickItems.forEach((item) => {
+            const btn = document.createElement('button');
+            btn.className = `slm-qa-btn slm-qa-mode-${displayMode}`;
+            const label = customLabels[item.key] || item.label;
+            const imgUrl = customImages[item.key] || '';
+            if (displayMode === 'emojiOnly') {
+                if (imgUrl) {
+                    btn.innerHTML = `<img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(label)}" class="slm-qa-img">`;
+                } else {
+                    btn.textContent = item.icon;
+                }
+                btn.title = label;
+            } else if (displayMode === 'labelOnly') {
+                btn.textContent = label;
+            } else {
+                // full mode
+                if (imgUrl) {
+                    btn.innerHTML = `<img src="${escapeHtml(imgUrl)}" alt="" class="slm-qa-img"> <span>${escapeHtml(label)}</span>`;
+                } else {
+                    btn.textContent = `${item.icon} ${label}`;
+                }
+            }
+            btn.onclick = async () => {
+                closePopup('quick-access-menu');
+                await item.action();
+            };
+            grid.appendChild(btn);
+        });
+        wrapper.appendChild(grid);
+    } else {
         wrapper.appendChild(Object.assign(document.createElement('div'), {
             className: 'slm-desc',
             textContent: settings.quickAccess?.enabled === false
@@ -789,16 +834,85 @@ function openSettingsPanel(onBack) {
 
         wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
 
-        // 개별 항목 표시/숨김 + 순서
+        // ── 커스터마이징: 열 수 설정 ──
+        const colTitle = Object.assign(document.createElement('div'), {
+            className: 'slm-label',
+            textContent: '🔲 레이아웃 (열 수)',
+        });
+        colTitle.style.fontWeight = '600';
+        colTitle.style.marginBottom = '6px';
+        wrapper.appendChild(colTitle);
+
+        const colRow = document.createElement('div');
+        colRow.className = 'slm-settings-row';
+        colRow.style.display = 'flex';
+        colRow.style.gap = '8px';
+        [1, 2, 3].forEach((n) => {
+            const btn = document.createElement('button');
+            btn.className = 'slm-btn slm-btn-sm' + ((settings.quickAccess?.columns || 1) === n ? ' slm-btn-primary' : ' slm-btn-ghost');
+            btn.textContent = `${n}열`;
+            btn.onclick = () => {
+                if (!settings.quickAccess) settings.quickAccess = { ...DEFAULT_SETTINGS.quickAccess };
+                settings.quickAccess.columns = n;
+                saveSettings();
+                refreshQuickAccessFab();
+                // 버튼 상태 갱신
+                colRow.querySelectorAll('button').forEach((b, i) => {
+                    b.className = 'slm-btn slm-btn-sm' + (i + 1 === n ? ' slm-btn-primary' : ' slm-btn-ghost');
+                });
+            };
+            colRow.appendChild(btn);
+        });
+        wrapper.appendChild(colRow);
+
+        // ── 커스터마이징: 표시 모드 ──
+        const modeTitle = Object.assign(document.createElement('div'), {
+            className: 'slm-label',
+            textContent: '🎭 표시 모드',
+        });
+        modeTitle.style.fontWeight = '600';
+        modeTitle.style.marginTop = '12px';
+        modeTitle.style.marginBottom = '6px';
+        wrapper.appendChild(modeTitle);
+
+        const modeRow = document.createElement('div');
+        modeRow.className = 'slm-settings-row';
+        modeRow.style.display = 'flex';
+        modeRow.style.gap = '8px';
+        const modes = [
+            { key: 'full', label: '이모지+텍스트' },
+            { key: 'emojiOnly', label: '이모지만' },
+            { key: 'labelOnly', label: '텍스트만' },
+        ];
+        modes.forEach((m) => {
+            const btn = document.createElement('button');
+            btn.className = 'slm-btn slm-btn-sm' + ((settings.quickAccess?.displayMode || 'full') === m.key ? ' slm-btn-primary' : ' slm-btn-ghost');
+            btn.textContent = m.label;
+            btn.onclick = () => {
+                if (!settings.quickAccess) settings.quickAccess = { ...DEFAULT_SETTINGS.quickAccess };
+                settings.quickAccess.displayMode = m.key;
+                saveSettings();
+                refreshQuickAccessFab();
+                modeRow.querySelectorAll('button').forEach((b, i) => {
+                    b.className = 'slm-btn slm-btn-sm' + (modes[i].key === m.key ? ' slm-btn-primary' : ' slm-btn-ghost');
+                });
+            };
+            modeRow.appendChild(btn);
+        });
+        wrapper.appendChild(modeRow);
+
+        wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
+
+        // ── 개별 항목 표시/숨김 + 순서 + 커스텀 이름/이미지 ──
         const itemsTitle = document.createElement('div');
         itemsTitle.className = 'slm-label';
-        itemsTitle.textContent = '⚡ 퀵 액세스 항목 표시/순서 설정';
+        itemsTitle.textContent = '⚡ 퀵 액세스 항목 설정';
         itemsTitle.style.fontWeight = '600';
         itemsTitle.style.marginBottom = '6px';
         wrapper.appendChild(itemsTitle);
         const hint = Object.assign(document.createElement('div'), {
             className: 'slm-desc',
-            textContent: '항목을 드래그하여 순서를 변경할 수 있습니다.',
+            textContent: '항목을 드래그하여 순서를 변경하고, 표시명과 이미지를 커스텀할 수 있습니다.',
         });
         wrapper.appendChild(hint);
 
@@ -814,7 +928,7 @@ function openSettingsPanel(onBack) {
                 .forEach(item => ordered.push(item));
             ordered.forEach((item) => {
                 const row = document.createElement('div');
-                row.className = 'slm-settings-row';
+                row.className = 'slm-settings-row slm-qa-settings-item';
                 row.draggable = true;
                 row.dataset.qaKey = item.key;
 
@@ -837,6 +951,11 @@ function openSettingsPanel(onBack) {
                     renderItems();
                 });
 
+                // 체크박스 + 기본 이름
+                const headerRow = document.createElement('div');
+                headerRow.style.display = 'flex';
+                headerRow.style.alignItems = 'center';
+                headerRow.style.gap = '6px';
                 const lbl = document.createElement('label');
                 lbl.className = 'slm-toggle-label';
                 const chk = document.createElement('input');
@@ -851,7 +970,47 @@ function openSettingsPanel(onBack) {
                 };
                 lbl.appendChild(chk);
                 lbl.appendChild(document.createTextNode(` ${item.icon} ${item.label}`));
-                row.appendChild(lbl);
+                headerRow.appendChild(lbl);
+                row.appendChild(headerRow);
+
+                // 커스텀 표시명 입력
+                const labelInput = document.createElement('input');
+                labelInput.type = 'text';
+                labelInput.className = 'slm-input slm-qa-custom-input';
+                labelInput.placeholder = '커스텀 표시명 (비워두면 기본값)';
+                labelInput.value = settings.quickAccess?.customLabels?.[item.key] || '';
+                labelInput.oninput = () => {
+                    if (!settings.quickAccess) settings.quickAccess = { ...DEFAULT_SETTINGS.quickAccess };
+                    if (!settings.quickAccess.customLabels) settings.quickAccess.customLabels = {};
+                    const v = labelInput.value.trim();
+                    if (v) {
+                        settings.quickAccess.customLabels[item.key] = v;
+                    } else {
+                        delete settings.quickAccess.customLabels[item.key];
+                    }
+                    saveSettings();
+                };
+                row.appendChild(labelInput);
+
+                // 커스텀 이미지 URL 입력 (이모지 대체)
+                const imgInput = document.createElement('input');
+                imgInput.type = 'text';
+                imgInput.className = 'slm-input slm-qa-custom-input';
+                imgInput.placeholder = '이모지 대체 이미지 URL (비워두면 이모지 사용)';
+                imgInput.value = settings.quickAccess?.customImages?.[item.key] || '';
+                imgInput.oninput = () => {
+                    if (!settings.quickAccess) settings.quickAccess = { ...DEFAULT_SETTINGS.quickAccess };
+                    if (!settings.quickAccess.customImages) settings.quickAccess.customImages = {};
+                    const v = imgInput.value.trim();
+                    if (v) {
+                        settings.quickAccess.customImages[item.key] = v;
+                    } else {
+                        delete settings.quickAccess.customImages[item.key];
+                    }
+                    saveSettings();
+                };
+                row.appendChild(imgInput);
+
                 list.appendChild(row);
             });
         };
