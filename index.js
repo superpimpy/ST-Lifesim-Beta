@@ -153,6 +153,19 @@ const DEFAULT_SETTINGS = {
         callSummary: { ...AI_ROUTE_DEFAULTS },
         contactProfile: { ...AI_ROUTE_DEFAULTS },
     },
+    quickAccess: {
+        enabled: true,
+        items: {
+            emoticon: true,
+            contacts: true,
+            call: true,
+            sns: true,
+            gifticon: true,
+            quickTools: true,
+            wallet: true,
+            calendar: true,
+        },
+    },
 };
 
 /**
@@ -313,6 +326,16 @@ function getSettings() {
     if (ext[SETTINGS_KEY].snsImageMode == null) {
         ext[SETTINGS_KEY].snsImageMode = DEFAULT_SETTINGS.snsImageMode;
     }
+    // 신규: 퀵 액세스 설정
+    if (!ext[SETTINGS_KEY].quickAccess || typeof ext[SETTINGS_KEY].quickAccess !== 'object') {
+        ext[SETTINGS_KEY].quickAccess = { ...DEFAULT_SETTINGS.quickAccess, items: { ...DEFAULT_SETTINGS.quickAccess.items } };
+    }
+    if (ext[SETTINGS_KEY].quickAccess.items == null) {
+        ext[SETTINGS_KEY].quickAccess.items = { ...DEFAULT_SETTINGS.quickAccess.items };
+    }
+    if (typeof ext[SETTINGS_KEY].quickAccess.enabled !== 'boolean') {
+        ext[SETTINGS_KEY].quickAccess.enabled = DEFAULT_SETTINGS.quickAccess.enabled;
+    }
     return ext[SETTINGS_KEY];
 }
 
@@ -371,6 +394,93 @@ function injectLifeSimMenuButton() {
     });
 
     sendBtn.parentNode.insertBefore(btn, sendBtn);
+}
+
+// ── 퀵 액세스 플로팅 버튼 (2단계 토글 구조) ──────────────────────
+const QUICK_ACCESS_ITEMS = [
+    { key: 'emoticon', icon: '😊', label: '이모티콘', action: () => openEmoticonPopup() },
+    { key: 'contacts', icon: '📋', label: '연락처', action: () => openContactsPopup() },
+    { key: 'call', icon: '📞', label: '통화', action: () => openCallLogsPopup() },
+    { key: 'sns', icon: '📸', label: 'SNS', action: () => openSnsPopup() },
+    { key: 'gifticon', icon: '🎁', label: '기프티콘', action: () => openGifticonPopup() },
+    { key: 'quickTools', icon: '🛠️', label: '퀵 도구', action: () => openQuickToolsPanel() },
+    { key: 'wallet', icon: '💰', label: '지갑', action: () => openWalletPopup() },
+    { key: 'calendar', icon: '📅', label: '캘린더', action: () => openCalendarPopup() },
+];
+
+/**
+ * 퀵 액세스 플로팅 버튼 (FAB)을 화면 우하단에 삽입한다.
+ * 1단계: 아이콘 버튼 클릭 → 2단계: 퀵 액세스 리스트 펼침 → 항목 클릭 시 해당 패널/모달 바로 열림
+ */
+function injectQuickAccessFab() {
+    if (document.getElementById('slm-qa-fab')) return;
+
+    const settings = getSettings();
+    if (!settings.quickAccess?.enabled) return;
+
+    // FAB 컨테이너
+    const container = document.createElement('div');
+    container.id = 'slm-qa-fab';
+    container.className = 'slm-qa-fab';
+
+    // 메인 FAB 버튼
+    const fab = document.createElement('button');
+    fab.className = 'slm-qa-fab-btn';
+    fab.innerHTML = '⚡';
+    fab.title = '퀵 액세스';
+    fab.setAttribute('aria-label', '퀵 액세스 열기');
+
+    // 퀵 액세스 리스트 (세로)
+    const list = document.createElement('div');
+    list.className = 'slm-qa-list';
+    list.style.display = 'none';
+
+    const qaItems = settings.quickAccess?.items || {};
+    QUICK_ACCESS_ITEMS.forEach(item => {
+        if (qaItems[item.key] === false) return;
+        if (!isModuleEnabled(item.key)) return;
+
+        const itemBtn = document.createElement('button');
+        itemBtn.className = 'slm-qa-item';
+        itemBtn.innerHTML = item.icon;
+        itemBtn.title = item.label;
+        itemBtn.setAttribute('aria-label', item.label);
+        itemBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            list.style.display = 'none';
+            fab.classList.remove('slm-qa-fab-open');
+            item.action();
+        });
+        list.appendChild(itemBtn);
+    });
+
+    // FAB 토글
+    fab.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = list.style.display !== 'none';
+        list.style.display = isOpen ? 'none' : 'flex';
+        fab.classList.toggle('slm-qa-fab-open', !isOpen);
+    });
+
+    // 외부 클릭 시 닫기
+    document.addEventListener('click', () => {
+        list.style.display = 'none';
+        fab.classList.remove('slm-qa-fab-open');
+    });
+    container.addEventListener('click', (e) => e.stopPropagation());
+
+    container.appendChild(list);
+    container.appendChild(fab);
+    document.body.appendChild(container);
+}
+
+/**
+ * 퀵 액세스 FAB을 갱신한다 (설정 변경 시 호출)
+ */
+function refreshQuickAccessFab() {
+    const old = document.getElementById('slm-qa-fab');
+    if (old) old.remove();
+    if (isEnabled()) injectQuickAccessFab();
 }
 
 /**
@@ -639,6 +749,66 @@ function openSettingsPanel(onBack) {
 
             lbl.appendChild(chk);
             lbl.appendChild(document.createTextNode(` ${m.label}${ALWAYS_ON_MODULES.has(m.key) ? ' (항상 활성화)' : ''}`));
+            row.appendChild(lbl);
+            wrapper.appendChild(row);
+        });
+
+        return wrapper;
+    }
+
+    // ─────────────────────────────────────────
+    // 탭: 퀵 액세스 설정
+    // ─────────────────────────────────────────
+    function buildQuickAccessTab() {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'slm-settings-wrapper slm-form';
+
+        // 퀵 액세스 전체 ON/OFF
+        const enabledRow = document.createElement('div');
+        enabledRow.className = 'slm-settings-row';
+        const enabledLbl = document.createElement('label');
+        enabledLbl.className = 'slm-toggle-label';
+        const enabledChk = document.createElement('input');
+        enabledChk.type = 'checkbox';
+        enabledChk.checked = settings.quickAccess?.enabled !== false;
+        enabledChk.onchange = () => {
+            if (!settings.quickAccess) settings.quickAccess = { ...DEFAULT_SETTINGS.quickAccess };
+            settings.quickAccess.enabled = enabledChk.checked;
+            saveSettings();
+            refreshQuickAccessFab();
+        };
+        enabledLbl.appendChild(enabledChk);
+        enabledLbl.appendChild(document.createTextNode(' 퀵 액세스 버튼 표시'));
+        enabledRow.appendChild(enabledLbl);
+        wrapper.appendChild(enabledRow);
+
+        wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
+
+        // 개별 항목 표시/숨김
+        const itemsTitle = document.createElement('div');
+        itemsTitle.className = 'slm-label';
+        itemsTitle.textContent = '⚡ 퀵 액세스 항목 표시 설정';
+        itemsTitle.style.fontWeight = '600';
+        itemsTitle.style.marginBottom = '6px';
+        wrapper.appendChild(itemsTitle);
+
+        QUICK_ACCESS_ITEMS.forEach(item => {
+            const row = document.createElement('div');
+            row.className = 'slm-settings-row';
+            const lbl = document.createElement('label');
+            lbl.className = 'slm-toggle-label';
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.checked = settings.quickAccess?.items?.[item.key] !== false;
+            chk.onchange = () => {
+                if (!settings.quickAccess) settings.quickAccess = { ...DEFAULT_SETTINGS.quickAccess };
+                if (!settings.quickAccess.items) settings.quickAccess.items = { ...DEFAULT_SETTINGS.quickAccess.items };
+                settings.quickAccess.items[item.key] = chk.checked;
+                saveSettings();
+                refreshQuickAccessFab();
+            };
+            lbl.appendChild(chk);
+            lbl.appendChild(document.createTextNode(` ${item.icon} ${item.label}`));
             row.appendChild(lbl);
             wrapper.appendChild(row);
         });
@@ -1786,6 +1956,7 @@ function openSettingsPanel(onBack) {
     const tabs = createTabs([
         { key: 'general', label: '⚙️ 일반', content: buildGeneralTab() },
         { key: 'modules', label: '🧩 모듈', content: buildModulesTab() },
+        { key: 'quickAccess', label: '⚡ 퀵 액세스', content: buildQuickAccessTab() },
         { key: 'media', label: '🖼️ 이미지', content: buildMediaTab() },
         { key: 'probability', label: '🎲 확률', content: buildProbabilityTab() },
         { key: 'theme', label: '🎨 테마', content: buildThemeTab() },
@@ -2193,6 +2364,9 @@ async function init() {
 
     // ST-LifeSim 메뉴 버튼 삽입 (sendform 옆)
     try { injectLifeSimMenuButton(); } catch (e) { console.error('[ST-LifeSim] 메뉴 버튼 오류:', e); }
+
+    // 퀵 액세스 플로팅 버튼 삽입
+    try { injectQuickAccessFab(); } catch (e) { console.error('[ST-LifeSim] 퀵 액세스 FAB 오류:', e); }
 
     // 선톡 타이머 시작 (활성화된 경우)
     try { startFirstMsgTimer(settings.firstMsg); } catch (e) { console.error('[ST-LifeSim] 선톡 타이머 오류:', e); }
