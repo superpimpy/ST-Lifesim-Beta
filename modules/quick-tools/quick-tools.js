@@ -13,8 +13,8 @@ import { getContext } from '../../utils/st-context.js';
 import { slashSend, slashGen, slashSendAs } from '../../utils/slash.js';
 import { showToast, escapeHtml, generateId } from '../../utils/ui.js';
 import { loadData, saveData, getExtensionSettings } from '../../utils/storage.js';
-import { getAppearanceTagsByName, collectAppearanceTagsFromText } from '../contacts/contacts.js';
-import { generateDanbooruTags, buildImageApiPrompt } from '../../utils/image-tag-generator.js';
+import { getAppearanceTagsByName, collectAppearanceTagsFromText, getContacts } from '../contacts/contacts.js';
+import { generateDanbooruTags, buildImageApiPrompt, generateImageTags } from '../../utils/image-tag-generator.js';
 
 // 사건 기록 아카이브 저장 키
 const ARCHIVE_KEY = 'event-archive';
@@ -611,7 +611,7 @@ export function renderVoiceMemoUI() {
 
 /**
  * 유저가 이미지를 생성하여 전송한다 (이미지 생성 API 호출)
- * Danbooru 태그 변환 단계를 거친 후 Image API에 전달한다.
+ * 통합 파이프라인: generateImageTags() → Image API (커스텀 프롬프트 불포함)
  * @param {string} prompt - 이미지 생성 프롬프트
  * @returns {Promise<string>} 생성된 이미지 URL 또는 빈 문자열
  */
@@ -624,25 +624,23 @@ async function generateUserImage(prompt) {
             return '';
         }
         const userName = ctx?.name1 || '';
-        const appearanceTagGroups = collectAppearanceTagsFromText(prompt, { includeNames: [userName, '{{user}}'] });
-        if (appearanceTagGroups.length === 0) {
-            const fallbackUserTags = getAppearanceTagsByName(userName) || getAppearanceTagsByName('{{user}}') || getExtensionSettings()?.['st-lifesim']?.characterAppearanceTags?.['{{user}}'] || '';
-            if (fallbackUserTags) appearanceTagGroups.push(String(fallbackUserTags).trim());
-        }
+        const allContactsList = [...getContacts('character'), ...getContacts('chat')];
 
-        // STEP 1-2: Danbooru 태그 생성 (한국어 → 영어 태그 변환)
-        const danbooruTags = await generateDanbooruTags(prompt.trim());
-        if (!danbooruTags) {
-            console.warn('[ST-LifeSim] 유저 이미지 Danbooru 태그 생성 실패, 이미지 생성 건너뜀');
+        // 통합 이미지 태그 생성 (캐릭터 컨텍스트 기반, 커스텀 프롬프트 없음)
+        const tagResult = await generateImageTags(prompt.trim(), {
+            includeNames: [userName, '{{user}}'],
+            contacts: allContactsList,
+            getAppearanceTagsByName,
+        });
+
+        if (!tagResult.finalPrompt) {
+            console.warn('[ST-LifeSim] 유저 이미지 태그 생성 실패, 이미지 생성 건너뜀');
             showToast('이미지 태그 변환 실패: 이미지 생성을 건너뜁니다', 'warn', 2500);
             return '';
         }
 
-        // STEP 3: 생성된 태그 + 외모 태그 조합
-        const finalPrompt = buildImageApiPrompt(danbooruTags, appearanceTagGroups);
-
         if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
-            const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true ${finalPrompt}`, { showOutput: false });
+            const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true ${tagResult.finalPrompt}`, { showOutput: false });
             const resultStr = String(result?.pipe || result || '').trim();
             if (resultStr && (resultStr.startsWith('http') || resultStr.startsWith('/') || resultStr.startsWith('data:'))) {
                 return resultStr;

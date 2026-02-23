@@ -14,7 +14,7 @@ import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
 import { getContacts, getAppearanceTagsByName, collectAppearanceTagsFromText } from '../contacts/contacts.js';
-import { generateDanbooruTags, buildImageApiPrompt } from '../../utils/image-tag-generator.js';
+import { generateDanbooruTags, buildImageApiPrompt, generateImageTags } from '../../utils/image-tag-generator.js';
 
 const MODULE_KEY = 'sns-feed';
 const AVATARS_KEY = 'sns-avatars';
@@ -550,44 +550,22 @@ export async function triggerNpcPosting() {
         // 캐릭터별 기본 이미지가 있으면 우선 사용하고, 없을 때만 프리셋으로 보완한다.
         let finalImageUrl = defaultImg || presetImg;
         let imageDescription = '';
-        const appearanceTagGroups = collectAppearanceTagsFromText(postContent, { includeNames: [pick.name] });
-        if (appearanceTagGroups.length === 0) {
-            const fallbackTags = getAppearanceTagsByName(pick.name) || String(promptSettings.characterAppearanceTags?.[pick.name] || '').trim();
-            if (fallbackTags) appearanceTagGroups.push(fallbackTags);
-        }
-        const appearanceTags = appearanceTagGroups.join(' | ');
-        const userName = freshCtx?.name1 || '{{user}}';
-        const userAppearanceTags = getAppearanceTagsByName(userName) || String(promptSettings.characterAppearanceTags?.['{{user}}'] || '').trim();
         let resolvedImagePrompt = '';
         if (promptSettings.snsImageMode) {
-            const basePrompt = applyPromptTemplate(promptSettings.templates.imageDescription, {
-                authorName: pick.name,
-                postContent,
+            // 통합 파이프라인: generateImageTags() → Image API (커스텀 프롬프트 불포함)
+            const allContactsList = [...getContacts('character'), ...getContacts('chat')];
+            const tagResult = await generateImageTags(postContent, {
+                includeNames: [pick.name],
+                contacts: allContactsList,
+                getAppearanceTagsByName,
             });
-            resolvedImagePrompt = promptSettings.snsImagePrompt
-                ? promptSettings.snsImagePrompt
-                    .replace(/\{authorName\}/g, pick.name)
-                    .replace(/\{postContent\}/g, postContent)
-                    .replace(/\{appearanceTags\}/g, appearanceTags)
-                    .replace(/\{\{user\}\}/g, freshCtx?.name1 || '{{user}}')
-                    .replace(/\{userAppearanceTags\}/g, userAppearanceTags)
-                : basePrompt;
-            // Danbooru 태그 생성 → Image API 전달 (한국어 직접 전달 금지)
-            // SNS 이미지 프롬프트(커스텀)를 태그 생성 컨텍스트로 함께 전달
-            let danbooruTags = '';
-            try {
-                danbooruTags = await generateDanbooruTags(resolvedImagePrompt, { customPrompt: promptSettings.snsImagePrompt || '' });
-            } catch (tagErr) {
-                console.warn('[ST-LifeSim] SNS Danbooru 태그 생성 실패:', tagErr);
-            }
+            resolvedImagePrompt = postContent;
 
-            if (danbooruTags) {
-                const finalApiPrompt = buildImageApiPrompt(danbooruTags, appearanceTagGroups);
+            if (tagResult.finalPrompt) {
                 try {
-                    const generatedUrl = await generateImageViaApi(finalApiPrompt);
+                    const generatedUrl = await generateImageViaApi(tagResult.finalPrompt);
                     if (generatedUrl) {
                         finalImageUrl = generatedUrl;
-                        // OPINION 4 요구사항: AI 이미지 생성 시 사진설명은 비워둔다.
                         imageDescription = '';
                     }
                 } catch (imgErr) {
@@ -1575,37 +1553,23 @@ function openWritePostDialog(onSave) {
         } else if (useAiRadio.checked) {
             // AI 이미지 생성 (NPC 게시글과 동일한 파이프라인)
             const userImageDesc = aiImgDescInput.value.trim() || text;
-            const appearanceTagGroups = collectAppearanceTagsFromText(userImageDesc, { includeNames: [authorName, '{{user}}'] });
-            if (appearanceTagGroups.length === 0) {
-                const fallbackTags = getAppearanceTagsByName(authorName) || getAppearanceTagsByName('{{user}}') || String(promptSettings.characterAppearanceTags?.['{{user}}'] || '').trim();
-                if (fallbackTags) appearanceTagGroups.push(fallbackTags);
-            }
-            const appearanceTags = appearanceTagGroups.join(' | ');
             const fallbackImageUrl = getAuthorDefaultImageUrl(authorName) || '';
 
-            resolvedImagePrompt = promptSettings.snsImagePrompt
-                ? promptSettings.snsImagePrompt
-                    .replace(/\{authorName\}/g, authorName)
-                    .replace(/\{postContent\}/g, userImageDesc)
-                    .replace(/\{appearanceTags\}/g, appearanceTags)
-                    .replace(/\{\{user\}\}/g, authorName)
-                    .replace(/\{userAppearanceTags\}/g, appearanceTags)
-                : `Create a photorealistic image for ${authorName}'s SNS post. Appearance: ${appearanceTags}. Post: "${userImageDesc}". Style: casual daily-life smartphone photo.`;
-
+            // 통합 파이프라인: generateImageTags() → Image API (커스텀 프롬프트 불포함)
             showToast('🎨 이미지 생성 중...', 'info', 3000);
             postBtn.disabled = true;
 
             try {
-                let danbooruTags = '';
-                try {
-                    danbooruTags = await generateDanbooruTags(resolvedImagePrompt, { customPrompt: promptSettings.snsImagePrompt || '' });
-                } catch (tagErr) {
-                    console.warn('[ST-LifeSim] 유저 SNS Danbooru 태그 생성 실패:', tagErr);
-                }
+                const allContactsList = [...getContacts('character'), ...getContacts('chat')];
+                const tagResult = await generateImageTags(userImageDesc, {
+                    includeNames: [authorName, '{{user}}'],
+                    contacts: allContactsList,
+                    getAppearanceTagsByName,
+                });
+                resolvedImagePrompt = userImageDesc;
 
-                if (danbooruTags) {
-                    const finalApiPrompt = buildImageApiPrompt(danbooruTags, appearanceTagGroups);
-                    const generatedUrl = await generateImageViaApi(finalApiPrompt);
+                if (tagResult.finalPrompt) {
+                    const generatedUrl = await generateImageViaApi(tagResult.finalPrompt);
                     finalImageUrl = generatedUrl || fallbackImageUrl;
                     if (generatedUrl) imageDescription = '';
                     if (!generatedUrl) showToast('이미지 생성 결과가 없습니다. 기본 이미지를 사용합니다.', 'warn', 2500);

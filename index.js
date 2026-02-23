@@ -22,13 +22,13 @@ import { exportAllData, importAllData, clearAllData } from './utils/storage.js';
 import { renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEventGeneratorUI, renderVoiceMemoUI, triggerQuickSend, triggerReadReceipt, triggerNoContact, triggerUserImageGenerationAndSend } from './modules/quick-tools/quick-tools.js';
 import { startFirstMsgTimer, renderFirstMsgSettingsUI } from './modules/firstmsg/firstmsg.js';
 import { initEmoticon, openEmoticonPopup } from './modules/emoticon/emoticon.js';
-import { initContacts, openContactsPopup, getAppearanceTagsByName, collectAppearanceTagsFromText } from './modules/contacts/contacts.js';
+import { initContacts, openContactsPopup, getContacts, getAppearanceTagsByName, collectAppearanceTagsFromText } from './modules/contacts/contacts.js';
 import { initCall, onCharacterMessageRenderedForProactiveCall, openCallLogsPopup, triggerProactiveIncomingCall, requestActiveCharacterCall } from './modules/call/call.js';
 import { initWallet, openWalletPopup } from './modules/wallet/wallet.js';
 import { initSns, openSnsPopup, triggerNpcPosting, triggerPendingCommentReaction, hasPendingCommentReaction } from './modules/sns/sns.js';
 import { initCalendar, openCalendarPopup } from './modules/calendar/calendar.js';
 import { initGifticon, openGifticonPopup, trackGifticonUsageFromCharacterMessage } from './modules/gifticon/gifticon.js';
-import { generateDanbooruTags, buildImageApiPrompt, containsKorean } from './utils/image-tag-generator.js';
+import { generateDanbooruTags, buildImageApiPrompt, containsKorean, generateImageTags } from './utils/image-tag-generator.js';
 
 // 설정 키
 const SETTINGS_KEY = 'st-lifesim';
@@ -2206,15 +2206,10 @@ async function applyCharacterImageDisplayMode() {
 
     if (allowAutoImageGeneration) {
         // ── ON 모드: 이미지 생성 API로 실제 이미지 생성 ──
+        // 통합 파이프라인: generateImageTags() → Image API
         showToast(`📷 ${picMatches.length}개 이미지 생성 중...`, 'info', 2000);
-        const appearanceTags = getAppearanceTagsByName(charName) || settings.characterAppearanceTags?.[charName] || '';
         const userName = ctx?.name1 || '';
-        const userAppearanceTags = getAppearanceTagsByName(userName) || settings.characterAppearanceTags?.['{{user}}'] || '';
-        const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const userNameRegex = userName ? new RegExp(escapeRegex(userName.toLowerCase())) : null;
-        const charNameRegex = charName ? new RegExp(escapeRegex(charName.toLowerCase())) : null;
-        const userHintRegex = /\buser\b|{{user}}|유저|너|당신|with user|together|둘이|함께/;
-        const charHintRegex = /\bchar\b|{{char}}|캐릭터/;
+        const allContactsList = [...getContacts('character'), ...getContacts('chat')];
         for (const match of picMatches) {
             const fullTag = match[0];
             const rawPrompt = (match[1] || '').trim();
@@ -2223,38 +2218,26 @@ async function applyCharacterImageDisplayMode() {
                 replacements.push({ index: matchIndex, length: fullTag.length, replacement: '' });
                 continue;
             }
-            const promptLower = rawPrompt.toLowerCase();
-            const mentionsUser = userHintRegex.test(promptLower)
-                || (!!userNameRegex && userNameRegex.test(promptLower));
-            const mentionsChar = charHintRegex.test(promptLower)
-                || (!!charNameRegex && charNameRegex.test(promptLower));
-            const tags = collectAppearanceTagsFromText(rawPrompt, { includeNames: [charName] });
-            if (mentionsUser && userAppearanceTags) unshiftUniqueTagGroup(tags, userAppearanceTags);
-            // char의 외모태그를 항상 보장 (pushUniqueTagGroup이 중복을 방지)
-            if (appearanceTags) pushUniqueTagGroup(tags, appearanceTags);
-            const tagsToUse = tags.join(' | ');
-            // STEP 1-2: Danbooru 태그 생성 (한국어 → 영어 태그 변환)
-            // 메시지 이미지 프롬프트(커스텀)를 태그 생성 컨텍스트로 함께 전달
-            const messageImageCustomPrompt = (settings.messageImagePrompt || DEFAULT_SETTINGS.messageImagePrompt)
-                .replace(/\{charName\}/g, charName)
-                .replace(/\{appearanceTags\}/g, tagsToUse);
-            let danbooruTags = '';
-            try {
-                danbooruTags = await generateDanbooruTags(rawPrompt, { customPrompt: messageImageCustomPrompt });
-            } catch (tagErr) {
-                console.warn('[ST-LifeSim] Danbooru 태그 생성 실패:', tagErr);
+            // 통합 이미지 태그 생성 (커스텀 프롬프트 없이 캐릭터 컨텍스트 기반)
+            const includeNames = [charName];
+            // user hint 감지 시 유저도 포함
+            const userHintRegex = /\buser\b|{{user}}|유저|너|당신|with user|together|둘이|함께/;
+            if (userName && userHintRegex.test(rawPrompt.toLowerCase())) {
+                includeNames.push(userName);
             }
+            const tagResult = await generateImageTags(rawPrompt, {
+                includeNames,
+                contacts: allContactsList,
+                getAppearanceTagsByName,
+            });
             let replacement;
-            // 태그 생성 실패 시 이미지 생성 차단 → 줄글 폴백
-            if (!danbooruTags) {
+            if (!tagResult.finalPrompt) {
                 console.warn('[ST-LifeSim] 태그 생성 결과 없음, 줄글 형태로 출력합니다.');
                 const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
                 replacement = template.replace(/\{description\}/g, rawPrompt);
             } else {
-                // STEP 3: 생성된 태그 + 외모 태그 조합 → Image API 전달
-                const finalPrompt = buildImageApiPrompt(danbooruTags, tags);
                 try {
-                    const imageUrl = await generateMessageImageViaApi(finalPrompt);
+                    const imageUrl = await generateMessageImageViaApi(tagResult.finalPrompt);
                     if (imageUrl) {
                         const safeUrl = escapeHtml(imageUrl);
                         const safePrompt = escapeHtml(rawPrompt);
