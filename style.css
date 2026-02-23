@@ -2268,16 +2268,18 @@ body[data-theme="dark"],
 
 .slm-qa-btn {
   --slm-qa-icon-size: 24px;
+  --slm-qa-label-font-size: 14px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--slm-border, #e5e5ea);
   background: var(--slm-bg-secondary, #f2f2f7);
   color: var(--slm-text, #1c1c1e);
-  font-size: 14px;
+  font-size: var(--slm-qa-label-font-size);
   cursor: pointer;
   transition: background 0.15s, transform 0.1s;
   text-align: center;
@@ -2341,4 +2343,23 @@ body[data-theme="dark"],
 .slm-qa-custom-input::placeholder {
   color: var(--slm-text-secondary, #6d6d72);
   opacity: 0.7;
+}
+
+/* RightSendForm icons */
+.slm-rsf-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  padding: 2px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.slm-rsf-icon:hover {
+  background: var(--slm-bg-secondary, #f2f2f7);
 }

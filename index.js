@@ -168,8 +168,10 @@ const DEFAULT_SETTINGS = {
         columns: 1,             // 1, 2, or 3 column layout
         displayMode: 'full',    // 'full' | 'emojiOnly' | 'labelOnly'
         iconSize: 24,           // px (16~64)
+        labelFontSize: 14,      // px (8~24) - 퀵 액세스 제목 폰트 크기
         customLabels: {},       // { [key]: string } - custom display names
         customImages: {},       // { [key]: string } - image URL replacement for emoji
+        rightSendFormItems: {}, // { [key]: true } - items to show as extra icons in sendform area
         order: ['userImage', 'callRequest', 'readReceipt', 'noContact', 'voiceMemo', 'emoticon', 'deletedMessage', 'sns', 'quickSend'],
         items: {
             userImage: true,
@@ -382,11 +384,20 @@ function getSettings() {
     } else {
         ext[SETTINGS_KEY].quickAccess.iconSize = Math.max(16, Math.min(64, Math.round(parsedIconSize)));
     }
+    const parsedLabelFontSize = Number(ext[SETTINGS_KEY].quickAccess.labelFontSize);
+    if (!Number.isFinite(parsedLabelFontSize)) {
+        ext[SETTINGS_KEY].quickAccess.labelFontSize = DEFAULT_SETTINGS.quickAccess.labelFontSize;
+    } else {
+        ext[SETTINGS_KEY].quickAccess.labelFontSize = Math.max(8, Math.min(24, Math.round(parsedLabelFontSize)));
+    }
     if (!ext[SETTINGS_KEY].quickAccess.customLabels || typeof ext[SETTINGS_KEY].quickAccess.customLabels !== 'object') {
         ext[SETTINGS_KEY].quickAccess.customLabels = {};
     }
     if (!ext[SETTINGS_KEY].quickAccess.customImages || typeof ext[SETTINGS_KEY].quickAccess.customImages !== 'object') {
         ext[SETTINGS_KEY].quickAccess.customImages = {};
+    }
+    if (!ext[SETTINGS_KEY].quickAccess.rightSendFormItems || typeof ext[SETTINGS_KEY].quickAccess.rightSendFormItems !== 'object') {
+        ext[SETTINGS_KEY].quickAccess.rightSendFormItems = {};
     }
     const customLabelEntries = Object.entries(ext[SETTINGS_KEY].quickAccess.customLabels)
         .map(([key, value]) => [String(key || '').trim(), String(value || '').trim()])
@@ -521,12 +532,14 @@ function openQuickAccessPopup() {
     const customLabels = settings.quickAccess?.customLabels || {};
     const customImages = settings.quickAccess?.customImages || {};
     const iconSize = Math.max(16, Math.min(64, Number(settings.quickAccess?.iconSize) || 24));
+    const labelFontSize = Math.max(8, Math.min(24, Number(settings.quickAccess?.labelFontSize) || 14));
     if (quickItems.length > 0) {
         const listContainer = document.createElement('div');
         listContainer.className = 'slm-qa-column-container';
         const grid = document.createElement('div');
         grid.className = `slm-qa-grid slm-qa-cols-${columns}`;
         grid.style.setProperty('--slm-qa-icon-size', `${iconSize}px`);
+        grid.style.setProperty('--slm-qa-label-font-size', `${labelFontSize}px`);
         quickItems.forEach((item) => {
             const btn = document.createElement('button');
             btn.className = `slm-qa-btn slm-qa-mode-${displayMode}`;
@@ -577,6 +590,49 @@ function refreshQuickAccessFab() {
     if (document.getElementById('slm-overlay-quick-access-menu')) {
         closePopup('quick-access-menu');
     }
+}
+
+/**
+ * 퀵 액세스 항목 중 rightSendFormItems에 등록된 것을 send_but 옆에 아이콘 버튼으로 삽입한다
+ */
+function injectRightSendFormIcons() {
+    // 기존 삽입된 아이콘 제거
+    document.querySelectorAll('.slm-rsf-icon').forEach(el => el.remove());
+
+    const settings = getSettings();
+    const rsfItems = settings.quickAccess?.rightSendFormItems || {};
+    const activeKeys = Object.keys(rsfItems).filter(k => rsfItems[k]);
+    if (activeKeys.length === 0) return;
+
+    const sendBtn = document.getElementById('send_but');
+    if (!sendBtn || !sendBtn.parentNode) return;
+
+    const itemMap = new Map(QUICK_ACCESS_ITEMS.map(item => [item.key, item]));
+    const customImages = settings.quickAccess?.customImages || {};
+
+    activeKeys.forEach((key) => {
+        const item = itemMap.get(key);
+        if (!item) return;
+        if (item.moduleKey && !isModuleEnabled(item.moduleKey)) return;
+
+        const btn = document.createElement('button');
+        btn.className = 'slm-rsf-icon interactable';
+        btn.title = item.label;
+        btn.setAttribute('aria-label', item.label);
+        btn.setAttribute('tabindex', '0');
+        const imgUrl = normalizeQuickAccessImageUrl(customImages[key] || '');
+        if (imgUrl) {
+            btn.innerHTML = `<img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(item.label)}" style="width:20px;height:20px;object-fit:contain;border-radius:3px;">`;
+        } else {
+            btn.textContent = item.icon;
+        }
+        btn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            await item.action();
+        });
+        sendBtn.parentNode.insertBefore(btn, sendBtn);
+    });
 }
 
 /**
@@ -972,6 +1028,32 @@ function openSettingsPanel(onBack) {
         iconSizeRow.append(iconSizeLbl, iconSizeInput, iconSizePx, iconSizeBtn);
         wrapper.appendChild(iconSizeRow);
 
+        // ── 제목 폰트 크기 설정 ──
+        const labelFontSizeRow = document.createElement('div');
+        labelFontSizeRow.className = 'slm-input-row';
+        labelFontSizeRow.style.marginTop = '10px';
+        const labelFontSizeLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '제목 폰트 크기:' });
+        const labelFontSizeInput = Object.assign(document.createElement('input'), {
+            className: 'slm-input slm-input-sm', type: 'number', min: '8', max: '24',
+            value: String(settings.quickAccess?.labelFontSize || 14),
+        });
+        labelFontSizeInput.style.width = '70px';
+        const labelFontSizePx = Object.assign(document.createElement('span'), { className: 'slm-label', textContent: 'px' });
+        const labelFontSizeBtn = Object.assign(document.createElement('button'), {
+            className: 'slm-btn slm-btn-primary slm-btn-sm',
+            textContent: '적용',
+        });
+        labelFontSizeBtn.onclick = () => {
+            if (!settings.quickAccess) settings.quickAccess = { ...DEFAULT_SETTINGS.quickAccess };
+            const nextSize = Math.max(8, Math.min(24, Number(labelFontSizeInput.value) || 14));
+            settings.quickAccess.labelFontSize = nextSize;
+            labelFontSizeInput.value = String(nextSize);
+            saveSettings();
+            refreshQuickAccessFab();
+        };
+        labelFontSizeRow.append(labelFontSizeLbl, labelFontSizeInput, labelFontSizePx, labelFontSizeBtn);
+        wrapper.appendChild(labelFontSizeRow);
+
         wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
 
         // ── 개별 항목 표시/숨김 + 순서 + 커스텀 이름/이미지 ──
@@ -1091,6 +1173,29 @@ function openSettingsPanel(onBack) {
                 imgRow.appendChild(Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '이미지 URL' }));
                 imgRow.appendChild(imgInput);
                 row.appendChild(imgRow);
+
+                // RightSendForm에 아이콘 추가 옵션
+                const rsfRow = document.createElement('div');
+                rsfRow.className = 'slm-input-row slm-qa-settings-field-row';
+                rsfRow.style.marginTop = '2px';
+                const rsfLbl = document.createElement('label');
+                rsfLbl.className = 'slm-toggle-label';
+                rsfLbl.style.fontSize = '12px';
+                const rsfChk = document.createElement('input');
+                rsfChk.type = 'checkbox';
+                rsfChk.checked = !!settings.quickAccess?.rightSendFormItems?.[item.key];
+                rsfChk.onchange = () => {
+                    if (!settings.quickAccess) settings.quickAccess = { ...DEFAULT_SETTINGS.quickAccess };
+                    if (!settings.quickAccess.rightSendFormItems) settings.quickAccess.rightSendFormItems = {};
+                    settings.quickAccess.rightSendFormItems[item.key] = rsfChk.checked;
+                    if (!rsfChk.checked) delete settings.quickAccess.rightSendFormItems[item.key];
+                    saveSettings();
+                    injectRightSendFormIcons();
+                };
+                rsfLbl.appendChild(rsfChk);
+                rsfLbl.appendChild(document.createTextNode(' 입력창 옆에 아이콘 추가'));
+                rsfRow.appendChild(rsfLbl);
+                row.appendChild(rsfRow);
 
                 list.appendChild(row);
             });
@@ -2720,6 +2825,9 @@ async function init() {
 
     // ST-LifeSim 메뉴 버튼 삽입 (sendform 옆)
     try { injectLifeSimMenuButton(); } catch (e) { console.error('[ST-LifeSim] 메뉴 버튼 오류:', e); }
+
+    // RightSendForm 아이콘 삽입
+    try { injectRightSendFormIcons(); } catch (e) { console.error('[ST-LifeSim] RSF 아이콘 오류:', e); }
 
     // 선톡 타이머 시작 (활성화된 경우)
     try { startFirstMsgTimer(settings.firstMsg); } catch (e) { console.error('[ST-LifeSim] 선톡 타이머 오류:', e); }
