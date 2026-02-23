@@ -495,12 +495,97 @@ function injectLifeSimMenuButton() {
     }
 }
 
+/**
+ * 유저 이미지 생성 팝업을 연다 (퀵 액세스용)
+ */
+function openUserImagePromptPopup() {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'slm-settings-wrapper slm-form';
+
+    const desc = document.createElement('p');
+    desc.className = 'slm-desc';
+    desc.textContent = '이미지 설명을 입력하면 AI가 이미지를 생성하여 유저 메시지로 전송합니다.';
+    wrapper.appendChild(desc);
+
+    const inputLabel = document.createElement('label');
+    inputLabel.className = 'slm-label';
+    inputLabel.textContent = '이미지 설명';
+    wrapper.appendChild(inputLabel);
+
+    const input = document.createElement('textarea');
+    input.className = 'slm-textarea';
+    input.rows = 3;
+    input.placeholder = '예: 카페에서 셀카, 공원에서 산책하는 모습, 음식 사진 등';
+    wrapper.appendChild(input);
+
+    const hint = document.createElement('p');
+    hint.className = 'slm-desc';
+    hint.style.marginTop = '4px';
+    hint.textContent = '💡 연락처에 등록된 캐릭터 이름을 포함하면 해당 캐릭터의 외형도 반영됩니다.';
+    wrapper.appendChild(hint);
+
+    const footer = document.createElement('div');
+    footer.className = 'slm-panel-footer';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'slm-btn slm-btn-secondary';
+    cancelBtn.textContent = '취소';
+
+    const genBtn = document.createElement('button');
+    genBtn.className = 'slm-btn slm-btn-primary';
+    genBtn.textContent = '🎨 이미지 생성';
+
+    footer.appendChild(cancelBtn);
+    footer.appendChild(genBtn);
+
+    const { close } = createPopup({
+        id: 'user-image-gen',
+        title: '🎨 이미지 생성 (유저)',
+        content: wrapper,
+        footer,
+        className: 'slm-sub-panel',
+    });
+
+    cancelBtn.onclick = () => close();
+
+    genBtn.onclick = async () => {
+        const prompt = input.value.trim();
+        if (!prompt) {
+            showToast('이미지 설명을 입력해주세요.', 'warn');
+            return;
+        }
+        genBtn.disabled = true;
+        genBtn.textContent = '⏳ 생성 중...';
+        try {
+            const ok = await triggerUserImageGenerationAndSend(prompt);
+            if (ok) {
+                close();
+            } else {
+                showToast('이미지 생성에 실패했습니다.', 'error', 2000);
+            }
+        } catch (e) {
+            showToast('이미지 생성 실패: ' + e.message, 'error');
+        } finally {
+            genBtn.disabled = false;
+            genBtn.textContent = '🎨 이미지 생성';
+        }
+    };
+
+    // Enter 키로 생성 (Shift+Enter는 줄바꿈)
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            genBtn.click();
+        }
+    });
+
+    // 자동 포커스
+    requestAnimationFrame(() => input.focus());
+}
+
 const QUICK_ACCESS_ITEMS = [
     { key: 'userImage', icon: '🎨', label: '유저 이미지 전송', moduleKey: 'quickTools', action: async () => {
-        const prompt = window.prompt('생성할 이미지 설명을 입력하세요.');
-        if (!prompt) return;
-        const ok = await triggerUserImageGenerationAndSend(prompt);
-        if (!ok) showToast('이미지 생성에 실패했습니다.', 'error', 2000);
+        openUserImagePromptPopup();
     } },
     { key: 'callRequest', icon: '📞', label: '통화 요청', moduleKey: 'call', action: async () => { await requestActiveCharacterCall(); } },
     { key: 'readReceipt', icon: '🔕', label: '읽씹하기', moduleKey: 'quickTools', action: async () => { await triggerReadReceipt(); } },

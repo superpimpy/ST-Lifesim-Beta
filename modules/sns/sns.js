@@ -553,13 +553,15 @@ export async function triggerNpcPosting() {
         let resolvedImagePrompt = '';
         if (promptSettings.snsImageMode) {
             // 통합 파이프라인: generateImageTags() → Image API
+            // 게시글 내용에서 시각적 장면을 유추할 수 있도록 작성자 정보 포함
             const allContactsList = [...getContacts('character'), ...getContacts('chat')];
-            const tagResult = await generateImageTags(postContent, {
+            const imageInputPrompt = `${pick.name}'s social media photo post: "${postContent}"`;
+            const tagResult = await generateImageTags(imageInputPrompt, {
                 includeNames: [pick.name],
                 contacts: allContactsList,
                 getAppearanceTagsByName,
             });
-            resolvedImagePrompt = postContent;
+            resolvedImagePrompt = imageInputPrompt;
 
             if (tagResult.finalPrompt) {
                 try {
@@ -1556,13 +1558,15 @@ function openWritePostDialog(onSave) {
             const fallbackImageUrl = getAuthorDefaultImageUrl(authorName) || '';
 
             // 통합 파이프라인: generateImageTags() → Image API
+            // 유저 SNS 게시글용 이미지: 작성자 컨텍스트 포함
             showToast('🎨 이미지 생성 중...', 'info', 3000);
             postBtn.disabled = true;
 
             try {
                 const allContactsList = [...getContacts('character'), ...getContacts('chat')];
-                const tagResult = await generateImageTags(userImageDesc, {
-                    includeNames: [authorName, '{{user}}'],
+                const imageInputPrompt = `${authorName}'s social media photo post: "${userImageDesc}"`;
+                const tagResult = await generateImageTags(imageInputPrompt, {
+                    includeNames: [authorName].filter(Boolean),
                     contacts: allContactsList,
                     getAppearanceTagsByName,
                 });

@@ -41,6 +41,8 @@ const TAG_CONVERSION_PROMPT = [
     'Convert the following image description into Danbooru-style English tags.',
     'Output ONLY comma-separated tags. No sentences, no Korean, no explanation.',
     'Replace underscores with spaces in all tags.',
+    'Do NOT fabricate or guess character appearance details (hair color, eye color, clothing, etc.).',
+    'Always include at least one framing tag (upper body, full body, close-up, portrait) and one setting tag (indoor, outdoor, etc.).',
     'Example output: 1girl, selfie, looking at viewer, phone in hand, casual smile, indoor, upper body',
     '',
     'Description:',
@@ -58,28 +60,41 @@ const TAG_CONVERSION_PROMPT = [
 function buildCharacterAwarePrompt(characters, appearanceVarMap) {
     const charList = characters.length > 0
         ? characters.map(c => {
-            const desc = c.description ? ` (${c.description})` : ''; // ✅ fix: desc 선언
+            const desc = c.description ? ` (${c.description})` : '';
             return `  - ${c.name}${desc}`;
         }).join('\n')
         : '  (none)';
 
+    // Provide character appearance as READ-ONLY reference so the AI can compose
+    // better scene/framing tags (e.g. close-up for selfie, full body for outfit post).
+    // The AI MUST NOT reproduce these tags in its output.
+    const charAppearanceRef = characters
+        .filter(c => c.appearanceTags)
+        .map(c => `  - ${c.name}: ${c.appearanceTags}`)
+        .join('\n');
+    const appearanceRefBlock = charAppearanceRef
+        ? `\nCharacter appearance (READ-ONLY reference — do NOT output any of these tags, the system appends them automatically):\n${charAppearanceRef}\n`
+        : '';
+
     return [
         'You are a Danbooru-style tag generator for image creation.',
         '',
-        'Given an image description and a list of known characters, generate ONLY scene/situation tags.',
-        'Character appearance tags are handled automatically by the system — do NOT include them in your output.',
+        'Given an image description and a list of known characters, generate ONLY scene/situation/composition tags.',
+        'Character appearance tags (hair, eyes, clothing, body features) are handled automatically by the system — do NOT include them in your output.',
         '',
         'RULES:',
         '1) Output ONLY comma-separated Danbooru-style tags. No sentences, no Korean, no explanation.',
         '2) Replace underscores with spaces in all tags.',
-        '3) DO NOT output character appearance, clothing, hair, or eye tags — the system appends them automatically.',
+        '3) NEVER output character appearance, clothing, hair color, eye color, or body feature tags — the system appends them automatically. Do NOT fabricate or guess any character appearance details.',
         '4) DO NOT output any {{appearanceTag:...}} variables or references.',
         '5) DO include character count tags: 1girl, 1boy, 2girls, 3boys, multiple boys, multiple girls, solo, etc.',
         '6) Include scene/environment tags: cafe, outdoor, indoor, classroom, bedroom, park, street, etc.',
-        '7) Include pose/action tags: selfie, standing, sitting, looking at viewer, v sign, peace sign, etc.',
-        '8) Include mood/lighting/framing tags: warm lighting, natural lighting, upper body, close-up, full body, etc.',
+        '7) Include pose/action tags: selfie, standing, sitting, looking at viewer, v sign, peace sign, holding phone, etc.',
+        '8) Include mood/lighting/framing tags: warm lighting, natural lighting, upper body, close-up, full body, photo (medium), portrait, etc.',
         '9) Count characters from the known list when they are mentioned or implied in the description.',
         '10) The entire output MUST be in English. No Korean or other languages.',
+        '11) Even if the description is vague (e.g. just a social media post text), infer a plausible visual scene and generate appropriate scene/composition tags.',
+        '12) Always include at least one framing tag (upper body, full body, close-up, portrait, etc.) and one setting tag (indoor, outdoor, etc.).',
         '',
         'EXAMPLE:',
         '* Input: "Alice and Bob go to cafe"',
@@ -88,7 +103,7 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap) {
         '',
         'Known characters:',
         charList,
-        '',
+        appearanceRefBlock,
         'Image description:',
     ].join('\n');
 }
@@ -376,7 +391,15 @@ export async function generateImageTags(rawPrompt, options = {}) {
         console.warn('[image-tag-generator] Scene tag generation failed:', err);
     }
 
+    // ── Step 2b: If scene tag generation failed, collect appearance tags as fallback ──
     if (!sceneTags) {
+        const fallbackAppearance = matched
+            .map(c => c.appearanceTags)
+            .filter(Boolean);
+        if (fallbackAppearance.length > 0) {
+            const fallbackPrompt = buildImageApiPrompt('', fallbackAppearance);
+            return { sceneTags: '', appearanceGroups: fallbackAppearance, finalPrompt: fallbackPrompt };
+        }
         return emptyResult;
     }
 

@@ -628,11 +628,17 @@ async function generateUserImage(prompt) {
             return '';
         }
         const userName = ctx?.name1 || '';
+        const charName = ctx?.name2 || '';
         const allContactsList = [...getContacts('character'), ...getContacts('chat')];
 
-        // 통합 이미지 태그 생성 (캐릭터 컨텍스트 기반, 커스텀 프롬프트 없음)
+        // {{user}} → 실제 유저 이름으로 치환하여 외형태그 조회 누락 방지
+        const includeNames = [userName].filter(Boolean);
+        // char 이름도 프롬프트에 언급되었을 수 있으므로 자동 매칭에 맡기되,
+        // 프롬프트에서 명시적으로 언급된 연락처 캐릭터는 generateImageTags 내부에서 자동 감지됨
+
+        // 통합 이미지 태그 생성 (캐릭터 컨텍스트 기반)
         const tagResult = await generateImageTags(prompt.trim(), {
-            includeNames: [userName, '{{user}}'],
+            includeNames,
             contacts: allContactsList,
             getAppearanceTagsByName,
         });
