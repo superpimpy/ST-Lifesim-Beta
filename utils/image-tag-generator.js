@@ -64,7 +64,6 @@ const TAG_CONVERSION_PROMPT = [
 function buildCharacterAwarePrompt(characters, appearanceVarMap) {
     const charList = characters.length > 0
         ? characters.map(c => {
-            const desc = c.description ? ` (${c.description})` : '';
             const tags = c.appearanceTags ? ` [appearance: ${c.appearanceTags}]` : '';
             return `  - ${c.name}${desc}${tags}`;
         }).join('\n')
@@ -111,8 +110,15 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap) {
         '8) If characters from the known list are mentioned or implied, count them for the character count tags.',
         '',
         'OUTPUT FORMAT:',
-        'scene_and_situation_tags | {{appearanceTag:character1_name}} | {{appearanceTag:character2_name}}',
+        'scene_and_situation_tags | {{appearanceTag:character1_name}}s description | {{appearanceTag:character2_name}}s description',
         '(Only include appearance tag variables for characters that are actually participating in the scene)',
+        '',
+        'EXAMPLE FORMAT:',
+        '* Input: a and b go to cafe',
+        '* {{appearanceTag:a}}s description is girl, white hair, blue eyes',
+        '* {{appearanceTag:b}}s description is boy, black hair, white eyes',
+        '* Ai thinks and doing tag match Situation is: cafe, sitting, eating a cake',
+        'Then OUTPUT WILL BE: cafe, sitting, eating a cake | girl, white hair, blue eyes | boy, black hair, white eyes',
         '',
         'Known characters:',
         charList,
