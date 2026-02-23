@@ -2254,6 +2254,8 @@ body[data-theme="dark"],
 
 /* ── Quick Access Grid & Button Customization ── */
 .slm-qa-grid {
+  --slm-qa-icon-size: 24px;
+  --slm-qa-label-font-size: 14px;
   display: grid;
   gap: 8px;
   margin-top: 8px;
@@ -2267,8 +2269,6 @@ body[data-theme="dark"],
 .slm-qa-cols-3 { grid-template-columns: repeat(3, 1fr); }
 
 .slm-qa-btn {
-  --slm-qa-icon-size: 24px;
-  --slm-qa-label-font-size: 14px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2279,7 +2279,7 @@ body[data-theme="dark"],
   border: 1px solid var(--slm-border, #e5e5ea);
   background: var(--slm-bg-secondary, #f2f2f7);
   color: var(--slm-text, #1c1c1e);
-  font-size: var(--slm-qa-label-font-size);
+  font-size: var(--slm-qa-label-font-size, 14px);
   cursor: pointer;
   transition: background 0.15s, transform 0.1s;
   text-align: center;
@@ -2287,7 +2287,7 @@ body[data-theme="dark"],
   min-height: 42px;
 }
 .slm-qa-icon {
-  font-size: var(--slm-qa-icon-size);
+  font-size: var(--slm-qa-icon-size, 24px);
   line-height: 1;
 }
 .slm-qa-btn:hover {
@@ -2303,20 +2303,20 @@ body[data-theme="dark"],
   min-height: 48px;
 }
 .slm-qa-mode-labelOnly {
-  font-size: 13px;
+  font-size: var(--slm-qa-label-font-size, 14px);
   padding: 8px 10px;
 }
 
 .slm-qa-img {
-  width: var(--slm-qa-icon-size);
-  height: var(--slm-qa-icon-size);
+  width: var(--slm-qa-icon-size, 24px);
+  height: var(--slm-qa-icon-size, 24px);
   object-fit: contain;
   border-radius: 4px;
   flex-shrink: 0;
 }
 .slm-qa-mode-emojiOnly .slm-qa-img {
-  width: calc(var(--slm-qa-icon-size) + 8px);
-  height: calc(var(--slm-qa-icon-size) + 8px);
+  width: calc(var(--slm-qa-icon-size, 24px) + 8px);
+  height: calc(var(--slm-qa-icon-size, 24px) + 8px);
 }
 
 /* Quick Access settings item */

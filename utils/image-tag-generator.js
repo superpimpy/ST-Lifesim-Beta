@@ -349,6 +349,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
         const contact = allContacts.find(c =>
             String(c.name || '').trim().toLowerCase() === normalized
             || String(c.displayName || '').trim().toLowerCase() === normalized
+            || String(c.subName || '').trim().toLowerCase() === normalized
         );
         const appearance = getAppearanceFn(name);
         matched.push({
@@ -360,7 +361,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
 
     // Scan all contacts for names mentioned in the prompt
     for (const contact of allContacts) {
-        const names = [contact?.name, contact?.displayName]
+        const names = [contact?.name, contact?.displayName, contact?.subName]
             .map(v => String(v || '').trim())
             .filter(Boolean);
         if (names.some(n => matchedNamesLower.has(n.toLowerCase()))) continue;

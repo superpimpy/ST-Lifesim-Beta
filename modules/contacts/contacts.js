@@ -48,6 +48,7 @@ const MODEL_KEY_BY_SOURCE = {
  * @property {string} id
  * @property {string} name
  * @property {string} [displayName]
+ * @property {string} [subName] - 다른 언어 이름 (이미지 생성 시 이름 인식에 사용)
  * @property {string} avatar
  * @property {string} description
  * @property {string} relationToUser
@@ -414,6 +415,7 @@ function openContactDetailPopup(contact) {
     fields.className = 'slm-contact-detail-fields';
 
     const fieldDefs = [
+        { label: '다른 언어 이름', value: contact.subName },
         { label: '관계', value: contact.relationToUser },
         { label: '성격/말투', value: contact.personality },
         { label: '외관 태그', value: contact.appearanceTags },
@@ -454,6 +456,7 @@ function openContactDialog(existing, defaultBinding, onSave) {
 
     const fields = {
         name: createFormField(wrapper, existing?.isCharAuto ? '표시 이름 *' : (existing?.isUserAuto ? '표시 이름' : '이름 *'), 'text', existing?.displayName || existing?.name || ''),
+        subName: createFormField(wrapper, '🌐 다른 언어 이름', 'text', existing?.subName || ''),
         avatar: createFormField(wrapper, '프로필 이미지 URL', 'url', existing?.avatar || ''),
         description: createFormField(wrapper, '설명', 'text', existing?.description || ''),
         relationToUser: createFormField(wrapper, '{{user}}와의 관계 *', 'text', existing?.relationToUser || ''),
@@ -461,6 +464,7 @@ function openContactDialog(existing, defaultBinding, onSave) {
         personality: createFormField(wrapper, '성격/말투', 'text', existing?.personality || ''),
         appearanceTags: createFormField(wrapper, '🏷️ 외관 태그 (이미지 생성용)', 'text', existing?.appearanceTags || ''),
     };
+    fields.subName.placeholder = '예: 유레오, ユレオ (이미지 생성 시 이 이름도 인식됩니다)';
     fields.appearanceTags.placeholder = '예: long hair, school uniform, warm smile';
     if (existing?.isCharAuto) {
         fields.name.disabled = true;
@@ -545,6 +549,7 @@ function openContactDialog(existing, defaultBinding, onSave) {
             id: existing?.id || generateId(),
             name: canonicalName,
             displayName,
+            subName: fields.subName.value.trim(),
             avatar: fields.avatar.value.trim(),
             description: (isCharAuto || isUserAuto) ? (existing?.description || '') : fields.description.value.trim(),
             relationToUser: isUserAuto ? (existing?.relationToUser || '본인') : relationToUser,
@@ -753,7 +758,7 @@ export function getContacts(binding = 'chat') {
 export function getAppearanceTagsByName(name) {
     if (!name) return '';
     const allContacts = [...loadContacts('character'), ...loadContacts('chat')];
-    const contact = allContacts.find(c => c.name === name || c.displayName === name);
+    const contact = allContacts.find(c => c.name === name || c.displayName === name || c.subName === name);
     const fromContact = String(contact?.appearanceTags || '').trim();
     if (fromContact) return fromContact;
     // 연락처에 외관 태그가 없으면 characterAppearanceTags 설정에서 확인
@@ -779,6 +784,10 @@ export function buildAppearanceTagVariableMap() {
         const displayName = String(c.displayName || '').trim();
         if (displayName && displayName !== name) {
             if (tags) map[displayName] = tags;
+        }
+        const subName = String(c.subName || '').trim();
+        if (subName && subName !== name && subName !== displayName) {
+            if (tags) map[subName] = tags;
         }
     }
     return map;
@@ -841,7 +850,7 @@ export function collectAppearanceTagsFromText(text, options = {}) {
     const checkedNames = new Set(includeNames.map(n => String(n || '').trim().toLowerCase()));
 
     allContacts.forEach((contact) => {
-        const namesToCheck = [contact?.name, contact?.displayName]
+        const namesToCheck = [contact?.name, contact?.displayName, contact?.subName]
             .map(v => String(v || '').trim())
             .filter(Boolean);
         if (namesToCheck.some(n => checkedNames.has(n.toLowerCase()))) return;
