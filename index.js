@@ -1597,6 +1597,7 @@ function openSettingsPanel(onBack) {
             saveSettings();
         };
         textTemplateGroup.appendChild(textTemplateResetBtn);
+        textTemplateGroup.appendChild(createPromptSaveBtn());
         wrapper.appendChild(textTemplateGroup);
 
         // ── 태그 가중치 설정 ──
@@ -1661,6 +1662,7 @@ function openSettingsPanel(onBack) {
             saveSettings();
         };
         snsImagePromptGroup.appendChild(snsImagePromptResetBtn);
+        snsImagePromptGroup.appendChild(createPromptSaveBtn());
         wrapper.appendChild(snsImagePromptGroup);
 
         const messageImagePromptGroup = document.createElement('div');
@@ -1682,6 +1684,7 @@ function openSettingsPanel(onBack) {
             saveSettings();
         };
         messageImagePromptGroup.appendChild(messageImagePromptResetBtn);
+        messageImagePromptGroup.appendChild(createPromptSaveBtn());
         wrapper.appendChild(messageImagePromptGroup);
 
         // 이미지 생성 프롬프트 주입 (AI에게 보내는 지시)
@@ -1709,6 +1712,7 @@ function openSettingsPanel(onBack) {
             saveSettings();
         };
         injectionPromptGroup.appendChild(injectionPromptResetBtn);
+        injectionPromptGroup.appendChild(createPromptSaveBtn());
         wrapper.appendChild(injectionPromptGroup);
 
         const tagAdditionalPromptGroup = document.createElement('div');
@@ -1735,6 +1739,7 @@ function openSettingsPanel(onBack) {
             saveSettings();
         };
         tagAdditionalPromptGroup.appendChild(tagAdditionalPromptResetBtn);
+        tagAdditionalPromptGroup.appendChild(createPromptSaveBtn());
         wrapper.appendChild(tagAdditionalPromptGroup);
 
         // 외관 태그 안내 (연락처 탭으로 이동됨)
@@ -2341,7 +2346,7 @@ function openSettingsPanel(onBack) {
             settings.snsKoreanTranslationPrompt = translationPromptInput.value;
             saveSettings();
         };
-        translationPromptGroup.append(translationPromptLabel, translationPromptInput);
+        translationPromptGroup.append(translationPromptLabel, translationPromptInput, createPromptSaveBtn());
         snsSection.appendChild(translationPromptGroup);
 
         if (!settings.snsPrompts) settings.snsPrompts = { ...SNS_PROMPT_DEFAULTS };
@@ -2372,7 +2377,7 @@ function openSettingsPanel(onBack) {
                 input.value = settings.snsPrompts[key];
                 saveSettings();
             };
-            group.append(lbl, input, resetBtn);
+            group.append(lbl, input, resetBtn, createPromptSaveBtn());
             snsSection.appendChild(group);
         });
 
@@ -2408,7 +2413,7 @@ function openSettingsPanel(onBack) {
             callSummaryInput.value = DEFAULT_SETTINGS.callSummaryPrompt;
             saveSettings();
         };
-        callSummaryGroup.append(callSummaryInput, callSummaryResetBtn);
+        callSummaryGroup.append(callSummaryInput, callSummaryResetBtn, createPromptSaveBtn());
         messageSection.appendChild(callSummaryGroup);
 
         // 메시지 템플릿 커스터마이징 (Item 3)
@@ -2495,7 +2500,7 @@ function openSettingsPanel(onBack) {
                 refreshPreview();
             };
             refreshPreview();
-            group.append(lbl, hintEl, input, preview, resetBtn);
+            group.append(lbl, hintEl, input, preview, resetBtn, createPromptSaveBtn());
             messageSection.appendChild(group);
         });
         return createTabs([
@@ -2529,6 +2534,51 @@ function openSettingsPanel(onBack) {
 function saveSettings() {
     const ctx = getContext();
     if (ctx?.saveSettingsDebounced) ctx.saveSettingsDebounced();
+}
+
+/**
+ * 프롬프트 저장 버튼 클릭 시 사용하는 강제 저장 함수.
+ * debounce 되지 않은 즉시 저장을 시도하고, 불가하면 debounced 저장 후 flush를 시도한다.
+ * @returns {boolean} 저장 시도 성공 여부
+ */
+function forceSaveSettings() {
+    const ctx = getContext();
+    if (!ctx) {
+        console.warn('[ST-LifeSim] forceSaveSettings: context not available');
+        return false;
+    }
+    if (typeof ctx.saveSettings === 'function') {
+        ctx.saveSettings();
+        return true;
+    }
+    if (ctx.saveSettingsDebounced) {
+        ctx.saveSettingsDebounced();
+        if (typeof ctx.saveSettingsDebounced.flush === 'function') {
+            ctx.saveSettingsDebounced.flush();
+        }
+        return true;
+    }
+    console.warn('[ST-LifeSim] forceSaveSettings: no save method available on context');
+    return false;
+}
+
+/**
+ * 프롬프트 커스텀 저장 버튼을 생성한다.
+ * @returns {HTMLButtonElement}
+ */
+function createPromptSaveBtn() {
+    const btn = document.createElement('button');
+    btn.className = 'slm-btn slm-btn-sm';
+    btn.textContent = '💾 저장';
+    btn.style.marginLeft = '6px';
+    btn.onclick = () => {
+        if (forceSaveSettings()) {
+            showToast('✅ 프롬프트가 저장되었습니다.', 'success', 1500);
+        } else {
+            showToast('⚠️ 저장에 실패했습니다. 다시 시도해주세요.', 'error', 2000);
+        }
+    };
+    return btn;
 }
 
 function hasForcedCallIntentFromLatestUserMessage() {
