@@ -556,11 +556,13 @@ export async function triggerNpcPosting() {
             // 게시글 내용에서 시각적 장면을 유추할 수 있도록 작성자 정보 포함
             const allContactsList = [...getContacts('character'), ...getContacts('chat')];
             const imageInputPrompt = `${pick.name}'s social media photo post: "${postContent}"`;
+            const additionalPrompt = String(getExtensionSettings()?.['st-lifesim']?.tagGenerationAdditionalPrompt || '').trim();
             const tagResult = await generateImageTags(imageInputPrompt, {
                 includeNames: [pick.name],
                 contacts: allContactsList,
                 getAppearanceTagsByName,
                 tagWeight: Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0,
+                additionalPrompt,
             });
             resolvedImagePrompt = imageInputPrompt;
 
@@ -1566,11 +1568,13 @@ function openWritePostDialog(onSave) {
             try {
                 const allContactsList = [...getContacts('character'), ...getContacts('chat')];
                 const imageInputPrompt = `${authorName}'s social media photo post: "${userImageDesc}"`;
+                const additionalPrompt = String(getExtensionSettings()?.['st-lifesim']?.tagGenerationAdditionalPrompt || '').trim();
                 const tagResult = await generateImageTags(imageInputPrompt, {
                     includeNames: [authorName].filter(Boolean),
                     contacts: allContactsList,
                     getAppearanceTagsByName,
                     tagWeight: Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0,
+                    additionalPrompt,
                 });
                 resolvedImagePrompt = userImageDesc;
 

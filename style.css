@@ -2327,6 +2327,28 @@ body[data-theme="dark"],
   padding: 8px 0;
   border-bottom: 1px solid var(--slm-border, #e5e5ea);
 }
+.slm-qa-settings-item.slm-qa-settings-item-drag-ready {
+  outline: 1px dashed var(--slm-primary, #0a84ff);
+  border-radius: 8px;
+}
+.slm-qa-settings-item.slm-qa-settings-item-dragging {
+  opacity: 0.65;
+}
+.slm-qa-drag-handle {
+  border: none;
+  background: transparent;
+  color: var(--slm-text-secondary, #6d6d72);
+  cursor: grab;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 6px;
+  touch-action: none;
+}
+.slm-qa-drag-handle:active {
+  cursor: grabbing;
+  background: var(--slm-bg-secondary, #f2f2f7);
+}
 .slm-qa-settings-item:last-child { border-bottom: none; }
 .slm-qa-settings-field-row .slm-label {
   min-width: 64px;

@@ -37,6 +37,7 @@ const SETTINGS_KEY = 'st-lifesim';
 const THEME_STORAGE_KEY = 'st-lifesim:forced-theme';
 const THEME_MODE_PRESETS_KEY = 'st-lifesim:theme-mode-presets';
 const IMAGE_INTENT_CONTEXT_WINDOW = 4;
+const DRAG_HOLD_DELAY_MS = 180;
 const ALWAYS_ON_MODULES = new Set(['quickTools', 'contacts']);
 const AI_ROUTE_DEFAULTS = {
     api: '',
@@ -119,6 +120,7 @@ const DEFAULT_SETTINGS = {
     messageImageGenerationMode: false, // 메신저 이미지 자동 생성 여부 (ON: 이미지 API로 생성, OFF: 줄글 텍스트)
     messageImageTextTemplate: '[사진: {description}]', // OFF일 때 줄글 형식 커스텀 템플릿
     messageImageInjectionPrompt: '<image_generation_rule>\nWhen {{char}} would naturally send a photo or picture in the conversation, insert a <pic prompt="image description in English for stable diffusion"> tag at that point in your response.\nThink about whether the current context calls for a photo — not only when someone explicitly says "photo" or "picture," but also when the situation naturally suggests one (e.g., {{user}} asks {{char}} to pose or make a V sign, {{char}} wants to show something, a visually interesting moment occurs, {{user}} asks about {{char}}\'s current appearance or activity).\nRules:\n1) Default subject is {{char}} only. Always include {{char}}\'s name explicitly in the prompt.\n2) If other characters from the contacts are involved, include their names explicitly so their appearance can be resolved.\n3) Include {{user}} only when the context explicitly says both are together or the photo is clearly about {{user}}. Use {{user}}\'s name explicitly.\n4) Do not mix appearance traits of multiple people unless the scene explicitly includes multiple people.\n5) Keep the prompt visual and concise using Danbooru-style tag concepts.\n6) Each <pic> tag MUST describe a completely NEW unique scene. NEVER reuse, reference, or modify a previously generated image URL from the conversation. Always write a fresh description.\n7) Analyze visual intent from context — if the user implies a visual action (e.g., "do a V sign", "show me your outfit"), generate a <pic> tag even without the word "photo".\n</image_generation_rule>',
+    tagGenerationAdditionalPrompt: '',
     snsImagePrompt: 'Create a photorealistic image for {authorName}\'s SNS post. Character appearance: {appearanceTags}. Post content: "{postContent}". The image must accurately depict the scene described in the post. Focus on matching the subject, setting, and mood of the post text. Style: casual daily-life smartphone photo, natural lighting, candid feel. Use Danbooru-style concepts and prefer spaces instead of underscores.',
     messageImagePrompt: 'Generate a photorealistic image that {charName} would send via messenger. Character appearance: {appearanceTags}. The image must reflect the character\'s physical appearance accurately based on the appearance tags. Style: personal candid photo matching the conversation context, natural and authentic feel. Use Danbooru-style concepts and prefer spaces instead of underscores.',
     characterAppearanceTags: {}, // { [charName]: "tag1, tag2" }
@@ -231,6 +233,9 @@ function getSettings() {
     // 메신저 이미지 생성 프롬프트 주입
     if (typeof ext[SETTINGS_KEY].messageImageInjectionPrompt !== 'string') {
         ext[SETTINGS_KEY].messageImageInjectionPrompt = DEFAULT_SETTINGS.messageImageInjectionPrompt;
+    }
+    if (typeof ext[SETTINGS_KEY].tagGenerationAdditionalPrompt !== 'string') {
+        ext[SETTINGS_KEY].tagGenerationAdditionalPrompt = DEFAULT_SETTINGS.tagGenerationAdditionalPrompt;
     }
     // 하위 호환: 기존 messageImageDisplayMode가 남아있으면 마이그레이션
     if (ext[SETTINGS_KEY].messageImageDisplayMode != null) {
@@ -1223,15 +1228,30 @@ function openSettingsPanel(onBack) {
             ordered.forEach((item) => {
                 const row = document.createElement('div');
                 row.className = 'slm-settings-row slm-qa-settings-item';
-                row.draggable = true;
+                row.draggable = false;
                 row.dataset.qaKey = item.key;
+                let dragArmed = false;
+                let dragHoldTimer = null;
 
                 row.addEventListener('dragstart', (e) => {
+                    if (!dragArmed) {
+                        e.preventDefault();
+                        return;
+                    }
+                    row.classList.add('slm-qa-settings-item-dragging');
                     e.dataTransfer?.setData('text/plain', item.key);
+                });
+                row.addEventListener('dragend', () => {
+                    row.classList.remove('slm-qa-settings-item-dragging');
+                    dragArmed = false;
+                    row.draggable = false;
                 });
                 row.addEventListener('dragover', (e) => e.preventDefault());
                 row.addEventListener('drop', (e) => {
                     e.preventDefault();
+                    row.classList.remove('slm-qa-settings-item-dragging');
+                    dragArmed = false;
+                    row.draggable = false;
                     const fromKey = e.dataTransfer?.getData('text/plain');
                     const toKey = item.key;
                     if (!fromKey || fromKey === toKey) return;
@@ -1250,6 +1270,36 @@ function openSettingsPanel(onBack) {
                 headerRow.style.display = 'flex';
                 headerRow.style.alignItems = 'center';
                 headerRow.style.gap = '6px';
+                const dragHandle = Object.assign(document.createElement('button'), {
+                    type: 'button',
+                    className: 'slm-qa-drag-handle',
+                    textContent: '☰',
+                    title: '길게 눌러 드래그하여 순서 변경 (Long press and drag to reorder)',
+                });
+                const armDrag = () => {
+                    dragArmed = true;
+                    row.draggable = true;
+                    row.classList.add('slm-qa-settings-item-drag-ready');
+                };
+                const clearArm = () => {
+                    if (dragHoldTimer) {
+                        clearTimeout(dragHoldTimer);
+                        dragHoldTimer = null;
+                    }
+                    if (!row.classList.contains('slm-qa-settings-item-dragging')) {
+                        dragArmed = false;
+                        row.draggable = false;
+                        row.classList.remove('slm-qa-settings-item-drag-ready');
+                    }
+                };
+                dragHandle.addEventListener('pointerdown', () => {
+                    clearArm();
+                    dragHoldTimer = setTimeout(armDrag, DRAG_HOLD_DELAY_MS);
+                });
+                dragHandle.addEventListener('pointerup', clearArm);
+                dragHandle.addEventListener('pointercancel', clearArm);
+                dragHandle.addEventListener('pointerleave', clearArm);
+                headerRow.appendChild(dragHandle);
                 const lbl = document.createElement('label');
                 lbl.className = 'slm-toggle-label';
                 const chk = document.createElement('input');
@@ -1550,6 +1600,32 @@ function openSettingsPanel(onBack) {
         };
         injectionPromptGroup.appendChild(injectionPromptResetBtn);
         wrapper.appendChild(injectionPromptGroup);
+
+        const tagAdditionalPromptGroup = document.createElement('div');
+        tagAdditionalPromptGroup.className = 'slm-form-group';
+        tagAdditionalPromptGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '➕ 태그 생성 추가 프롬프트 (커스텀)' }));
+        const tagAdditionalPromptDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: '기존 태그 생성 프롬프트는 유지되며, 여기에 입력한 지시문이 추가로 append됩니다.',
+        });
+        tagAdditionalPromptGroup.appendChild(tagAdditionalPromptDesc);
+        const tagAdditionalPromptInput = document.createElement('textarea');
+        tagAdditionalPromptInput.className = 'slm-textarea';
+        tagAdditionalPromptInput.rows = 3;
+        tagAdditionalPromptInput.placeholder = '예: 촬영 구도는 자연스러운 셀카 느낌을 우선';
+        tagAdditionalPromptInput.value = settings.tagGenerationAdditionalPrompt || '';
+        tagAdditionalPromptInput.oninput = () => { settings.tagGenerationAdditionalPrompt = tagAdditionalPromptInput.value; saveSettings(); };
+        tagAdditionalPromptGroup.appendChild(tagAdditionalPromptInput);
+        const tagAdditionalPromptResetBtn = document.createElement('button');
+        tagAdditionalPromptResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+        tagAdditionalPromptResetBtn.textContent = '↺ 비우기';
+        tagAdditionalPromptResetBtn.onclick = () => {
+            settings.tagGenerationAdditionalPrompt = '';
+            tagAdditionalPromptInput.value = '';
+            saveSettings();
+        };
+        tagAdditionalPromptGroup.appendChild(tagAdditionalPromptResetBtn);
+        wrapper.appendChild(tagAdditionalPromptGroup);
 
         // ── 태그 가중치 설정 ──
         wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
@@ -2596,6 +2672,46 @@ function hasExplicitImageIntentAroundLatestMessage() {
     });
 }
 
+function isAsciiNameToken(name) {
+    return /^[a-z0-9_]+$/i.test(name);
+}
+
+const NAME_MENTION_REGEX_CACHE = new Map();
+
+function isNameMentionedInText(textLower, name) {
+    const normalized = String(name || '').trim().toLowerCase();
+    if (!normalized) return false;
+    if (isAsciiNameToken(normalized)) {
+        let re = NAME_MENTION_REGEX_CACHE.get(normalized);
+        if (!re) {
+            re = new RegExp(`(^|[^a-z0-9_])${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9_]|$)`, 'i');
+            NAME_MENTION_REGEX_CACHE.set(normalized, re);
+        }
+        return re.test(textLower);
+    }
+    return textLower.includes(normalized);
+}
+
+function collectMentionedContactNames(text, contacts = []) {
+    const textLower = String(text || '').toLowerCase();
+    if (!textLower) return [];
+    const names = [];
+    const seen = new Set();
+    contacts.forEach((contact) => {
+        const aliases = [contact?.name, contact?.displayName, contact?.subName]
+            .map(v => String(v || '').trim())
+            .filter(Boolean);
+        if (!aliases.length) return;
+        if (!aliases.some(alias => isNameMentionedInText(textLower, alias))) return;
+        const contactName = String(contact?.name || contact?.displayName || '').trim();
+        const key = contactName.toLowerCase();
+        if (!contactName || seen.has(key)) return;
+        seen.add(key);
+        names.push(contactName);
+    });
+    return names;
+}
+
 /**
  * 외모 태그 그룹을 중복 없이 배열에 추가한다.
  * @param {string[]} groups
@@ -2736,6 +2852,11 @@ async function applyCharacterImageDisplayMode() {
         showToast(`📷 ${picMatches.length}개 이미지 생성 중...`, 'info', 2000);
         const userName = ctx?.name1 || '';
         const allContactsList = [...getContacts('character'), ...getContacts('chat')];
+        const additionalTagPrompt = String(settings.tagGenerationAdditionalPrompt || '').trim();
+        const recentContextText = (Array.isArray(ctx.chat) ? ctx.chat : [])
+            .slice(-IMAGE_INTENT_CONTEXT_WINDOW)
+            .map(m => String(m?.mes || ''))
+            .join('\n');
         for (const match of picMatches) {
             const fullTag = match[0];
             const rawPrompt = (match[1] || '').trim();
@@ -2746,6 +2867,9 @@ async function applyCharacterImageDisplayMode() {
             }
             // 통합 이미지 태그 생성 (커스텀 프롬프트 없이 캐릭터 컨텍스트 기반)
             const includeNames = [charName];
+            collectMentionedContactNames(`${recentContextText}\n${rawPrompt}`, allContactsList).forEach((name) => {
+                if (name && !includeNames.includes(name)) includeNames.push(name);
+            });
             // user hint 감지 시 유저도 포함
             const userHintRegex = /\buser\b|{{user}}|유저|너|당신|with user|together|둘이|함께/;
             if (userName && userHintRegex.test(rawPrompt.toLowerCase())) {
@@ -2756,6 +2880,7 @@ async function applyCharacterImageDisplayMode() {
                 contacts: allContactsList,
                 getAppearanceTagsByName,
                 tagWeight: Number(settings.tagWeight) || 0,
+                additionalPrompt: additionalTagPrompt,
             });
             let replacement;
             if (!tagResult.finalPrompt) {
@@ -2980,23 +3105,27 @@ async function init() {
     const eventTypes = ctx.eventTypes || ctx.event_types;
     const evSrc = ctx.eventSource;
 
+    const refreshContextAndInjection = async () => {
+        if (!isEnabled()) return;
+        await injectContext().catch(e => console.error('[ST-LifeSim] 컨텍스트 주입 오류:', e));
+        try { updateMessageImageInjection(); } catch (e) { console.error('[ST-LifeSim] 이미지 프롬프트 재주입 오류:', e); }
+    };
+
     if (evSrc && eventTypes?.CHARACTER_MESSAGE_RENDERED) {
-        evSrc.on(eventTypes.CHARACTER_MESSAGE_RENDERED, async () => {
-            if (isEnabled()) {
-                await injectContext().catch(e => console.error('[ST-LifeSim] 컨텍스트 주입 오류:', e));
-            }
-        });
+        evSrc.on(eventTypes.CHARACTER_MESSAGE_RENDERED, refreshContextAndInjection);
     }
 
-    // 채팅 로드 시 컨텍스트 주입
+    // 채팅/캐릭터 전환 시 컨텍스트를 즉시 갱신
     if (evSrc && eventTypes?.CHAT_CHANGED) {
-        evSrc.on(eventTypes.CHAT_CHANGED, async () => {
-            if (isEnabled()) {
-                await injectContext().catch(e => console.error('[ST-LifeSim] 컨텍스트 주입 오류:', e));
-                try { updateMessageImageInjection(); } catch (e) { console.error('[ST-LifeSim] 이미지 프롬프트 재주입 오류:', e); }
-            }
-        });
+        evSrc.on(eventTypes.CHAT_CHANGED, refreshContextAndInjection);
     }
+    if (evSrc && eventTypes?.CHARACTER_CHANGED) {
+        evSrc.on(eventTypes.CHARACTER_CHANGED, refreshContextAndInjection);
+    }
+    if (evSrc && eventTypes?.CHARACTER_SELECTED) {
+        evSrc.on(eventTypes.CHARACTER_SELECTED, refreshContextAndInjection);
+    }
+    void refreshContextAndInjection();
 
     // 유저 메시지 전송 시 설정된 확률로 SNS 포스팅 트리거
     if (evSrc && eventTypes?.MESSAGE_SENT) {

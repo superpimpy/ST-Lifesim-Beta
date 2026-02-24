@@ -62,7 +62,7 @@ const TAG_CONVERSION_PROMPT = [
  * @param {{ [name: string]: string }} [appearanceVarMap] - (unused, kept for API compat)
  * @returns {string}
  */
-function buildCharacterAwarePrompt(characters, appearanceVarMap) {
+function buildCharacterAwarePrompt(characters, appearanceVarMap, additionalPrompt = '') {
     const charList = characters.length > 0
         ? characters.map(c => `  - ${c.name}`).join('\n')
         : '  (none)';
@@ -76,7 +76,7 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap) {
         ? `\nCharacter appearance tags:\n${charAppearanceRef}\n`
         : '';
 
-    return [
+    const basePrompt = [
         'You are a Danbooru-style tag generator for image creation.',
         '',
         'Given an image description, a list of known characters, and their appearance tags,',
@@ -125,6 +125,9 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap) {
         appearanceRefBlock,
         'Image description:',
     ].join('\n');
+    const extra = String(additionalPrompt || '').trim();
+    if (!extra) return basePrompt;
+    return `${basePrompt}\n\nAdditional instructions:\n${extra}`;
 }
 
 
@@ -173,6 +176,7 @@ export async function generateDanbooruTags(rawPrompt, options) {
     const trimmed = rawPrompt.trim();
     const characters = Array.isArray(options?.characters) ? options.characters : [];
     const appearanceVarMap = options?.appearanceVarMap || {};
+    const additionalPrompt = String(options?.additionalPrompt || '').trim();
 
     // Already looks like Danbooru tag-style English input — keep as-is to avoid unnecessary AI rewriting
     // (Natural-language prose with commas should still go through tag generation)
@@ -196,10 +200,11 @@ export async function generateDanbooruTags(rawPrompt, options) {
 
     // Use character-aware prompt when characters are provided
     const promptBase = characters.length > 0
-        ? buildCharacterAwarePrompt(characters, appearanceVarMap)
+        ? buildCharacterAwarePrompt(characters, appearanceVarMap, additionalPrompt)
         : TAG_CONVERSION_PROMPT;
-
-    const fullPrompt = `${promptBase}\n${trimmed}`;
+    const fullPrompt = additionalPrompt && characters.length === 0
+        ? `${promptBase}\n\nAdditional instructions:\n${additionalPrompt}\n${trimmed}`
+        : `${promptBase}\n${trimmed}`;
 
     try {
         let result = '';
@@ -331,6 +336,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
         : () => '';
     const includeNames = Array.isArray(options.includeNames) ? options.includeNames : [];
     const tagWeight = Number(options.tagWeight) || 0;
+    const additionalPrompt = String(options.additionalPrompt || '').trim();
 
     // Build appearance variable map from all contacts for the prompt
     const appearanceVarMap = options.appearanceVarMap || {};
@@ -410,7 +416,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
     // ── Step 2: Generate scene/situation tags via AI ──
     let sceneTags = '';
     try {
-        sceneTags = await generateDanbooruTags(resolvedRawPrompt, { characters: matched, appearanceVarMap });
+        sceneTags = await generateDanbooruTags(resolvedRawPrompt, { characters: matched, appearanceVarMap, additionalPrompt });
     } catch (err) {
         console.warn('[image-tag-generator] Scene tag generation failed:', err);
     }

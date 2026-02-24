@@ -241,15 +241,21 @@ export function initContacts() {
     // 채팅 로드 시 {{char}} 자동 추가
     const ctx = getContext();
     const resolvedEventTypes = ctx?.event_types || ctx?.eventTypes;
+    const syncAutoContacts = () => {
+        ensureCharContact();
+        ensureUserContact();
+    };
     if (ctx?.eventSource && resolvedEventTypes?.CHAT_CHANGED) {
-        ctx.eventSource.on(resolvedEventTypes.CHAT_CHANGED, () => {
-            ensureCharContact();
-            ensureUserContact();
-        });
+        ctx.eventSource.on(resolvedEventTypes.CHAT_CHANGED, syncAutoContacts);
+    }
+    if (ctx?.eventSource && resolvedEventTypes?.CHARACTER_CHANGED) {
+        ctx.eventSource.on(resolvedEventTypes.CHARACTER_CHANGED, syncAutoContacts);
+    }
+    if (ctx?.eventSource && resolvedEventTypes?.CHARACTER_SELECTED) {
+        ctx.eventSource.on(resolvedEventTypes.CHARACTER_SELECTED, syncAutoContacts);
     }
     // 즉시도 한번 실행
-    ensureCharContact();
-    ensureUserContact();
+    syncAutoContacts();
 }
 
 /**

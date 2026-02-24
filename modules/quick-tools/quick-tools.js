@@ -638,11 +638,13 @@ async function generateUserImage(prompt) {
 
         // 통합 이미지 태그 생성 (캐릭터 컨텍스트 기반)
         const tagWeight = Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0;
+        const additionalPrompt = String(getExtensionSettings()?.['st-lifesim']?.tagGenerationAdditionalPrompt || '').trim();
         const tagResult = await generateImageTags(prompt.trim(), {
             includeNames,
             contacts: allContactsList,
             getAppearanceTagsByName,
             tagWeight,
+            additionalPrompt,
         });
 
         if (!tagResult.finalPrompt) {
