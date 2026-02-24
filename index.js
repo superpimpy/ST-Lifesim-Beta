@@ -2351,16 +2351,17 @@ function openSettingsPanel(onBack) {
 
         if (!settings.snsPrompts) settings.snsPrompts = { ...SNS_PROMPT_DEFAULTS };
         const promptDefs = [
-            { key: 'postChar', label: '캐릭터 게시글 프롬프트' },
-            { key: 'postContact', label: '연락처 게시글 프롬프트' },
-            { key: 'imageDescription', label: '이미지 설명 프롬프트' },
-            { key: 'reply', label: '답글 프롬프트' },
-            { key: 'extraComment', label: '추가 댓글 프롬프트' },
+            { key: 'postChar', label: '캐릭터 게시글 프롬프트', hint: '{{charName}}: 캐릭터 이름, {{authorName}}: 작성자 이름, {{personality}}: 성격' },
+            { key: 'postContact', label: '연락처 게시글 프롬프트', hint: '{{authorName}}: 작성자 이름, {{personality}}: 성격, {{charName}}: 캐릭터 이름' },
+            { key: 'imageDescription', label: '이미지 설명 프롬프트', hint: '{{authorName}}: 작성자 이름, {{postContent}}: 게시글 내용' },
+            { key: 'reply', label: '답글 프롬프트', hint: '게시글: {{postAuthorName}}, {{postAuthorHandle}}, {{postContent}} | 댓글: {{commentAuthorName}}, {{commentAuthorHandle}}, {{commentText}} | 답글: {{replyAuthorName}}, {{replyAuthorHandle}}, {{replyPersonality}}' },
+            { key: 'extraComment', label: '추가 댓글 프롬프트', hint: '게시글: {{postAuthorName}}, {{postAuthorHandle}}, {{postContent}} | 댓글: {{extraAuthorName}}, {{extraAuthorHandle}}, {{extraPersonality}}' },
         ];
-        promptDefs.forEach(({ key, label }) => {
+        promptDefs.forEach(({ key, label, hint }) => {
             const group = document.createElement('div');
             group.className = 'slm-form-group';
             const lbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: label });
+            const hintEl = Object.assign(document.createElement('div'), { className: 'slm-desc', textContent: `변수: ${hint}` });
             const input = document.createElement('textarea');
             input.className = 'slm-textarea';
             input.rows = 4;
@@ -2377,7 +2378,7 @@ function openSettingsPanel(onBack) {
                 input.value = settings.snsPrompts[key];
                 saveSettings();
             };
-            group.append(lbl, input, resetBtn, createPromptSaveBtn());
+            group.append(lbl, hintEl, input, resetBtn, createPromptSaveBtn());
             snsSection.appendChild(group);
         });
 
