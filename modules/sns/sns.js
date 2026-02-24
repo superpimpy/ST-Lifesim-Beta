@@ -199,6 +199,15 @@ function applyPromptTemplate(template, vars) {
     return String(template || '').replace(/\{\{(\w+)}}/g, (_, key) => String(vars?.[key] ?? ''));
 }
 
+function buildSnsImageInputPrompt(customTemplate, authorName, postContent) {
+    if (!customTemplate) return `${authorName}'s social media photo post: "${postContent}"`;
+    const authorAppearanceTags = String(getAppearanceTagsByName(authorName) || '').trim();
+    return customTemplate
+        .replace(/\{authorName\}/g, authorName)
+        .replace(/\{appearanceTags\}/g, authorAppearanceTags)
+        .replace(/\{postContent\}/g, postContent);
+}
+
 function enforceSnsLanguage(prompt, language) {
     const langLabel = {
         ko: 'Korean',
@@ -555,14 +564,7 @@ export async function triggerNpcPosting() {
             // 통합 파이프라인: generateImageTags() → Image API
             // 게시글 내용에서 시각적 장면을 유추할 수 있도록 작성자 정보 포함
             const allContactsList = [...getContacts('character'), ...getContacts('chat')];
-            const authorAppearanceTags = String(getAppearanceTagsByName(pick.name) || '').trim();
-            const customSnsImagePrompt = promptSettings.snsImagePrompt;
-            const imageInputPrompt = customSnsImagePrompt
-                ? customSnsImagePrompt
-                    .replace(/\{authorName\}/g, pick.name)
-                    .replace(/\{appearanceTags\}/g, authorAppearanceTags)
-                    .replace(/\{postContent\}/g, postContent)
-                : `${pick.name}'s social media photo post: "${postContent}"`;
+            const imageInputPrompt = buildSnsImageInputPrompt(promptSettings.snsImagePrompt, pick.name, postContent);
             const additionalPrompt = String(getExtensionSettings()?.['st-lifesim']?.tagGenerationAdditionalPrompt || '').trim();
             const tagResult = await generateImageTags(imageInputPrompt, {
                 includeNames: [pick.name],
@@ -1575,14 +1577,7 @@ function openWritePostDialog(onSave) {
             try {
                 const allContactsList = [...getContacts('character'), ...getContacts('chat')];
                 const userPromptSettings = getSnsPromptSettings();
-                const authorAppearanceTags = String(getAppearanceTagsByName(authorName) || '').trim();
-                const customSnsImagePrompt = userPromptSettings.snsImagePrompt;
-                const imageInputPrompt = customSnsImagePrompt
-                    ? customSnsImagePrompt
-                        .replace(/\{authorName\}/g, authorName)
-                        .replace(/\{appearanceTags\}/g, authorAppearanceTags)
-                        .replace(/\{postContent\}/g, userImageDesc)
-                    : `${authorName}'s social media photo post: "${userImageDesc}"`;
+                const imageInputPrompt = buildSnsImageInputPrompt(userPromptSettings.snsImagePrompt, authorName, userImageDesc);
                 const additionalPrompt = String(getExtensionSettings()?.['st-lifesim']?.tagGenerationAdditionalPrompt || '').trim();
                 const tagResult = await generateImageTags(imageInputPrompt, {
                     includeNames: [authorName].filter(Boolean),
