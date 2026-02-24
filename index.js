@@ -2701,7 +2701,10 @@ function isUrlAlreadyInChat(url, ctx) {
  * @returns {Promise<string>} 생성된 이미지의 URL 또는 빈 문자열
  */
 async function generateMessageImageViaApi(imagePrompt) {
-    if (!imagePrompt || !imagePrompt.trim()) return '';
+    if (!imagePrompt || !imagePrompt.trim()) {
+        console.warn('[ST-LifeSim] generateMessageImageViaApi: 빈 프롬프트가 전달됨');
+        return '';
+    }
     try {
         const ctx = getContext();
         if (!ctx) return '';
@@ -2716,6 +2719,7 @@ async function generateMessageImageViaApi(imagePrompt) {
                 }
                 return resultStr;
             }
+            console.warn('[ST-LifeSim] /sd 커맨드가 유효한 URL을 반환하지 않음:', resultStr ? resultStr.substring(0, 120) : '(빈 응답)');
         }
         return '';
     } catch (e) {
@@ -2787,11 +2791,12 @@ async function applyCharacterImageDisplayMode() {
             });
             let replacement;
             if (!tagResult.finalPrompt) {
-                console.warn('[ST-LifeSim] 태그 생성 결과 없음, 줄글 형태로 출력합니다.');
+                console.warn('[ST-LifeSim] 태그 생성 결과 없음 (finalPrompt 비어있음), 줄글 형태로 출력합니다. sceneTags:', tagResult.sceneTags, 'appearanceGroups:', tagResult.appearanceGroups);
                 const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
                 replacement = template.replace(/\{description\}/g, rawPrompt);
             } else {
                 try {
+                    console.log('[ST-LifeSim] 이미지 생성 API 호출 시작, finalPrompt:', tagResult.finalPrompt.substring(0, 150));
                     const imageUrl = await generateMessageImageViaApi(tagResult.finalPrompt);
                     if (imageUrl) {
                         const safeUrl = escapeHtml(imageUrl);
