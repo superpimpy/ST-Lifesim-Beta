@@ -37,6 +37,7 @@ const SETTINGS_KEY = 'st-lifesim';
 const THEME_STORAGE_KEY = 'st-lifesim:forced-theme';
 const THEME_MODE_PRESETS_KEY = 'st-lifesim:theme-mode-presets';
 const IMAGE_INTENT_CONTEXT_WINDOW = 4;
+const DRAG_HOLD_DELAY_MS = 180;
 const ALWAYS_ON_MODULES = new Set(['quickTools', 'contacts']);
 const AI_ROUTE_DEFAULTS = {
     api: '',
@@ -1273,7 +1274,7 @@ function openSettingsPanel(onBack) {
                     type: 'button',
                     className: 'slm-qa-drag-handle',
                     textContent: '☰',
-                    title: '길게 눌러 드래그하여 순서 변경',
+                    title: '길게 눌러 드래그하여 순서 변경 (Long press and drag to reorder)',
                 });
                 const armDrag = () => {
                     dragArmed = true;
@@ -1293,7 +1294,7 @@ function openSettingsPanel(onBack) {
                 };
                 dragHandle.addEventListener('pointerdown', () => {
                     clearArm();
-                    dragHoldTimer = setTimeout(armDrag, 180);
+                    dragHoldTimer = setTimeout(armDrag, DRAG_HOLD_DELAY_MS);
                 });
                 dragHandle.addEventListener('pointerup', clearArm);
                 dragHandle.addEventListener('pointercancel', clearArm);
@@ -2675,11 +2676,17 @@ function isAsciiNameToken(name) {
     return /^[a-z0-9_]+$/i.test(name);
 }
 
+const NAME_MENTION_REGEX_CACHE = new Map();
+
 function isNameMentionedInText(textLower, name) {
     const normalized = String(name || '').trim().toLowerCase();
     if (!normalized) return false;
     if (isAsciiNameToken(normalized)) {
-        const re = new RegExp(`(^|[^a-z0-9_])${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9_]|$)`, 'i');
+        let re = NAME_MENTION_REGEX_CACHE.get(normalized);
+        if (!re) {
+            re = new RegExp(`(^|[^a-z0-9_])${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9_]|$)`, 'i');
+            NAME_MENTION_REGEX_CACHE.set(normalized, re);
+        }
         return re.test(textLower);
     }
     return textLower.includes(normalized);
