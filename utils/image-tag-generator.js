@@ -174,9 +174,17 @@ export async function generateDanbooruTags(rawPrompt, options) {
     const characters = Array.isArray(options?.characters) ? options.characters : [];
     const appearanceVarMap = options?.appearanceVarMap || {};
 
-    // Already looks like tag-style English input — keep as-is to avoid unnecessary AI rewriting
-    const looksLikeTagList = /,|\[/.test(trimmed);
-    if (!containsKorean(trimmed) && (looksLikeTagList || characters.length === 0)) {
+    // Already looks like Danbooru tag-style English input — keep as-is to avoid unnecessary AI rewriting
+    // (Natural-language prose with commas should still go through tag generation)
+    const looksLikeDanbooruTagList = (() => {
+        const MIN_TAG_LIST_PARTS = 2;
+        const MAX_DANBOORU_TAG_LENGTH = 40;
+        const parts = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+        if (parts.length === 0) return false;
+        if (parts.length < MIN_TAG_LIST_PARTS && !/\[[^\]]+:[^\]]+\]/.test(trimmed)) return false;
+        return parts.every(tag => tag.length > 0 && tag.length <= MAX_DANBOORU_TAG_LENGTH && !/[.!?'"`]/.test(tag));
+    })();
+    if (!containsKorean(trimmed) && looksLikeDanbooruTagList) {
         return sanitizeTags(trimmed);
     }
 
@@ -361,26 +369,23 @@ export async function generateImageTags(rawPrompt, options = {}) {
         return textLower.includes(norm);
     }
 
-    // Check includeNames — only include if actually mentioned in prompt
+    // includeNames are explicit caller hints (e.g. current speaker/author), so force-include first.
     for (const name of includeNames) {
-        if (!name) continue;
-        const normalized = String(name).trim().toLowerCase();
+        const cleanName = String(name).trim();
+        if (!cleanName) continue;
+        const normalized = cleanName.toLowerCase();
         if (matchedNamesLower.has(normalized)) continue;
         const contact = allContacts.find(c =>
             String(c.name || '').trim().toLowerCase() === normalized
             || String(c.displayName || '').trim().toLowerCase() === normalized
             || String(c.subName || '').trim().toLowerCase() === normalized
         );
-        // Check if any of the contact's names (name, displayName, subName) are mentioned
-        const namesToCheck = contact
-            ? [contact.name, contact.displayName, contact.subName, name].map(v => String(v || '').trim()).filter(Boolean)
-            : [String(name).trim()];
-        const mentioned = namesToCheck.some(n => isNameMentioned(n));
-        if (!mentioned) continue;
+        const contactName = String(contact?.name || cleanName).trim();
         matchedNamesLower.add(normalized);
-        const appearance = getAppearanceFn(name);
+        if (contactName) matchedNamesLower.add(contactName.toLowerCase());
+        const appearance = getAppearanceFn(contactName || cleanName);
         matched.push({
-            name: String(name).trim(),
+            name: contactName || cleanName,
             appearanceTags: String(appearance || '').trim(),
         });
     }
