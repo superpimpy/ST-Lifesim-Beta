@@ -35,7 +35,6 @@ const SETTINGS_KEY = 'st-lifesim';
 
 // 주간/야간 테마 저장 키 (localStorage)
 const THEME_STORAGE_KEY = 'st-lifesim:forced-theme';
-const THEME_MODE_PRESETS_KEY = 'st-lifesim:theme-mode-presets';
 const IMAGE_INTENT_CONTEXT_WINDOW = 4;
 const ALWAYS_ON_MODULES = new Set(['quickTools', 'contacts']);
 const AI_ROUTE_DEFAULTS = {
@@ -986,6 +985,66 @@ function openSettingsPanel(onBack) {
         dataBtnRow.appendChild(importInput);
         wrapper.appendChild(dataBtnRow);
 
+        wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
+
+        // ── 확률 설정 (기존 확률 탭에서 통합) ──
+        const probTitle = document.createElement('div');
+        probTitle.className = 'slm-label';
+        probTitle.textContent = '🎲 확률 설정';
+        probTitle.style.fontWeight = '600';
+        probTitle.style.marginBottom = '6px';
+        wrapper.appendChild(probTitle);
+
+        wrapper.appendChild(renderFirstMsgSettingsUI(settings, saveSettings));
+        wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
+
+        const snsProbRow = document.createElement('div');
+        snsProbRow.className = 'slm-input-row';
+        const snsProbLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: 'SNS 자동 생성 확률:' });
+        const snsProbInput = Object.assign(document.createElement('input'), {
+            className: 'slm-input slm-input-sm', type: 'number', min: '0', max: '100',
+            value: String(settings.snsPostingProbability ?? 10),
+        });
+        snsProbInput.style.width = '70px';
+        const snsProbPctLbl = Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '%' });
+        const snsProbApplyBtn = document.createElement('button');
+        snsProbApplyBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
+        snsProbApplyBtn.textContent = '적용';
+        snsProbApplyBtn.onclick = () => {
+            const val = parseInt(snsProbInput.value);
+            settings.snsPostingProbability = Math.max(0, Math.min(100, isNaN(val) ? 10 : val));
+            snsProbInput.value = String(settings.snsPostingProbability);
+            saveSettings();
+            showToast(`SNS 자동 생성 확률: ${settings.snsPostingProbability}%`, 'success', 1500);
+        };
+        snsProbRow.append(snsProbLbl, snsProbInput, snsProbPctLbl, snsProbApplyBtn);
+        wrapper.appendChild(snsProbRow);
+
+        const callProbRow = document.createElement('div');
+        callProbRow.className = 'slm-input-row';
+        callProbRow.style.marginTop = '8px';
+        const callProbLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '먼저 전화를 걸 확률:' });
+        const callProbInput = Object.assign(document.createElement('input'), {
+            className: 'slm-input slm-input-sm', type: 'number', min: '0', max: '100',
+            value: String(settings.proactiveCallProbability ?? 0),
+        });
+        callProbInput.style.width = '70px';
+        const callProbPctLbl = Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '%' });
+        const callProbApplyBtn = document.createElement('button');
+        callProbApplyBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
+        callProbApplyBtn.textContent = '적용';
+        callProbApplyBtn.onclick = () => {
+            const val = parseInt(callProbInput.value);
+            settings.proactiveCallProbability = Math.max(0, Math.min(100, isNaN(val) ? 0 : val));
+            callProbInput.value = String(settings.proactiveCallProbability);
+            saveSettings();
+            showToast(`선전화 확률: ${settings.proactiveCallProbability}%`, 'success', 1500);
+        };
+        callProbRow.append(callProbLbl, callProbInput, callProbPctLbl, callProbApplyBtn);
+        wrapper.appendChild(callProbRow);
+
+        wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
+
         const resetBtn = document.createElement('button');
         resetBtn.className = 'slm-btn slm-btn-danger slm-btn-sm';
         resetBtn.style.marginTop = '10px';
@@ -1540,59 +1599,6 @@ function openSettingsPanel(onBack) {
         textTemplateGroup.appendChild(textTemplateResetBtn);
         wrapper.appendChild(textTemplateGroup);
 
-        // 이미지 생성 프롬프트 주입 (AI에게 보내는 지시)
-        const injectionPromptGroup = document.createElement('div');
-        injectionPromptGroup.className = 'slm-form-group';
-        injectionPromptGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '🤖 이미지 생성 프롬프트 주입 (커스텀)' }));
-        const injectionPromptDesc = Object.assign(document.createElement('div'), {
-            className: 'slm-desc',
-            textContent: 'AI에게 보내는 이미지 생성 지시 프롬프트입니다. AI가 사진을 보낼만한 상황에서 <pic prompt="설명"> 태그를 출력하도록 유도합니다.',
-        });
-        injectionPromptGroup.appendChild(injectionPromptDesc);
-        const injectionPromptInput = document.createElement('textarea');
-        injectionPromptInput.className = 'slm-textarea';
-        injectionPromptInput.rows = 4;
-        injectionPromptInput.placeholder = 'AI 이미지 생성 지시 프롬프트';
-        injectionPromptInput.value = settings.messageImageInjectionPrompt || DEFAULT_SETTINGS.messageImageInjectionPrompt;
-        injectionPromptInput.oninput = () => { settings.messageImageInjectionPrompt = injectionPromptInput.value; saveSettings(); };
-        injectionPromptGroup.appendChild(injectionPromptInput);
-        const injectionPromptResetBtn = document.createElement('button');
-        injectionPromptResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
-        injectionPromptResetBtn.textContent = '↺ 기본값';
-        injectionPromptResetBtn.onclick = () => {
-            settings.messageImageInjectionPrompt = DEFAULT_SETTINGS.messageImageInjectionPrompt;
-            injectionPromptInput.value = settings.messageImageInjectionPrompt;
-            saveSettings();
-        };
-        injectionPromptGroup.appendChild(injectionPromptResetBtn);
-        wrapper.appendChild(injectionPromptGroup);
-
-        const tagAdditionalPromptGroup = document.createElement('div');
-        tagAdditionalPromptGroup.className = 'slm-form-group';
-        tagAdditionalPromptGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '➕ 태그 생성 추가 프롬프트 (커스텀)' }));
-        const tagAdditionalPromptDesc = Object.assign(document.createElement('div'), {
-            className: 'slm-desc',
-            textContent: '기존 태그 생성 프롬프트는 유지되며, 여기에 입력한 지시문이 추가로 append됩니다.',
-        });
-        tagAdditionalPromptGroup.appendChild(tagAdditionalPromptDesc);
-        const tagAdditionalPromptInput = document.createElement('textarea');
-        tagAdditionalPromptInput.className = 'slm-textarea';
-        tagAdditionalPromptInput.rows = 3;
-        tagAdditionalPromptInput.placeholder = '예: 촬영 구도는 자연스러운 셀카 느낌을 우선';
-        tagAdditionalPromptInput.value = settings.tagGenerationAdditionalPrompt || '';
-        tagAdditionalPromptInput.oninput = () => { settings.tagGenerationAdditionalPrompt = tagAdditionalPromptInput.value; saveSettings(); };
-        tagAdditionalPromptGroup.appendChild(tagAdditionalPromptInput);
-        const tagAdditionalPromptResetBtn = document.createElement('button');
-        tagAdditionalPromptResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
-        tagAdditionalPromptResetBtn.textContent = '↺ 비우기';
-        tagAdditionalPromptResetBtn.onclick = () => {
-            settings.tagGenerationAdditionalPrompt = '';
-            tagAdditionalPromptInput.value = '';
-            saveSettings();
-        };
-        tagAdditionalPromptGroup.appendChild(tagAdditionalPromptResetBtn);
-        wrapper.appendChild(tagAdditionalPromptGroup);
-
         // ── 태그 가중치 설정 ──
         wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
         const tagWeightTitle = Object.assign(document.createElement('div'), {
@@ -1677,6 +1683,59 @@ function openSettingsPanel(onBack) {
         };
         messageImagePromptGroup.appendChild(messageImagePromptResetBtn);
         wrapper.appendChild(messageImagePromptGroup);
+
+        // 이미지 생성 프롬프트 주입 (AI에게 보내는 지시)
+        const injectionPromptGroup = document.createElement('div');
+        injectionPromptGroup.className = 'slm-form-group';
+        injectionPromptGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '🤖 이미지 생성 프롬프트 주입 (커스텀)' }));
+        const injectionPromptDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: 'AI에게 보내는 이미지 생성 지시 프롬프트입니다. AI가 사진을 보낼만한 상황에서 <pic prompt="설명"> 태그를 출력하도록 유도합니다.',
+        });
+        injectionPromptGroup.appendChild(injectionPromptDesc);
+        const injectionPromptInput = document.createElement('textarea');
+        injectionPromptInput.className = 'slm-textarea';
+        injectionPromptInput.rows = 4;
+        injectionPromptInput.placeholder = 'AI 이미지 생성 지시 프롬프트';
+        injectionPromptInput.value = settings.messageImageInjectionPrompt || DEFAULT_SETTINGS.messageImageInjectionPrompt;
+        injectionPromptInput.oninput = () => { settings.messageImageInjectionPrompt = injectionPromptInput.value; saveSettings(); };
+        injectionPromptGroup.appendChild(injectionPromptInput);
+        const injectionPromptResetBtn = document.createElement('button');
+        injectionPromptResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+        injectionPromptResetBtn.textContent = '↺ 기본값';
+        injectionPromptResetBtn.onclick = () => {
+            settings.messageImageInjectionPrompt = DEFAULT_SETTINGS.messageImageInjectionPrompt;
+            injectionPromptInput.value = settings.messageImageInjectionPrompt;
+            saveSettings();
+        };
+        injectionPromptGroup.appendChild(injectionPromptResetBtn);
+        wrapper.appendChild(injectionPromptGroup);
+
+        const tagAdditionalPromptGroup = document.createElement('div');
+        tagAdditionalPromptGroup.className = 'slm-form-group';
+        tagAdditionalPromptGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '➕ 태그 생성 추가 프롬프트 (커스텀)' }));
+        const tagAdditionalPromptDesc = Object.assign(document.createElement('div'), {
+            className: 'slm-desc',
+            textContent: '기존 태그 생성 프롬프트는 유지되며, 여기에 입력한 지시문이 추가로 append됩니다.',
+        });
+        tagAdditionalPromptGroup.appendChild(tagAdditionalPromptDesc);
+        const tagAdditionalPromptInput = document.createElement('textarea');
+        tagAdditionalPromptInput.className = 'slm-textarea';
+        tagAdditionalPromptInput.rows = 3;
+        tagAdditionalPromptInput.placeholder = '예: 촬영 구도는 자연스러운 셀카 느낌을 우선';
+        tagAdditionalPromptInput.value = settings.tagGenerationAdditionalPrompt || '';
+        tagAdditionalPromptInput.oninput = () => { settings.tagGenerationAdditionalPrompt = tagAdditionalPromptInput.value; saveSettings(); };
+        tagAdditionalPromptGroup.appendChild(tagAdditionalPromptInput);
+        const tagAdditionalPromptResetBtn = document.createElement('button');
+        tagAdditionalPromptResetBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+        tagAdditionalPromptResetBtn.textContent = '↺ 비우기';
+        tagAdditionalPromptResetBtn.onclick = () => {
+            settings.tagGenerationAdditionalPrompt = '';
+            tagAdditionalPromptInput.value = '';
+            saveSettings();
+        };
+        tagAdditionalPromptGroup.appendChild(tagAdditionalPromptResetBtn);
+        wrapper.appendChild(tagAdditionalPromptGroup);
 
         // 외관 태그 안내 (연락처 탭으로 이동됨)
         const appearanceNotice = document.createElement('div');
@@ -1913,61 +1972,6 @@ function openSettingsPanel(onBack) {
         ], 'image');
     }
 
-    function buildProbabilityTab() {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'slm-settings-wrapper slm-form';
-
-        wrapper.appendChild(renderFirstMsgSettingsUI(settings, saveSettings));
-        wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
-
-        const snsProbRow = document.createElement('div');
-        snsProbRow.className = 'slm-input-row';
-        const snsProbLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: 'SNS 자동 생성 확률:' });
-        const snsProbInput = Object.assign(document.createElement('input'), {
-            className: 'slm-input slm-input-sm', type: 'number', min: '0', max: '100',
-            value: String(settings.snsPostingProbability ?? 10),
-        });
-        snsProbInput.style.width = '70px';
-        const snsProbPctLbl = Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '%' });
-        const snsProbApplyBtn = document.createElement('button');
-        snsProbApplyBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
-        snsProbApplyBtn.textContent = '적용';
-        snsProbApplyBtn.onclick = () => {
-            const val = parseInt(snsProbInput.value);
-            settings.snsPostingProbability = Math.max(0, Math.min(100, isNaN(val) ? 10 : val));
-            snsProbInput.value = String(settings.snsPostingProbability);
-            saveSettings();
-            showToast(`SNS 자동 생성 확률: ${settings.snsPostingProbability}%`, 'success', 1500);
-        };
-        snsProbRow.append(snsProbLbl, snsProbInput, snsProbPctLbl, snsProbApplyBtn);
-        wrapper.appendChild(snsProbRow);
-
-        const callProbRow = document.createElement('div');
-        callProbRow.className = 'slm-input-row';
-        callProbRow.style.marginTop = '8px';
-        const callProbLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '먼저 전화를 걸 확률:' });
-        const callProbInput = Object.assign(document.createElement('input'), {
-            className: 'slm-input slm-input-sm', type: 'number', min: '0', max: '100',
-            value: String(settings.proactiveCallProbability ?? 0),
-        });
-        callProbInput.style.width = '70px';
-        const callProbPctLbl = Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '%' });
-        const callProbApplyBtn = document.createElement('button');
-        callProbApplyBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
-        callProbApplyBtn.textContent = '적용';
-        callProbApplyBtn.onclick = () => {
-            const val = parseInt(callProbInput.value);
-            settings.proactiveCallProbability = Math.max(0, Math.min(100, isNaN(val) ? 0 : val));
-            callProbInput.value = String(settings.proactiveCallProbability);
-            saveSettings();
-            showToast(`선전화 확률: ${settings.proactiveCallProbability}%`, 'success', 1500);
-        };
-        callProbRow.append(callProbLbl, callProbInput, callProbPctLbl, callProbApplyBtn);
-        wrapper.appendChild(callProbRow);
-
-        return wrapper;
-    }
-
     // ─────────────────────────────────────────
     // 탭 4: 테마 (CSS 색상 커스터마이징)
     // ─────────────────────────────────────────
@@ -1979,72 +1983,6 @@ function openSettingsPanel(onBack) {
         desc.className = 'slm-desc';
         desc.textContent = '컬러 피커로 ST-LifeSim UI 색상을 자유롭게 변경하세요. 변경 즉시 적용됩니다.';
         wrapper.appendChild(desc);
-
-        const modePresetGroup = document.createElement('div');
-        modePresetGroup.className = 'slm-form-group';
-        modePresetGroup.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '🌓 주간/야간 모드 프리셋' }));
-        const modePresetRow = document.createElement('div');
-        modePresetRow.className = 'slm-input-row';
-        const modePresetSaveBtn = document.createElement('button');
-        modePresetSaveBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
-        modePresetSaveBtn.textContent = '💾 저장';
-        const modePresetSelect = document.createElement('select');
-        modePresetSelect.className = 'slm-select';
-        modePresetSelect.style.flex = '1';
-        const modePresetLoadBtn = document.createElement('button');
-        modePresetLoadBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
-        modePresetLoadBtn.textContent = '📂 불러오기';
-        const modePresetDeleteBtn = document.createElement('button');
-        modePresetDeleteBtn.className = 'slm-btn slm-btn-danger slm-btn-sm';
-        modePresetDeleteBtn.textContent = '🗑️';
-        modePresetDeleteBtn.title = '선택된 프리셋 삭제';
-        const loadThemeModePresets = () => {
-            const raw = localStorage.getItem(THEME_MODE_PRESETS_KEY) || '{}';
-            try { return JSON.parse(raw); } catch (e) {
-                console.warn('[ST-LifeSim] 테마 모드 프리셋 파싱 실패:', e, raw);
-                return {};
-            }
-        };
-        const refreshModePresetList = () => {
-            modePresetSelect.innerHTML = '';
-            modePresetSelect.appendChild(Object.assign(document.createElement('option'), { value: '', textContent: '-- 모드 프리셋 --' }));
-            const presets = loadThemeModePresets();
-            Object.keys(presets).forEach((name) => {
-                modePresetSelect.appendChild(Object.assign(document.createElement('option'), { value: name, textContent: name }));
-            });
-        };
-        modePresetSaveBtn.onclick = () => {
-            const presetName = prompt('주간/야간 모드 프리셋 이름:');
-            if (!presetName) return;
-            const mode = getEffectiveTheme();
-            const presets = loadThemeModePresets();
-            presets[presetName] = mode;
-            localStorage.setItem(THEME_MODE_PRESETS_KEY, JSON.stringify(presets));
-            refreshModePresetList();
-            modePresetSelect.value = presetName;
-            showToast(`"${presetName}" 저장됨 (${mode === 'light' ? '주간' : '야간'})`, 'success', 1500);
-        };
-        modePresetLoadBtn.onclick = () => {
-            const name = modePresetSelect.value;
-            if (!name) { showToast('프리셋을 선택하세요.', 'warn'); return; }
-            const mode = loadThemeModePresets()[name];
-            if (mode !== 'light' && mode !== 'dark') { showToast('프리셋을 찾을 수 없습니다.', 'error'); return; }
-            applyForcedTheme(mode);
-            showToast(`프리셋 "${name}" 적용됨`, 'success', 1500);
-        };
-        modePresetDeleteBtn.onclick = () => {
-            const name = modePresetSelect.value;
-            if (!name) return;
-            const presets = loadThemeModePresets();
-            delete presets[name];
-            localStorage.setItem(THEME_MODE_PRESETS_KEY, JSON.stringify(presets));
-            refreshModePresetList();
-            showToast(`프리셋 "${name}" 삭제됨`, 'success', 1200);
-        };
-        refreshModePresetList();
-        modePresetRow.append(modePresetSaveBtn, modePresetSelect, modePresetLoadBtn, modePresetDeleteBtn);
-        modePresetGroup.appendChild(modePresetRow);
-        wrapper.appendChild(modePresetGroup);
 
         if (!settings.themeColors) settings.themeColors = {};
 
@@ -2572,7 +2510,6 @@ function openSettingsPanel(onBack) {
         { key: 'modules', label: '🧩 모듈', content: buildModulesTab() },
         { key: 'quickAccess', label: '⚡ 퀵 액세스', content: buildQuickAccessTab() },
         { key: 'media', label: '🖼️ 이미지', content: buildMediaTab() },
-        { key: 'probability', label: '🎲 확률', content: buildProbabilityTab() },
         { key: 'theme', label: '🎨 테마', content: buildThemeTab() },
         { key: 'prompts', label: '📝 프롬프트', content: buildSnsPromptTab() },
     ], 'general');
@@ -2955,9 +2892,22 @@ function getEffectiveTheme() {
 /**
  * 강제 테마를 적용한다.
  * null을 전달하면 강제 테마를 해제하고 시스템/ST 테마로 복귀한다.
+ * 테마 전환 시 패널/카드/텍스트 배경 등 핵심 CSS 변수의 인라인 오버라이드를
+ * 제거하여 테마 CSS가 올바르게 적용되도록 한다.
  * @param {'light'|'dark'|null} theme
  */
 function applyForcedTheme(theme) {
+    // 테마 전환 시 핵심 색상 인라인 오버라이드 제거
+    const themeVars = ['--slm-bg', '--slm-bg-secondary', '--slm-bg-tertiary', '--slm-surface', '--slm-text', '--slm-text-secondary', '--slm-border', '--slm-overlay-bg'];
+    themeVars.forEach(v => document.documentElement.style.removeProperty(v));
+
+    // 저장된 사용자 커스텀 색상 중 핵심 변수도 제거
+    const settings = getSettings();
+    if (settings.themeColors) {
+        themeVars.forEach(v => { delete settings.themeColors[v]; });
+        saveSettings();
+    }
+
     if (theme === 'dark' || theme === 'light') {
         document.documentElement.setAttribute('data-slm-theme', theme);
         localStorage.setItem(THEME_STORAGE_KEY, theme);
