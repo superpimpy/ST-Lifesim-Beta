@@ -1,0 +1,56 @@
+1. 연락처 기능에서 '새 채팅을 파도 유지' 설정을 한 캐릭터는 'SNS 게시글 생성 - NPC 랜덤'기능의 대상 리스트에서 제외되는 것 같습니다. 이 점 수정합니다.
+
+2. 통화중일 때에는 char의 이미지 생성 및 이모티콘 기능을 완전히 비활성화합니다. 통화가 종료된 후엔 다시 활성화합니다.
+
+3. 커스텀 프롬프트의 디폴트를 변경합니다.
+* SNS - 캐릭터 게시글 프롬프트 (커스텀) 기본값:
+Write exactly one SNS post as {{charName}}.
+
+* Before writing, internalize these:
+- {{charName}}'s personality, speech patterns, and worldview based on profile.
+- Extract the setting and genre from {{charName}}'s profile itself — it could be modern, medieval fantasy, zombie apocalypse, sci-fi, or anything else. Let that world shape what feels natural to say and how to say it
+- What {{charName}} would actually care about or casually mention on a given day
+--------
+* {{charName}}'s profile:
+{{personality}}
+--------
+* System Rules:
+- 1–4 sentences, casual and off-the-cuff, like a real personal post
+- Write in the voice and language style that fits {{charName}}'s background and personality
+- If {{charName}}'s personality strongly suggests they'd use emojis, you may include them — otherwise, don't
+- No hashtags, no image tags, no quotation marks, no other characters' reactions, no [caption: ...] blocks
+- Word choice, references, and tone must stay true to the detected world — never bleed in elements from the wrong setting
+- Don't be stiff or formal. This is a glimpse into {{charName}}'s actual inner life, not a public announcement
+
+* System Note
+- Output only {{charName}}'s post text. Nothing else.
+- Please comply with the output language.
+* This is a post aimed at an unspecified number of people. It is not a 1:1 session to communicate with {{user}}.
+
+
+* SNS - 연락처 게시글 프롬프트 (커스텀) 기본값:
+Write exactly one SNS post as {{authorName}}.
+
+* Before writing, internalize these:
+- {{authorName}}'s personality, speech patterns, and worldview based on profile.
+- Extract the setting and genre from {{authorName}}'s profile itself — it could be modern, medieval fantasy, zombie apocalypse, sci-fi, or anything else. Let that world shape what feels natural to say and how to say it
+- What {{authorName}} would actually care about or casually mention on a given day
+-------
+* {{authorName}}'s profile:
+{{personality}}
+-------
+* System Rules:
+- 1–2 sentences, casual and off-the-cuff, like a real personal post
+- Write in the voice and language style that fits {{authorName}}'s background and personality
+- If {{authorName}}'s personality strongly suggests they'd use emojis, you may include them — otherwise, don't
+- No hashtags, no image tags, no quotation marks, no other characters' reactions, no [caption: ...] blocks
+- Word choice, references, and tone must stay true to the detected world — never bleed in elements from the wrong setting
+- Don't be stiff or formal. This is a glimpse into {{authorName}}'s actual inner life, not a public announcement
+
+* System Note
+- Output only {{authorName}}'s post text. Nothing else.
+- Please comply with the output language.
+
+* 답글 프롬프트, 추가댓글 프롬프트:
+기존 프롬프트에 해당 문장을 추가합니다 ->
+It should be written vividly, fitting the characteristics of each character.
