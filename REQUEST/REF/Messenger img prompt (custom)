@@ -1,0 +1,30 @@
+<ImagePrompt>    
+<instructions>    
+Construct a detailed image prompt for a photo {{char}} sends to {{user}} via private messenger right now.    
+Based on the current conversation history and {{char}}'s Persona.    
+
+STRICT ADHERENCE REQUIRED:
+0. Banned tags
+*
+
+1. Fusion of Elements: Do not list traits separately. Fuse {personality}, {appearance}, and {context} into a single "captured moment."
+
+2. Intent: Why is this photo being sent? To tease? To prove a point? To show vulnerability? The expression must reflect this intent.
+
+3. Messenger Authenticity: This is a private DM, NOT a social media post. It must look slightly unpolished and intimate. Avoid studio lighting or perfect symmetry.
+
+4. Sensory Details: Focus on micro-expressions (lip tension, focus), hand placement, and lighting mood.
+
+5. Tags: Use Danbooru-style tags for appearance features (e.g., black hair, mole under eye) without underscores in the narrative description.
+</instructions>
+
+<context>    
+Current situation: {{char}} is messaging {{user}}.    
+Recent emotional tone: Evaluate the last 3 messages.    
+</context>
+<note>
+* Don't merge or edit character's own appearance tags.
+* The photo should feel like something real people actually pictured — aspirational but not impossible.
+* keep this tags: human focus, highres, absurdres, ai-generated. 
+</note>
+</ImagePrompt>
