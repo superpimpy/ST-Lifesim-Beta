@@ -119,7 +119,7 @@ const DEFAULT_SETTINGS = {
     messageImageTextTemplate: '[사진: {description}]', // OFF일 때 줄글 형식 커스텀 템플릿
     messageImageInjectionPrompt: '<image_generation_rule>\nWhen {{char}} would naturally send a photo or picture in the conversation, insert a <pic prompt="image description in English for stable diffusion"> tag at that point in your response.\nThink about whether the current context calls for a photo — not only when someone explicitly says "photo" or "picture," but also when the situation naturally suggests one (e.g., {{user}} asks {{char}} to pose or make a V sign, {{char}} wants to show something, a visually interesting moment occurs, {{user}} asks about {{char}}\'s current appearance or activity).\nRules:\n1) Default subject is {{char}} only. Always include {{char}}\'s name explicitly in the prompt.\n2) If other characters from the contacts are involved, include their names explicitly so their appearance can be resolved.\n3) Include {{user}} only when the context explicitly says both are together or the photo is clearly about {{user}}. Use {{user}}\'s name explicitly.\n4) Do not mix appearance traits of multiple people unless the scene explicitly includes multiple people.\n5) Keep the prompt visual and concise using Danbooru-style tag concepts.\n6) Each <pic> tag MUST describe a completely NEW unique scene. NEVER reuse, reference, or modify a previously generated image URL from the conversation. Always write a fresh description.\n7) Analyze visual intent from context — if the user implies a visual action (e.g., "do a V sign", "show me your outfit"), generate a <pic> tag even without the word "photo".\n</image_generation_rule>',
     tagGenerationAdditionalPrompt: '',
-    snsImagePrompt: '{authorName}\'s SNS post image. Character appearance: {appearanceTags}. Post content: "{postContent}".',
+    snsImagePrompt: 'Create a image for {authorName}\'s SNS post. Character appearance: {appearanceTags}. Post content: "{postContent}". The image must accurately depict the scene described in the post. Focus on matching the subject, setting, and mood of the post text. Style: natural lighting, candid feel. Use Danbooru-style concepts and prefer spaces instead of underscores.',
     messageImagePrompt: 'Generate a image that {charName} would send via messenger. Character appearance: {appearanceTags}. The image must reflect the character\'s physical appearance accurately based on the appearance tags. Style: personal candid photo matching the conversation context, natural and authentic feel. Use Danbooru-style concepts and prefer spaces instead of underscores.',
     characterAppearanceTags: {}, // { [charName]: "tag1, tag2" }
     tagWeight: 5, // 태그 가중치 (예: 5 → "5::(tags)::")
@@ -244,10 +244,6 @@ function getSettings() {
     }
     if (typeof ext[SETTINGS_KEY].snsImagePrompt !== 'string') {
         ext[SETTINGS_KEY].snsImagePrompt = DEFAULT_SETTINGS.snsImagePrompt;
-    } else {
-        ext[SETTINGS_KEY].snsImagePrompt = ext[SETTINGS_KEY].snsImagePrompt
-            .replace(/\s*The image must accurately depict[\s\S]*$/i, '')
-            .trim();
     }
     if (typeof ext[SETTINGS_KEY].messageImagePrompt !== 'string') {
         ext[SETTINGS_KEY].messageImagePrompt = DEFAULT_SETTINGS.messageImagePrompt;

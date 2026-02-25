@@ -2286,9 +2286,6 @@ body[data-theme="dark"],
   word-break: keep-all;
   min-height: 42px;
 }
-.slm-qa-btn span {
-  color: inherit;
-}
 .slm-qa-icon {
   font-size: var(--slm-qa-icon-size, 24px);
   line-height: 1;
