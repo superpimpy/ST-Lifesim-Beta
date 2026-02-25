@@ -513,11 +513,16 @@ export async function triggerNpcPosting() {
             seenContactNames.add(c.name);
             return true;
         });
+    const seenCandidateNames = new Set();
     const candidates = [
         ...(charName ? [{ name: charName, personality: '', isChar: true }] : []),
         ...contacts.map(c => ({ name: c.name, personality: c.personality, isChar: false })),
     ].filter(c => c.name && c.name !== userName && postingEnabled[c.name] !== false)
-        .filter((c, idx, arr) => arr.findIndex(x => x.name === c.name) === idx);
+        .filter((c) => {
+            if (seenCandidateNames.has(c.name)) return false;
+            seenCandidateNames.add(c.name);
+            return true;
+        });
 
     if (candidates.length === 0) return;
 
