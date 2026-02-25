@@ -144,8 +144,8 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap, additionalPromp
     ].join('\n');
     const extra = String(additionalPrompt || '').trim();
     if (!extra) return basePrompt;
-    return `${basePrompt}\n\nAdditional instructions:\n${extra}`;
-    TAG_GEN_PREFILL,
+    return `${basePrompt}\n\nAdditional instructions:\n${extra}`,
+        TAG_GEN_PREFILL;
 }
 
 
