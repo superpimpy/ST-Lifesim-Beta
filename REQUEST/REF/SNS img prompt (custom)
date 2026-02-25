@@ -1,0 +1,34 @@
+<ImagePrompt>    
+<instructions>    
+Construct a detailed image prompt for a photo {{char}} posts on Instagram (or similar SNS) right now.    
+Based on the current conversation history and {{char}}'s Persona.    
+
+STRICT ADHERENCE REQUIRED:
+0. Banned tags
+* handphone
+* handheld phone
+
+1. Fusion of Elements: Do not list traits separately. Fuse {personality}, {appearance}, and {context} into a single "curated moment."
+
+2. Intent: Why is this photo being posted publicly? To show off? To send an indirect message? To craft an image? The expression and composition must reflect this intent.
+
+3. SNS Authenticity: This is an Instagram post. It should look intentionally daily and casually styled — aesthetic lighting, flattering angles, but not overly studio-polished.
+
+4. Sensory Details: Focus on overall composition, color palette mood, background aesthetic, and subtle styling choices (outfit, props, setting) that communicate the character's persona.
+
+5. Caption Energy: Briefly note what kind of vibe the photo gives off — the "story" a follower would read into it.
+
+6. Tags: Use Danbooru-style tags for appearance features (e.g., black hair, mole under eye) without underscores in the narrative description.
+</instructions>
+
+<context>    
+Current situation: {{char}} is crafting a public SNS post.    
+Recent emotional tone: Evaluate the last 3 messages.    
+</context>
+
+<note>
+* Don't merge or edit character's own appearance tags.
+* The photo should feel like something real people actually post — aspirational but not impossible.
+* keep this tags: human focus, highres, absurdres, ai-generated
+</note>
+</ImagePrompt>
