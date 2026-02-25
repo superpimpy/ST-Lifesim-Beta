@@ -205,7 +205,9 @@ function buildSnsImageInputPrompt(customTemplate, authorName, postContent) {
     return customTemplate
         .replace(/\{authorName\}/g, authorName)
         .replace(/\{appearanceTags\}/g, authorAppearanceTags)
-        .replace(/\{postContent\}/g, postContent);
+        .replace(/\{postContent\}/g, postContent)
+        .replace(/\s*The image must accurately depict[\s\S]*$/i, '')
+        .trim();
 }
 
 function enforceSnsLanguage(prompt, language) {
@@ -500,7 +502,7 @@ export function initSns() {
  */
 export async function triggerNpcPosting() {
     const ctx = getContext();
-    const charName = ctx?.name2 || '{{char}}';
+    const charName = String(ctx?.name2 || '').trim();
     const userName = ctx?.name1 || 'user';
     const postingEnabled = loadPostingEnabledMap();
 
@@ -511,10 +513,16 @@ export async function triggerNpcPosting() {
             seenContactNames.add(c.name);
             return true;
         });
+    const seenCandidateNames = new Set();
     const candidates = [
-        { name: charName, personality: '', isChar: true },
+        ...(charName ? [{ name: charName, personality: '', isChar: true }] : []),
         ...contacts.map(c => ({ name: c.name, personality: c.personality, isChar: false })),
-    ].filter(c => c.name !== userName && postingEnabled[c.name] !== false);
+    ].filter(c => c.name && c.name !== userName && postingEnabled[c.name] !== false)
+        .filter((c) => {
+            if (seenCandidateNames.has(c.name)) return false;
+            seenCandidateNames.add(c.name);
+            return true;
+        });
 
     if (candidates.length === 0) return;
 
@@ -532,11 +540,15 @@ export async function triggerNpcPosting() {
         .slice(-5)
         .map((item) => `- ${normalizeSnsText(item.content, 120)}`)
         .join('\n');
+    const perspectiveGuard = !pick.isChar && charName
+        ? `\n[Output guard] Write strictly from ${pick.name}'s perspective. Do not write as ${charName}.`
+        : '';
     const finalPrompt = recentPosts
         ? `${prompt}\n최근 ${pick.name} 게시글 요약:\n${recentPosts}\n위 내용과 주제/표현을 반복하지 말고 새 일상 주제로 작성하세요.`
         : prompt;
+    const guardedPrompt = `${finalPrompt}${perspectiveGuard}`;
     const authorLanguage = getAuthorLanguage(pick.name, promptSettings.language);
-    const localizedPrompt = enforceSnsLanguage(finalPrompt, authorLanguage);
+    const localizedPrompt = enforceSnsLanguage(guardedPrompt, authorLanguage);
 
     try {
         const freshCtx = getContext();
