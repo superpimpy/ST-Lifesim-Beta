@@ -51,8 +51,6 @@ const TAG_GEN_PREFILL = [
 
 /** Simple tag-only conversion prompt (legacy fallback) */
 const TAG_CONVERSION_PROMPT = [
-    TAG_GEN_PREFILL,
-    '',
     'Convert the following image description into Danbooru-style English tags.',
     'Output ONLY comma-separated tags. No sentences, no Korean, no explanation.',
     'Replace underscores with spaces in all tags.',
@@ -61,6 +59,7 @@ const TAG_CONVERSION_PROMPT = [
     'Example output: 1girl, selfie, looking at viewer, phone in hand, casual smile, indoor, upper body',
     '',
     'Description:',
+    TAG_GEN_PREFILL,
 ].join('\n');
 
 /**
@@ -91,8 +90,6 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap, additionalPromp
         : '';
 
     const basePrompt = [
-        TAG_GEN_PREFILL,
-        '',
         'You are a Danbooru-style tag generator for image creation.',
         '',
         'Given an image description, a list of known characters, and their appearance tags,',
