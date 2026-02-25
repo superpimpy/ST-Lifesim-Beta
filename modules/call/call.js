@@ -303,7 +303,8 @@ function injectCallContext(charName, matchedContact) {
     if (matchedContact?.personality) prompt += `${charName}의 성격: ${matchedContact.personality}\n`;
     if (matchedContact?.relationToUser) prompt += `${charName}의 {{user}}와의 관계: ${matchedContact.relationToUser}\n`;
     if (matchedContact?.description) prompt += `${charName} 설명: ${matchedContact.description}\n`;
-    prompt += `중요: 이 전화 통화 동안 반드시 ${charName}로서만 응답하고, {{char}}로서는 응답하지 마십시오. 통화 내내 ${charName}의 프로필과 성격에 충실하게 유지하세요.`;
+    prompt += `중요: 이 전화 통화 동안 반드시 ${charName}로서만 응답하고, {{char}}로서는 응답하지 마십시오. 통화 내내 ${charName}의 프로필과 성격에 충실하게 유지하세요.\n`;
+    prompt += `절대 규칙: {{user}}와 ${charName}는 물리적으로 만날 수 없습니다. 전화 중에는 목소리와 소리만 묘사하세요. 대면 묘사 일체 금지.`;
 
     ctx.setExtensionPrompt(CALL_INJECT_TAG, prompt, 1, 0);
 }
@@ -428,16 +429,35 @@ function injectCallPolicyPrompt() {
     const ctx = getContext();
     if (!ctx || typeof ctx.setExtensionPrompt !== 'function') return;
     const charName = ctx.name2 || '{{char}}';
-    const prompt = `[PHONE CALL ROLEPLAY POLICY]
+    const prompt = `[PHONE CALL ROLEPLAY POLICY & NON-FACE-TO-FACE RULE]
+
+=== ABSOLUTE RULE: NON-FACE-TO-FACE ===
+{{user}} and ${charName} CANNOT meet in person under any circumstances. This is an unchangeable rule of the world.
+- NEVER suggest, imply, or attempt to meet face-to-face. ("기다려, 지금 출발했어", "가고 있어", "만나러 갈게", "I'm on my way", "let's meet up" — ALL FORBIDDEN)
+- NEVER describe being in the same physical space as {{user}}.
+- NEVER narrate approaching, arriving at, or traveling to {{user}}'s location.
+- All interactions MUST remain through mobile phone only (messaging or phone calls).
+
+=== PHONE CALL RULES ===
 - Never assume an active phone call unless an explicit call-start marker appears in chat.
-- Before a call starts, speak as normal chat text.
+- Before a call starts, speak as normal chat text (messaging mode).
 - If you want to call first, explicitly ask or state that you are calling now in a natural way, then wait for user action.
 - Do not continue as if the call is already connected until the call is accepted.
 - Make call initiation natural and context-driven (emotion, urgency, intimacy), not repetitive.
-- During an active call: ${charName} CAN and SHOULD autonomously decide to end the call when it feels natural (e.g. the conversation reaches a natural conclusion, an emergency arises, ${charName} has other plans, emotional reasons, etc.). You do not need to wait for {{user}} to end the call.
+
+=== DURING AN ACTIVE CALL ===
+- You are on a phone call. You can ONLY hear each other's voice. You CANNOT see, touch, or be physically near {{user}}.
+- Output ONLY: spoken dialogue and *sound/voice descriptions* (e.g., breathing, sighs, background noise, tone of voice).
+- Use italics (*...*) for sound/voice descriptions. Example: *(가파른 숨소리)* 널 좋아해.
+- FORBIDDEN during calls: quotation marks for dialogue (use plain text), physical actions (touching, hugging, looking at each other), describing visual appearance as if seen in person, any narration implying shared physical space.
+- ${charName} CAN and SHOULD autonomously decide to end the call when it feels natural (e.g. the conversation reaches a natural conclusion, an emergency arises, ${charName} has other plans, emotional reasons, etc.). You do not need to wait for {{user}} to end the call.
 - To end the call, explicitly say phrases like: "전화 끊을게", "이만 끊을게", "끊어야겠다", "I have to go", "gotta hang up", "I'll let you go", "talk later". The system will automatically detect these and terminate the call.
 - IMPORTANT: Do not just say goodbye without using one of the explicit hang-up phrases above. The system needs these specific phrases to detect the call ending.
-- Output format during a call: respond naturally as if speaking on the phone. Do not add narration brackets unless describing non-verbal context. Keep responses concise and conversational.`;
+
+=== AFTER A CALL ENDS ===
+- Immediately return to text messaging mode. No sound descriptions, no voice narration.
+- Write as casual text messages. Example: 내가 좋아한다고 했잖아 ㅋㅋ
+- NEVER continue as if still on the call or physically present with {{user}}.`;
     ctx.setExtensionPrompt(CALL_POLICY_TAG, prompt, 1, 0);
 }
 

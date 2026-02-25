@@ -511,9 +511,12 @@ export async function triggerNpcPosting() {
             seenContactNames.add(c.name);
             return true;
         });
+    // charName의 연락처에서 description + personality를 결합하여 가져온다
+    const charContact = [...getContacts('character'), ...getContacts('chat')].find(c => c?.name === charName);
+    const charPersonality = [charContact?.description, charContact?.personality].filter(Boolean).join(' / ') || '';
     const candidates = [
-        { name: charName, personality: '', isChar: true },
-        ...contacts.map(c => ({ name: c.name, personality: c.personality, isChar: false })),
+        { name: charName, personality: charPersonality, isChar: true },
+        ...contacts.map(c => ({ name: c.name, personality: [c.description, c.personality].filter(Boolean).join(' / '), isChar: false })),
     ].filter(c => c.name !== userName && postingEnabled[c.name] !== false);
 
     if (candidates.length === 0) return;
@@ -1337,18 +1340,20 @@ async function runDeferredCommentGeneration({ postId, commentId, text, userName,
         const userHandle = getAuthorHandle(userName, userIds);
         const charName = ctx?.name2 || '';
         const contacts = getContacts('chat');
-        const postAuthorContact = contacts.find(c => c?.name === p.authorName);
+        const allContactsForPersonality = [...getContacts('character'), ...contacts];
+        const postAuthorContact = allContactsForPersonality.find(c => c?.name === p.authorName);
         const replyAuthorCandidates = [];
         if (p.authorName && p.authorName !== userName) {
-            replyAuthorCandidates.push({ name: p.authorName, personality: postAuthorContact?.personality || '' });
+            replyAuthorCandidates.push({ name: p.authorName, personality: [postAuthorContact?.description, postAuthorContact?.personality].filter(Boolean).join(' / ') || '' });
         }
         if (charName && charName !== userName && charName !== p.authorName) {
-            replyAuthorCandidates.push({ name: charName, personality: '' });
+            const charContact = allContactsForPersonality.find(c => c?.name === charName);
+            replyAuthorCandidates.push({ name: charName, personality: [charContact?.description, charContact?.personality].filter(Boolean).join(' / ') || '' });
         }
         contacts.forEach(c => {
             if (!c?.name || c.name === userName || c.name === p.authorName) return;
             if (!replyAuthorCandidates.find(existing => existing.name === c.name)) {
-                replyAuthorCandidates.push({ name: c.name, personality: c.personality || '' });
+                replyAuthorCandidates.push({ name: c.name, personality: [c.description, c.personality].filter(Boolean).join(' / ') || '' });
             }
         });
 
@@ -1405,7 +1410,7 @@ async function runDeferredCommentGeneration({ postId, commentId, text, userName,
                     postContent: safePostContent,
                     extraAuthorName: picker.name,
                     extraAuthorHandle: pickerHandle,
-                    extraPersonality: picker.personality || '평범하고 자연스러운 말투',
+                    extraPersonality: [picker.description, picker.personality].filter(Boolean).join(' / ') || '평범하고 자연스러운 말투',
                 }), pickerLanguage);
                 const generated = await generateSnsText(ctx, contactPrompt, picker.name);
                 if (generated) {
@@ -1784,10 +1789,53 @@ function openAvatarSettingsDialog(onUpdate) {
     wrapper.appendChild(presetManageBtn);
 
     wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
+    const descRow = document.createElement('div');
+    descRow.style.display = 'flex';
+    descRow.style.alignItems = 'center';
+    descRow.style.gap = '8px';
+    descRow.style.marginBottom = '6px';
     const desc = document.createElement('div');
     desc.className = 'slm-label';
     desc.textContent = '연락처에 등록된 인물을 SNS 프로필로 자동 동기화합니다. 이름을 눌러 세부 옵션을 설정하세요.';
-    wrapper.appendChild(desc);
+    descRow.appendChild(desc);
+    const refreshBtn = document.createElement('button');
+    refreshBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
+    refreshBtn.textContent = '🔄 갱신';
+    refreshBtn.title = '현재 연락처/페르소나에서 프로필을 다시 동기화합니다';
+    refreshBtn.onclick = () => {
+        const freshContacts = [...getContacts('character'), ...getContacts('chat')];
+        const freshUserName = getContext()?.name1 || 'user';
+        const freshCharName = getContext()?.name2 || '';
+        const freshCharProfile = freshCharName
+            ? [{ name: freshCharName, avatar: avatars[freshCharName] || getBuiltinCharAvatarUrl(), personality: 'char' }]
+            : [];
+        const freshProfiles = [{ name: freshUserName, avatar: avatars[freshUserName] || getBuiltinUserAvatarUrl(), personality: 'user' }, ...freshCharProfile, ...freshContacts]
+            .filter((c, i, arr) => arr.findIndex(x => x.name === c.name) === i);
+        // 새 프로필에 없는 이전 항목 제거
+        const freshNames = new Set(freshProfiles.map(c => c.name));
+        Object.keys(userIds).forEach(k => { if (!freshNames.has(k)) delete userIds[k]; });
+        Object.keys(postingEnabled).forEach(k => { if (!freshNames.has(k)) delete postingEnabled[k]; });
+        // 새 프로필 동기화
+        freshProfiles.forEach(c => {
+            if (!userIds[c.name]) userIds[c.name] = makeDefaultHandle(c.name);
+            if (c.avatar && !avatars[c.name]) avatars[c.name] = c.avatar;
+            if (c.name !== freshUserName && postingEnabled[c.name] == null) postingEnabled[c.name] = true;
+            if (!['ko', 'en', 'ja', 'zh'].includes(authorLanguages[c.name])) authorLanguages[c.name] = 'en';
+            if (authorMinLikes[c.name] == null || Number.isNaN(Number(authorMinLikes[c.name]))) authorMinLikes[c.name] = 0;
+        });
+        saveUserIds(userIds);
+        saveAvatars(avatars);
+        savePostingEnabledMap(postingEnabled);
+        saveAuthorLanguages(authorLanguages);
+        saveAuthorMinLikesMap(authorMinLikes);
+        // allProfiles 갱신 후 렌더링
+        allProfiles.length = 0;
+        freshProfiles.forEach(p => allProfiles.push(p));
+        renderContactList();
+        showToast('SNS 프로필 갱신 완료', 'success', 1500);
+    };
+    descRow.appendChild(refreshBtn);
+    wrapper.appendChild(descRow);
 
     const userIds = loadUserIds();
     const avatars = loadAvatars();
