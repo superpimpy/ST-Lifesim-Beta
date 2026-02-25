@@ -141,6 +141,7 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap, additionalPromp
         charList,
         appearanceRefBlock,
         'Image description:',
+        TAG_GEN_PREFILL,
     ].join('\n');
     const extra = String(additionalPrompt || '').trim();
     if (!extra) return basePrompt;
