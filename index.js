@@ -23,7 +23,7 @@ import { renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEven
 import { startFirstMsgTimer, renderFirstMsgSettingsUI } from './modules/firstmsg/firstmsg.js';
 import { initEmoticon, openEmoticonPopup } from './modules/emoticon/emoticon.js';
 import { initContacts, openContactsPopup, getContacts, getAppearanceTagsByName, buildAppearanceTagVariableMap, resolveAppearanceTagVariables } from './modules/contacts/contacts.js';
-import { initCall, onCharacterMessageRenderedForProactiveCall, openCallLogsPopup, triggerProactiveIncomingCall, requestActiveCharacterCall } from './modules/call/call.js';
+import { initCall, isCallActive, onCharacterMessageRenderedForProactiveCall, openCallLogsPopup, triggerProactiveIncomingCall, requestActiveCharacterCall } from './modules/call/call.js';
 import { initWallet, openWalletPopup } from './modules/wallet/wallet.js';
 import { initSns, openSnsPopup, triggerNpcPosting, triggerPendingCommentReaction, hasPendingCommentReaction } from './modules/sns/sns.js';
 import { initCalendar, openCalendarPopup } from './modules/calendar/calendar.js';
@@ -70,11 +70,11 @@ const ROUTE_MODEL_KEY_BY_SOURCE = {
     zai: 'zai_model',
 };
 const SNS_PROMPT_DEFAULTS = {
-    postChar: 'Write exactly one SNS post for {{charName}}. Use natural language and tone that fit {{charName}}\'s nationality/background, personality, and current situation. Keep it 1-2 casual daily-life sentences. Avoid repeating topics or phrasing from recent posts. Do not include hashtags, image tags, quotation marks, other people\'s reactions/comments, or [caption: ...] blocks. Output only {{charName}}\'s own post text.',
-    postContact: 'Write exactly one SNS post for {{authorName}}. Personality: {{personality}}. Use natural language and tone that fit {{authorName}}\'s nationality/background and daily context. Keep it 1-2 casual daily-life sentences and avoid repeating recent topics/phrasing. Do not include hashtags, image tags, quotation marks, other people\'s reactions/comments, or [caption: ...] blocks. Output only {{authorName}}\'s own post text.',
+    postChar: 'Write exactly one SNS post as {{charName}}.\n\n* Before writing, internalize these:\n- {{charName}}\'s personality, speech patterns, and worldview based on profile.\n- Extract the setting and genre from {{charName}}\'s profile itself — it could be modern, medieval fantasy, zombie apocalypse, sci-fi, or anything else. Let that world shape what feels natural to say and how to say it\n- What {{charName}} would actually care about or casually mention on a given day\n--------\n* {{charName}}\'s profile:\n{{personality}}\n--------\n* System Rules:\n- 1–4 sentences, casual and off-the-cuff, like a real personal post\n- Write in the voice and language style that fits {{charName}}\'s background and personality\n- If {{charName}}\'s personality strongly suggests they\'d use emojis, you may include them — otherwise, don\'t\n- No hashtags, no image tags, no quotation marks, no other characters\' reactions, no [caption: ...] blocks\n- Word choice, references, and tone must stay true to the detected world — never bleed in elements from the wrong setting\n- Don\'t be stiff or formal. This is a glimpse into {{charName}}\'s actual inner life, not a public announcement\n\n* System Note\n- Output only {{charName}}\'s post text. Nothing else.\n- Please comply with the output language.\n* This is a post aimed at an unspecified number of people. It is not a 1:1 session to communicate with {{user}}.',
+    postContact: 'Write exactly one SNS post as {{authorName}}.\n\n* Before writing, internalize these:\n- {{authorName}}\'s personality, speech patterns, and worldview based on profile.\n- Extract the setting and genre from {{authorName}}\'s profile itself — it could be modern, medieval fantasy, zombie apocalypse, sci-fi, or anything else. Let that world shape what feels natural to say and how to say it\n- What {{authorName}} would actually care about or casually mention on a given day\n-------\n* {{authorName}}\'s profile:\n{{personality}}\n-------\n* System Rules:\n- 1–2 sentences, casual and off-the-cuff, like a real personal post\n- Write in the voice and language style that fits {{authorName}}\'s background and personality\n- If {{authorName}}\'s personality strongly suggests they\'d use emojis, you may include them — otherwise, don\'t\n- No hashtags, no image tags, no quotation marks, no other characters\' reactions, no [caption: ...] blocks\n- Word choice, references, and tone must stay true to the detected world — never bleed in elements from the wrong setting\n- Don\'t be stiff or formal. This is a glimpse into {{authorName}}\'s actual inner life, not a public announcement\n\n* System Note\n- Output only {{authorName}}\'s post text. Nothing else.\n- Please comply with the output language.',
     imageDescription: 'For {{authorName}}\'s SNS post "{{postContent}}", write exactly one short sentence describing the attached image. Mention only visible content. Do not use hashtags, quotes, parentheses, or any "caption:" prefix.',
-    reply: 'Write exactly one SNS reply for this thread.\nPost author: {{postAuthorName}} ({{postAuthorHandle}})\nPost: "{{postContent}}"\nTarget comment author: {{commentAuthorName}} ({{commentAuthorHandle}})\nTarget comment: "{{commentText}}"\nReply author: {{replyAuthorName}} ({{replyAuthorHandle}})\nRules: one sentence only from {{replyAuthorName}}\'s perspective; use only fixed @handles if needed; use natural language fitting {{replyAuthorName}}\'s background; no explanations, quotes, or hashtags. Personality hint: {{replyPersonality}}.',
-    extraComment: 'Write exactly one additional SNS comment for this post.\nPost author: {{postAuthorName}} ({{postAuthorHandle}})\nPost: "{{postContent}}"\nComment author: {{extraAuthorName}} ({{extraAuthorHandle}})\nRules: one short sentence from {{extraAuthorName}}\'s perspective; use only fixed @handles if needed; use natural language fitting {{extraAuthorName}}\'s background; no explanations, quotes, or hashtags. Personality hint: {{extraPersonality}}.',
+    reply: 'Write exactly one SNS reply for this thread.\nPost author: {{postAuthorName}} ({{postAuthorHandle}})\nPost: "{{postContent}}"\nTarget comment author: {{commentAuthorName}} ({{commentAuthorHandle}})\nTarget comment: "{{commentText}}"\nReply author: {{replyAuthorName}} ({{replyAuthorHandle}})\nRules: one sentence only from {{replyAuthorName}}\'s perspective; use only fixed @handles if needed; use natural language fitting {{replyAuthorName}}\'s background; no explanations, quotes, or hashtags. Personality hint: {{replyPersonality}}. It should be written vividly, fitting the characteristics of each character.',
+    extraComment: 'Write exactly one additional SNS comment for this post.\nPost author: {{postAuthorName}} ({{postAuthorHandle}})\nPost: "{{postContent}}"\nComment author: {{extraAuthorName}} ({{extraAuthorHandle}})\nRules: one short sentence from {{extraAuthorName}}\'s perspective; use only fixed @handles if needed; use natural language fitting {{extraAuthorName}}\'s background; no explanations, quotes, or hashtags. Personality hint: {{extraPersonality}}. It should be written vividly, fitting the characteristics of each character.',
 };
 
 function normalizeQuickAccessImageUrl(value) {
@@ -2757,6 +2757,10 @@ const MSG_IMAGE_OFF_PROMPT = '<image_generation_rule>\nWhen {{char}} would natur
 function updateMessageImageInjection() {
     const ctx = getContext();
     if (!ctx || typeof ctx.setExtensionPrompt !== 'function') return;
+    if (isCallActive()) {
+        ctx.setExtensionPrompt(MSG_IMAGE_INJECT_TAG, '', 1, 0);
+        return;
+    }
     const settings = getSettings();
     if (settings.messageImageGenerationMode) {
         const prompt = settings.messageImageInjectionPrompt || DEFAULT_SETTINGS.messageImageInjectionPrompt;
@@ -2841,7 +2845,7 @@ async function applyCharacterImageDisplayMode() {
     // 각 매치에 대한 대체 문자열을 미리 계산한다 (역순 처리를 위해)
     /** @type {Array<{index: number, length: number, replacement: string}>} */
     const replacements = [];
-    const allowAutoImageGeneration = settings.messageImageGenerationMode && hasExplicitImageIntentAroundLatestMessage();
+    const allowAutoImageGeneration = !isCallActive() && settings.messageImageGenerationMode && hasExplicitImageIntentAroundLatestMessage();
 
     if (allowAutoImageGeneration) {
         // ── ON 모드: 이미지 생성 API로 실제 이미지 생성 ──

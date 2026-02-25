@@ -164,6 +164,10 @@ export function initEmoticon() {
  * 이모티콘 팝업을 연다
  */
 export function openEmoticonPopup(onBack) {
+    if (isCallActive()) {
+        showToast('통화 중에는 이모티콘 기능을 사용할 수 없습니다.', 'warn');
+        return;
+    }
     const content = buildEmoticonContent();
     createPopup({
         id: 'emoticon',
