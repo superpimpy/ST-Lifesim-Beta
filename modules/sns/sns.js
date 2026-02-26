@@ -1752,6 +1752,7 @@ function openImagePresetManager(onChanged) {
 function openAvatarSettingsDialog(onUpdate) {
     const wrapper = document.createElement('div');
     wrapper.className = 'slm-form';
+    const defaultAuthorLanguage = getSnsPromptSettings().language;
 
     // ─ 연락처 프로필 연동 토글 ─
     const linkRow = document.createElement('div');
@@ -1854,7 +1855,6 @@ function openAvatarSettingsDialog(onUpdate) {
     const postingEnabled = loadPostingEnabledMap();
     const authorLanguages = loadAuthorLanguages();
     const authorMinLikes = loadAuthorMinLikesMap();
-    const defaultAuthorLanguage = getSnsPromptSettings().language;
     const contacts = [...getContacts('character'), ...getContacts('chat')];
     const userName = getContext()?.name1 || 'user';
     const charName = getContext()?.name2 || '';
