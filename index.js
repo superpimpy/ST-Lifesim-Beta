@@ -3055,6 +3055,9 @@ async function processMessengerImageGeneration(rawPrompt, options = {}) {
     const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
     return { imageUrl: '', fallbackText: template.replace(/\{description\}/g, rawPrompt) };
 }
+
+/**
+ * char 메시지 렌더링 후 이미지 태그를 처리한다
  * - ON: <pic prompt="..."> 태그를 감지하여 이미지 생성 API로 실제 이미지 생성
  * - OFF: <pic prompt="..."> 태그를 줄글 텍스트 형식으로 변환
  */
