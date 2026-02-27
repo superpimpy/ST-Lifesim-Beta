@@ -2871,6 +2871,11 @@ function syncQuickSendButtons() {
 
 // 동시 실행 방지 플래그 — 이미지 생성이 진행 중인 동안 중복 호출을 차단한다
 let _imageGenInProgress = false;
+// 재실행 대기 플래그 — 이미지 생성 진행 중 새로운 호출이 들어오면 완료 후 재실행한다
+let _imageGenPendingRetry = false;
+// 재실행 횟수 제한 — 무한 재귀를 방지한다
+let _imageGenRetryCount = 0;
+const MAX_IMAGE_GEN_RETRIES = 3;
 
 // 메신저 이미지 프롬프트 주입 태그
 const MSG_IMAGE_INJECT_TAG = 'st-lifesim-msg-image';
@@ -3080,8 +3085,11 @@ async function processMessengerImageGeneration(rawPrompt, options = {}) {
  * - OFF: <pic prompt="..."> 태그를 줄글 텍스트 형식으로 변환
  */
 async function applyCharacterImageDisplayMode() {
-    // 동시 실행 방지: 이전 호출이 완료될 때까지 새로운 호출을 무시한다
-    if (_imageGenInProgress) return;
+    // 동시 실행 방지: 이전 호출이 완료될 때까지 대기 플래그를 세우고 나중에 재실행한다
+    if (_imageGenInProgress) {
+        _imageGenPendingRetry = true;
+        return;
+    }
     _imageGenInProgress = true;
     try {
         const settings = getSettings();
@@ -3099,7 +3107,9 @@ async function applyCharacterImageDisplayMode() {
         const charName = String(lastMsg.name || ctx?.name2 || '{{char}}');
         const msgIdx = Number(ctx.chat.length - 1);
 
-        const allowAutoImageGeneration = !isCallActive() && settings.messageImageGenerationMode && hasExplicitImageIntentAroundLatestMessage();
+        // char의 응답에 <pic prompt="..."> 태그가 포함되어 있으면 그 자체가 이미지 생성 의도이므로,
+        // 유저의 명시적 지시("사진 보내줘" 등) 없이도 이미지를 생성한다.
+        const allowAutoImageGeneration = !isCallActive() && settings.messageImageGenerationMode;
 
         if (allowAutoImageGeneration) {
             // ── ON 모드: 이미지 생성 API로 실제 이미지 생성 (순차적 UI 업데이트) ──
@@ -3225,6 +3235,15 @@ async function applyCharacterImageDisplayMode() {
         }
     } finally {
         _imageGenInProgress = false;
+        // 진행 중 새로운 호출이 대기 중이었다면 재실행한다 (최대 횟수 제한)
+        if (_imageGenPendingRetry && _imageGenRetryCount < MAX_IMAGE_GEN_RETRIES) {
+            _imageGenPendingRetry = false;
+            _imageGenRetryCount++;
+            applyCharacterImageDisplayMode().catch((e) => console.error('[ST-LifeSim] 이미지 표시 모드 재실행 오류:', e));
+        } else {
+            _imageGenPendingRetry = false;
+            _imageGenRetryCount = 0;
+        }
     }
 }
 
