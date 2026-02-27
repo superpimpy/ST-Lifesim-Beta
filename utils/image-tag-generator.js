@@ -172,6 +172,14 @@ function getTagGenRouteSettings() {
     };
 }
 
+function getTagGenExternalApiSettings() {
+    const ext = getExtensionSettings()?.['st-lifesim'];
+    return {
+        url: String(ext?.snsExternalApiUrl || '').trim(),
+        timeoutMs: Math.max(1000, Math.min(60000, Number(ext?.snsExternalApiTimeoutMs) || 12000)),
+    };
+}
+
 
 /**
  * Uses AI to convert a raw prompt (possibly Korean) into English Danbooru-style tags.
@@ -224,8 +232,41 @@ export async function generateDanbooruTags(rawPrompt, options) {
     try {
         let result = '';
         const aiRoute = getTagGenRouteSettings();
+        const externalApi = getTagGenExternalApiSettings();
 
-        if (typeof context.generateRaw === 'function') {
+        if (externalApi.url && typeof fetch === 'function') {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), externalApi.timeoutMs);
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (typeof context.getRequestHeaders === 'function') {
+                    Object.assign(headers, context.getRequestHeaders());
+                }
+                const response = await fetch(externalApi.url, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ prompt: fullPrompt, quietName: 'danbooru-tag-gen', module: 'st-lifesim-tag-generation' }),
+                    signal: controller.signal,
+                });
+                if (response.ok) {
+                    const rawText = await response.text();
+                    try {
+                        const json = JSON.parse(rawText || 'null');
+                        if (typeof json === 'string') result = json.trim();
+                        else if (typeof json?.text === 'string') result = json.text.trim();
+                    } catch { /* non-JSON 응답은 그대로 사용 */ }
+                    if (!result && rawText) result = rawText.trim();
+                } else {
+                    console.warn('[image-tag-generator] 태그 생성 외부 API 응답 오류:', response.status);
+                }
+            } catch (error) {
+                console.warn('[image-tag-generator] 태그 생성 외부 API 호출 실패, 내부 생성으로 폴백:', error);
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+
+        if (!result && typeof context.generateRaw === 'function') {
             const chatSettings = context.chatCompletionSettings;
             const sourceBefore = chatSettings?.chat_completion_source;
             let modelKey = '';
@@ -262,7 +303,7 @@ export async function generateDanbooruTags(rawPrompt, options) {
                     chatSettings[modelKey] = modelBefore;
                 }
             }
-        } else if (typeof context.generateQuietPrompt === 'function') {
+        } else if (!result && typeof context.generateQuietPrompt === 'function') {
             result = (await context.generateQuietPrompt({
                 quietPrompt: fullPrompt,
                 quietName: 'danbooru-tag-gen',
