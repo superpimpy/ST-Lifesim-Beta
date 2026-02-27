@@ -996,6 +996,7 @@ function openSettingsPanel(onBack) {
         enabledCheck.onchange = () => {
             settings.enabled = enabledCheck.checked;
             saveSettings();
+            updateMessageImageInjection();
             if (!settings.enabled) {
                 clearContext();
                 document.querySelectorAll('.slm-rsf-icon').forEach(el => el.remove());
@@ -2920,6 +2921,10 @@ const MSG_IMAGE_OFF_PROMPT = '<image_generation_rule>\nWhen {{char}} would natur
 function updateMessageImageInjection() {
     const ctx = getContext();
     if (!ctx || typeof ctx.setExtensionPrompt !== 'function') return;
+    if (!isEnabled()) {
+        ctx.setExtensionPrompt(MSG_IMAGE_INJECT_TAG, '', 1, 0);
+        return;
+    }
     if (isCallActive()) {
         ctx.setExtensionPrompt(MSG_IMAGE_INJECT_TAG, '', 1, 0);
         return;
