@@ -2679,6 +2679,7 @@ function hasExplicitImageIntentAroundLatestMessage() {
         /wanna\s+see\s+(?:a\s+)?(?:photo|picture|pic|image|selfie)/i,
     ];
     const userAgreementRe = /^\s*(?:응|웅|어|그래|좋아|네|예|ㅇㅇ|ㅇ|오키|오케이|고|ㄱㄱ|ㄱ|yes|yeah|yep|yup|ok|okay|sure|please|그럼|당연|물론|해줘|해봐|gogo|당근|좋지|ㅇㅋ|보내|보내줘|보내봐|보여줘|보여봐|응응|그래그래|좋아좋아)[\s.!~?ㅋㅎ]*$/i;
+    // Short messages only — prevents long user messages from being misidentified as simple agreement
     const MAX_AGREEMENT_LENGTH = 30;
 
     for (let i = 0; i < recentMessages.length - 1; i++) {
