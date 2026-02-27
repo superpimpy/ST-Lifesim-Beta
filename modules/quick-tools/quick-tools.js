@@ -705,7 +705,7 @@ async function handleVoiceMemo(seconds, hint, aiMode = false) {
             const tmpl = getExtensionSettings()?.['st-lifesim']?.messageTemplates?.voiceMemo;
             const voiceHtml = tmpl
                 ? tmpl.replace(/\{timeStr\}/g, timeStr).replace(/\{hint\}/g, hintText)
-                : `🎤 음성메시지 (${timeStr})<br>${hintText}`;
+                : `🎤 음성메시지 (${timeStr})<br>내용: ${hintText}`;
             await slashSend(voiceHtml);
             showToast('음성메시지 삽입 완료', 'success', 1500);
         }

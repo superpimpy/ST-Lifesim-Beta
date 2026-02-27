@@ -36,6 +36,7 @@ const SETTINGS_KEY = 'st-lifesim';
 // 주간/야간 테마 저장 키 (localStorage)
 const THEME_STORAGE_KEY = 'st-lifesim:forced-theme';
 const IMAGE_INTENT_CONTEXT_WINDOW = 4;
+const MAX_MESSENGER_IMAGES_PER_RESPONSE = 3;
 const ALWAYS_ON_MODULES = new Set(['quickTools', 'contacts']);
 const AI_ROUTE_DEFAULTS = {
     api: '',
@@ -89,7 +90,7 @@ const DEFAULT_MESSAGE_TEMPLATES = {
     callStart_incoming: '📞 {charName}님께서 전화를 거셨습니다. {{user}}님께서 전화를 받으셨습니다.',
     callStart_outgoing: '📞 {charName}님께 전화를 걸었습니다. {charName}님께서 전화를 받으셨습니다.',
     callEnd: '📵 통화 종료 (통화시간: {timeStr})',
-    voiceMemo: '🎤 음성메시지 ({timeStr})<br>{hint}',
+    voiceMemo: '🎤 음성메시지 ({timeStr})<br>내용: {hint}',
     voiceMemoAiPrompt: 'As {charName}, send exactly one voice message in Korean. You must choose suitable duration and content yourself based on current context.\nOutput only this HTML format:\n🎤 음성메시지 (M:SS)<br>[actual voice message content]',
     readReceipt: '{charName} sent a message to {{user}}. {{user}} has read {charName}\'s message but has not replied yet. Briefly describe {charName}\'s reaction in 1-2 sentences as dialogue.',
     noContact: '{charName} tried to reach {{user}} but {{user}} has not seen or responded yet. Briefly describe the situation in 1-2 sentences.',
@@ -588,6 +589,96 @@ function openUserImagePromptPopup() {
     requestAnimationFrame(() => input.focus());
 }
 
+/**
+ * 음성메모 삽입 전용 패널을 연다 (퀵 액세스용)
+ * 취소 시 전송 안 됨
+ */
+function openVoiceMemoPanel() {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'slm-settings-wrapper slm-form';
+
+    const desc = document.createElement('p');
+    desc.className = 'slm-desc';
+    desc.textContent = '음성메시지 길이와 내용 힌트를 입력하세요.';
+    wrapper.appendChild(desc);
+
+    const durationLabel = document.createElement('label');
+    durationLabel.className = 'slm-label';
+    durationLabel.textContent = '길이(초)';
+    wrapper.appendChild(durationLabel);
+
+    const durationInput = document.createElement('input');
+    durationInput.className = 'slm-input';
+    durationInput.type = 'number';
+    durationInput.min = '1';
+    durationInput.max = '600';
+    durationInput.value = '30';
+    durationInput.placeholder = '예: 30';
+    wrapper.appendChild(durationInput);
+
+    const hintLabel = document.createElement('label');
+    hintLabel.className = 'slm-label';
+    hintLabel.style.marginTop = '8px';
+    hintLabel.textContent = '내용 힌트 (선택)';
+    wrapper.appendChild(hintLabel);
+
+    const hintInput = document.createElement('input');
+    hintInput.className = 'slm-input';
+    hintInput.type = 'text';
+    hintInput.placeholder = '예: 오늘 늦겠다고';
+    wrapper.appendChild(hintInput);
+
+    const footer = document.createElement('div');
+    footer.className = 'slm-panel-footer';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'slm-btn slm-btn-secondary';
+    cancelBtn.textContent = '취소';
+
+    const sendBtn = document.createElement('button');
+    sendBtn.className = 'slm-btn slm-btn-primary';
+    sendBtn.textContent = '🎤 전송';
+
+    footer.appendChild(cancelBtn);
+    footer.appendChild(sendBtn);
+
+    const { close } = createPopup({
+        id: 'voice-memo-quick',
+        title: '🎤 음성메모 삽입',
+        content: wrapper,
+        footer,
+        className: 'slm-sub-panel',
+    });
+
+    cancelBtn.onclick = () => close();
+
+    sendBtn.onclick = async () => {
+        const secs = Math.max(1, Math.min(600, Number(durationInput.value) || 30));
+        const hint = hintInput.value.trim();
+        sendBtn.disabled = true;
+        sendBtn.textContent = '⏳ 전송 중...';
+        try {
+            await triggerVoiceMemoInsertion(secs, hint);
+            close();
+        } catch (e) {
+            showToast('음성메모 전송 실패: ' + e.message, 'error');
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.textContent = '🎤 전송';
+        }
+    };
+
+    // Enter 키로 전송
+    hintInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !sendBtn.disabled) {
+            e.preventDefault();
+            sendBtn.click();
+        }
+    });
+
+    requestAnimationFrame(() => durationInput.focus());
+}
+
 const QUICK_ACCESS_ITEMS = [
     { key: 'userImage', icon: '🎨', label: '유저 이미지 전송', moduleKey: 'quickTools', action: async () => {
         openUserImagePromptPopup();
@@ -596,11 +687,8 @@ const QUICK_ACCESS_ITEMS = [
     { key: 'contacts', icon: '📋', label: '연락처', action: () => { closePopup('quick-access-menu'); openContactsPopup(); } },
     { key: 'readReceipt', icon: '🔕', label: '읽씹하기', moduleKey: 'quickTools', action: async () => { await triggerReadReceipt(); } },
     { key: 'noContact', icon: '📵', label: '연락 안 됨(안읽씹)', moduleKey: 'quickTools', action: async () => { await triggerNoContact(); } },
-    { key: 'voiceMemo', icon: '🎤', label: '음성메모 삽입', moduleKey: 'quickTools', action: async () => {
-        const secRaw = window.prompt('음성메모 길이(초)를 입력하세요.', '30');
-        if (secRaw == null) return;
-        const hint = window.prompt('음성메모 내용 힌트(선택)') || '';
-        await triggerVoiceMemoInsertion(Number(secRaw), hint);
+    { key: 'voiceMemo', icon: '🎤', label: '음성메모 삽입', moduleKey: 'quickTools', action: () => {
+        openVoiceMemoPanel();
     } },
     { key: 'emoticon', icon: '😊', label: '이모티콘 열기', moduleKey: 'emoticon', action: () => openEmoticonPopup() },
     { key: 'deletedMessage', icon: '🚫', label: '삭제된 메시지', moduleKey: 'quickTools', action: async () => { await triggerDeletedMessage(); } },
@@ -2647,6 +2735,11 @@ function hasExplicitImageIntentAroundLatestMessage() {
         /v\s*sign|peace\s*sign|손가락|브이|윙크|wink|미소.*지어|smile\s+for|손\s*흔들|wave/i,
         /어떤\s*표정|어떻게\s*생겼|입고\s*있|wearing|옷.*보여|outfit|look\s+like/i,
         /어디\s*있|where\s+are\s+you|뭐\s*하고\s*있|what\s+are\s+you\s+doing|지금\s*모습/i,
+        // Follow-up image requests — user asks for more images after char already sent one
+        /(?:\d+\s*장|한\s*장|두\s*장|세\s*장).*(?:더|추가|또).*(?:보내|줘|보여|찍어)/i,
+        /(?:더|추가|또).*(?:\d+\s*장|한\s*장|사진|이미지|셀카).*(?:보내|줘|보여)/i,
+        /(?:more|another|one\s+more|send\s+more).*(?:photo|picture|pic|image|selfie)/i,
+        /(?:photo|picture|pic|image|selfie).*(?:more|another|again)/i,
     ];
     const charSendIntentPatterns = [
         /사진.*(보낼게|보내줄게|찍어줄게|첨부|보여줄게)|이미지.*(보낼게|보내줄게|첨부|보여줄게)|셀카.*(보낼게|보내줄게)/i,
@@ -2915,7 +3008,53 @@ async function generateMessageImageViaApi(imagePrompt) {
 }
 
 /**
- * char 메시지 렌더링 후 이미지 태그를 처리한다
+ * 메신저 이미지 생성 파이프라인 (외부 호출용)
+ * SNS 게시글 생성 로직과 동일한 패턴: generateImageTags() → Image API
+ * @param {string} rawPrompt - 원본 이미지 설명
+ * @param {Object} options
+ * @param {string} options.charName - 캐릭터 이름
+ * @param {string[]} [options.includeNames] - 포함할 이름 목록
+ * @param {Array} [options.contacts] - 연락처 목록
+ * @param {Object} [options.settings] - 확장 설정
+ * @returns {Promise<{imageUrl: string, fallbackText: string}>}
+ */
+async function processMessengerImageGeneration(rawPrompt, options = {}) {
+    const { charName = '', includeNames = [], contacts = [], settings = getSettings() } = options;
+    const additionalTagPrompt = String(settings.tagGenerationAdditionalPrompt || '').trim();
+    const customMsgImgPrompt = settings.messageImagePrompt || '';
+    const charAppearanceTags = String(getAppearanceTagsByName(charName) || '').trim();
+    const resolvedCustomPrompt = customMsgImgPrompt
+        ? customMsgImgPrompt
+            .replace(/\{charName\}/g, charName)
+            .replace(/\{appearanceTags\}/g, charAppearanceTags)
+        : '';
+    const enrichedPrompt = resolvedCustomPrompt
+        ? `${resolvedCustomPrompt}\nScene: ${rawPrompt}`
+        : rawPrompt;
+    const tagResult = await generateImageTags(enrichedPrompt, {
+        includeNames,
+        contacts,
+        getAppearanceTagsByName,
+        tagWeight: Number(settings.tagWeight) || 0,
+        additionalPrompt: additionalTagPrompt,
+    });
+    if (!tagResult.finalPrompt) {
+        console.warn('[ST-LifeSim] 메신저 이미지 태그 생성 결과 없음');
+        const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
+        return { imageUrl: '', fallbackText: template.replace(/\{description\}/g, rawPrompt) };
+    }
+    try {
+        console.log('[ST-LifeSim] 메신저 이미지 생성 API 호출 시작, finalPrompt:', tagResult.finalPrompt.substring(0, 150));
+        const imageUrl = await generateMessageImageViaApi(tagResult.finalPrompt);
+        if (imageUrl) {
+            return { imageUrl, fallbackText: '' };
+        }
+    } catch (err) {
+        console.warn('[ST-LifeSim] 메신저 이미지 생성 실패:', err);
+    }
+    const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
+    return { imageUrl: '', fallbackText: template.replace(/\{description\}/g, rawPrompt) };
+}
  * - ON: <pic prompt="..."> 태그를 감지하여 이미지 생성 API로 실제 이미지 생성
  * - OFF: <pic prompt="..."> 태그를 줄글 텍스트 형식으로 변환
  */
@@ -2942,14 +3081,20 @@ async function applyCharacterImageDisplayMode() {
     if (allowAutoImageGeneration) {
         // ── ON 모드: 이미지 생성 API로 실제 이미지 생성 ──
         // 통합 파이프라인: generateImageTags() → Image API
-        showToast(`📷 ${picMatches.length}개 이미지 생성 중...`, 'info', 2000);
+        // 최대 이미지 수 제한
+        const limitedPicMatches = picMatches.slice(0, MAX_MESSENGER_IMAGES_PER_RESPONSE);
+        if (picMatches.length > MAX_MESSENGER_IMAGES_PER_RESPONSE) {
+            showToast(`📷 이미지 최대 ${MAX_MESSENGER_IMAGES_PER_RESPONSE}장까지 생성 가능합니다.`, 'warn', 2000);
+        }
+        showToast(`📷 ${limitedPicMatches.length}개 이미지 생성 중...`, 'info', 2000);
         const userName = ctx?.name1 || '';
         const allContactsList = [...getContacts('character'), ...getContacts('chat')];
-        const additionalTagPrompt = String(settings.tagGenerationAdditionalPrompt || '').trim();
         const recentContextText = (Array.isArray(ctx.chat) ? ctx.chat : [])
             .slice(-IMAGE_INTENT_CONTEXT_WINDOW)
             .map(m => String(m?.mes || ''))
             .join('\n');
+        // 제한 내 이미지만 생성, 초과분은 텍스트 폴백
+        const limitedSet = new Set(limitedPicMatches.map(m => m.index));
         for (const match of picMatches) {
             const fullTag = match[0];
             const rawPrompt = (match[1] || match[2] || '').trim();
@@ -2958,56 +3103,34 @@ async function applyCharacterImageDisplayMode() {
                 replacements.push({ index: matchIndex, length: fullTag.length, replacement: '' });
                 continue;
             }
-            // 통합 이미지 태그 생성 (커스텀 프롬프트 반영)
+            // 최대 이미지 수를 초과한 매치는 텍스트 폴백
+            if (!limitedSet.has(matchIndex)) {
+                const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
+                replacements.push({ index: matchIndex, length: fullTag.length, replacement: template.replace(/\{description\}/g, rawPrompt) });
+                continue;
+            }
+            // 외부 파이프라인으로 이미지 생성 처리 (SNS 게시글 생성 로직 참고)
             const includeNames = [charName];
             collectMentionedContactNames(`${recentContextText}\n${rawPrompt}`, allContactsList).forEach((name) => {
                 if (name && !includeNames.includes(name)) includeNames.push(name);
             });
-            // user hint 감지 시 유저도 포함
             const userHintRegex = /\buser\b|{{user}}|유저|너|당신|with user|together|둘이|함께/;
             if (userName && userHintRegex.test(rawPrompt.toLowerCase())) {
                 includeNames.push(userName);
             }
-            // 커스텀 메신저 이미지 프롬프트 적용
-            const customMsgImgPrompt = settings.messageImagePrompt || '';
-            const charAppearanceTags = String(getAppearanceTagsByName(charName) || '').trim();
-            const resolvedCustomPrompt = customMsgImgPrompt
-                ? customMsgImgPrompt
-                    .replace(/\{charName\}/g, charName)
-                    .replace(/\{appearanceTags\}/g, charAppearanceTags)
-                : '';
-            const enrichedPrompt = resolvedCustomPrompt
-                ? `${resolvedCustomPrompt}\nScene: ${rawPrompt}`
-                : rawPrompt;
-            const tagResult = await generateImageTags(enrichedPrompt, {
+            const result = await processMessengerImageGeneration(rawPrompt, {
+                charName,
                 includeNames,
                 contacts: allContactsList,
-                getAppearanceTagsByName,
-                tagWeight: Number(settings.tagWeight) || 0,
-                additionalPrompt: additionalTagPrompt,
+                settings,
             });
             let replacement;
-            if (!tagResult.finalPrompt) {
-                console.warn('[ST-LifeSim] 태그 생성 결과 없음 (finalPrompt 비어있음), 줄글 형태로 출력합니다. sceneTags:', tagResult.sceneTags, 'appearanceGroups:', tagResult.appearanceGroups);
-                const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
-                replacement = template.replace(/\{description\}/g, rawPrompt);
+            if (result.imageUrl) {
+                const safeUrl = escapeHtml(result.imageUrl);
+                const safePrompt = escapeHtml(rawPrompt);
+                replacement = `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`;
             } else {
-                try {
-                    console.log('[ST-LifeSim] 이미지 생성 API 호출 시작, finalPrompt:', tagResult.finalPrompt.substring(0, 150));
-                    const imageUrl = await generateMessageImageViaApi(tagResult.finalPrompt);
-                    if (imageUrl) {
-                        const safeUrl = escapeHtml(imageUrl);
-                        const safePrompt = escapeHtml(rawPrompt);
-                        replacement = `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`;
-                    } else {
-                        const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
-                        replacement = template.replace(/\{description\}/g, rawPrompt);
-                    }
-                } catch (err) {
-                    console.warn('[ST-LifeSim] 메신저 이미지 개별 생성 실패:', err);
-                    const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
-                    replacement = template.replace(/\{description\}/g, rawPrompt);
-                }
+                replacement = result.fallbackText;
             }
             replacements.push({ index: matchIndex, length: fullTag.length, replacement });
         }
