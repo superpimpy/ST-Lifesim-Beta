@@ -2850,6 +2850,50 @@ async function generateMessageImageViaApi(imagePrompt) {
     try {
         const ctx = getContext();
         if (!ctx) return '';
+        const settings = getSettings();
+        const externalApiUrl = String(settings?.snsExternalApiUrl || '').trim();
+        const externalApiTimeoutMs = Math.max(1000, Math.min(60000, Number(settings?.snsExternalApiTimeoutMs) || 12000));
+        if (externalApiUrl) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), externalApiTimeoutMs);
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (typeof ctx.getRequestHeaders === 'function') {
+                    Object.assign(headers, ctx.getRequestHeaders());
+                }
+                const response = await fetch(externalApiUrl, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ prompt: imagePrompt, module: 'st-lifesim-messenger-image' }),
+                    signal: controller.signal,
+                });
+                if (response.ok) {
+                    const rawText = await response.text();
+                    let resultStr = String(rawText || '').trim();
+                    try {
+                        const json = JSON.parse(rawText || 'null');
+                        if (typeof json === 'string') resultStr = json.trim();
+                        else if (typeof json?.url === 'string') resultStr = json.url.trim();
+                        else if (typeof json?.imageUrl === 'string') resultStr = json.imageUrl.trim();
+                        else if (typeof json?.text === 'string') resultStr = json.text.trim();
+                    } catch { /* non-JSON 응답은 그대로 사용 */ }
+                    if (resultStr && (resultStr.startsWith('http') || resultStr.startsWith('/') || resultStr.startsWith('data:'))) {
+                        if (isUrlAlreadyInChat(resultStr, ctx)) {
+                            console.warn('[ST-LifeSim] 외부 API 이미지 URL이 이미 채팅에 존재합니다. 재사용 방지를 위해 거부합니다.');
+                            return '';
+                        }
+                        return resultStr;
+                    }
+                    console.warn('[ST-LifeSim] 외부 API가 유효한 이미지 URL을 반환하지 않음');
+                } else {
+                    console.warn('[ST-LifeSim] 메신저 이미지 외부 API 응답 오류:', response.status);
+                }
+            } catch (error) {
+                console.warn('[ST-LifeSim] 메신저 이미지 외부 API 호출 실패, /sd로 폴백:', error);
+            } finally {
+                clearTimeout(timer);
+            }
+        }
         if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
             const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true ${imagePrompt}`, { showOutput: false });
             const resultStr = String(result?.pipe || result || '').trim();
