@@ -2754,8 +2754,8 @@ const PIC_TAG_REGEX = /<pic\s[^>]*?prompt\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*?\/?
  */
 function normalizeQuotesForPicTag(text) {
     return text
-        .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
-        .replace(/[\u2018\u2019\u201A\u201B]/g, "'");
+        .replace(/[\u201C\u201D\u201E\u201F]/g, '"')   // U+201C " U+201D " U+201E „ U+201F ‟
+        .replace(/[\u2018\u2019\u201A\u201B]/g, "'");   // U+2018 ' U+2019 ' U+201A ‚ U+201B ‛
 }
 
 /**
