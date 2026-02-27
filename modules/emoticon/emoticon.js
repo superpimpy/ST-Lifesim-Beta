@@ -150,13 +150,16 @@ export function initEmoticon() {
         if (aiEmoticons.length === 0) return null;
         const size = getEmoticonSize();
         const radius = getEmoticonRadius();
+        const ctx = getContext();
+        const charName = (ctx?.name2 || '{{char}}').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const list = aiEmoticons.map(e => {
             // Escape values for safe HTML embedding
             const safeName = e.name.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             const safeUrl = e.url.replace(/"/g, '&quot;');
-            return `• ${safeName}: <img src="${safeUrl}" alt="${safeName}" style="width:${size}px;height:${size}px;object-fit:contain;display:inline-block;vertical-align:middle;border-radius:${radius}px">`;
+            const label = `${charName}이(가) ${safeName} 이모티콘을 보냈습니다.`;
+            return `• ${safeName}: <img src="${safeUrl}" alt="${safeName}" aria-label="${label}" style="width:${size}px;height:${size}px;object-fit:contain;display:inline-block;vertical-align:middle;border-radius:${radius}px">`;
         }).join('\n');
-        return `=== Available Emoticons for AI ===\nTo use an emoticon, copy the exact HTML tag shown below:\n${list}`;
+        return `=== Available Emoticons for AI ===\nWhen sending an emoticon, the aria-label should follow the format: "(이름)이(가) (이모티콘이름) 이모티콘을 보냈습니다."\nTo use an emoticon, copy the exact HTML tag shown below:\n${list}`;
     });
 }
 
@@ -492,10 +495,14 @@ function buildEmoticonContent() {
                 try {
                     const size = getEmoticonSize();
                     const radius = getEmoticonRadius();
+                    const ctx = getContext();
+                    const userName = ctx?.name1 || '{{user}}';
                     // HTML img 태그로 크기/모서리 지정 (URL/이름 이스케이프)
                     const safeName = escapeHtml(e.name);
                     const safeUrl = e.url.replace(/"/g, '&quot;');
-                    const html = `<img src="${safeUrl}" alt="${safeName}" aria-label="${safeName}이모티콘" style="width:${size}px;height:${size}px;object-fit:contain;display:inline-block;vertical-align:middle;border-radius:${radius}px">`;
+                    const safeUserName = escapeHtml(userName);
+                    const label = `${safeUserName}이(가) ${safeName} 이모티콘을 보냈습니다.`;
+                    const html = `<img src="${safeUrl}" alt="${safeName}" aria-label="${label}" style="width:${size}px;height:${size}px;object-fit:contain;display:inline-block;vertical-align:middle;border-radius:${radius}px">`;
                     await slashSend(html);
                     showToast(`이모티콘 전송: ${e.name}`, 'success', 1000);
                 } catch (err) {
