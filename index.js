@@ -2657,12 +2657,48 @@ function hasExplicitImageIntentAroundLatestMessage() {
         /v\s*sign|peace\s*sign|브이.*했|윙크.*했|wink|미소.*지었|smiled/i,
         /찍어\s*봄|찍어봤|한\s*장.*찍|잠깐.*봐|이거\s*봐/i,
     ];
-    return recentMessages.some((msg) => {
+        // Existing check: any message independently matches explicit intent
+    if (recentMessages.some((msg) => {
         const text = msg?.mes;
         if (!text) return false;
         const patterns = msg?.is_user ? userRequestPatterns : charSendIntentPatterns;
         return patterns.some((re) => re.test(text));
-    });
+    })) return true;
+
+    // ── NEW: AI offered to send an image → user agreed ──
+    // Detect when the AI proposes/offers to send an image (question form)
+    // and the user responds with a short affirmative answer.
+    const charOfferPatterns = [
+        // Korean: image keyword + offer/question ending (줄까, 볼까, 할까)
+        /(?:사진|이미지|셀카|인증샷)[\s\S]*?(?:줄까|볼까|할까)/i,
+        // Korean: "사진이라도" (casual offer implying sending a photo)
+        /사진이라도/i,
+        // English: offer/question form + image keyword
+        /(?:shall|should|want\s+me\s+to|do\s+you\s+want)[\s\S]*?(?:send|show|take)[\s\S]*?(?:photo|picture|pic|image|selfie)/i,
+        /(?:photo|picture|pic|image|selfie)[\s\S]*?(?:shall\s+I|want\s+me\s+to|should\s+I)/i,
+        /wanna\s+see\s+(?:a\s+)?(?:photo|picture|pic|image|selfie)/i,
+    ];
+    const userAgreementRe = /^\s*(?:응|웅|어|그래|좋아|네|예|ㅇㅇ|ㅇ|오키|오케이|고|ㄱㄱ|ㄱ|yes|yeah|yep|yup|ok|okay|sure|please|그럼|당연|물론|해줘|해봐|gogo|당근|좋지|ㅇㅋ|보내|보내줘|보내봐|보여줘|보여봐|응응|그래그래|좋아좋아)[\s.!~?ㅋㅎ]*$/i;
+    // Short messages only — prevents long user messages from being misidentified as simple agreement
+    const MAX_AGREEMENT_LENGTH = 30;
+
+    for (let i = 0; i < recentMessages.length - 1; i++) {
+        const msg = recentMessages[i];
+        if (msg?.is_user) continue;
+        const text = String(msg?.mes || '');
+        if (!charOfferPatterns.some(re => re.test(text))) continue;
+        // AI offered an image — check if any subsequent user message is an agreement
+        for (let j = i + 1; j < recentMessages.length; j++) {
+            const nextMsg = recentMessages[j];
+            if (!nextMsg?.is_user) continue;
+            const nextText = String(nextMsg?.mes || '').trim();
+            if (nextText.length <= MAX_AGREEMENT_LENGTH && userAgreementRe.test(nextText)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 function isAsciiNameToken(name) {
