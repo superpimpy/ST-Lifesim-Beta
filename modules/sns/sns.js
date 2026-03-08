@@ -14,7 +14,7 @@ import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
 import { getContacts, getAppearanceTagsByName } from '../contacts/contacts.js';
-import { generateImageTags } from '../../utils/image-tag-generator.js';
+import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
 
 const MODULE_KEY = 'sns-feed';
 const AVATARS_KEY = 'sns-avatars';
@@ -212,6 +212,57 @@ function buildSnsImageInputPrompt(customTemplate, authorName, postContent) {
         .replace(/\{authorName\}/g, authorName)
         .replace(/\{appearanceTags\}/g, authorAppearanceTags)
         .replace(/\{postContent\}/g, postContent);
+}
+
+function buildSnsDirectImagePromptRequest(sourcePrompt, authorName) {
+    return [
+        String(sourcePrompt || '').trim(),
+        '',
+        '[Output rule]',
+        `Return exactly one final direct image prompt for ${authorName || 'the author'}.`,
+        'Output ONLY one line of English Danbooru-style tags for direct image generation.',
+        'Do not output explanations, markdown, XML tags, captions, or Korean.',
+        'If character appearance tags are needed, include them directly as [Name: appearance tags].',
+        'Keep the named author in-frame unless the prompt clearly describes a subject-only object or scenery post.',
+        'Always produce a fresh prompt for a new image.',
+    ].join('\n');
+}
+
+async function createSnsImagePrompt(ctx, sourcePrompt, authorName, contacts = []) {
+    if (!ctx) return { sceneTags: '', appearanceGroups: [], finalPrompt: '' };
+    const generatedPrompt = await generateSnsText(
+        ctx,
+        buildSnsDirectImagePromptRequest(sourcePrompt, authorName),
+        `${authorName || 'sns'}-image`,
+    );
+    return buildDirectImagePrompt(generatedPrompt, {
+        includeNames: [authorName].filter(Boolean),
+        contacts,
+        getAppearanceTagsByName,
+        tagWeight: Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0,
+    });
+}
+
+async function applyGeneratedImageToPost(postId, { promptSource, authorName, fallbackImageUrl = '', onUpdate } = {}) {
+    const ctx = getContext();
+    if (!ctx) return false;
+    const contacts = [...getContacts('character'), ...getContacts('chat')];
+    const promptResult = await createSnsImagePrompt(ctx, promptSource, authorName, contacts);
+    if (!promptResult.finalPrompt) return false;
+    const generatedUrl = await generateImageViaApi(promptResult.finalPrompt);
+    const feed = loadFeed();
+    const post = feed.find(item => item.id === postId);
+    if (!post) return false;
+    if (generatedUrl) {
+        post.imageUrl = generatedUrl;
+        post.imageDescription = '';
+    } else if (!post.imageUrl && fallbackImageUrl) {
+        post.imageUrl = fallbackImageUrl;
+    }
+    post.imagePrompt = promptResult.finalPrompt;
+    saveFeed(feed);
+    onUpdate?.();
+    return !!generatedUrl;
 }
 
 function enforceSnsLanguage(prompt, language) {
@@ -570,23 +621,13 @@ export async function triggerNpcPosting() {
         let imageDescription = '';
         let resolvedImagePrompt = '';
         if (promptSettings.snsImageMode) {
-            // 통합 파이프라인: generateImageTags() → Image API
-            // 게시글 내용에서 시각적 장면을 유추할 수 있도록 작성자 정보 포함
-            const allContactsList = [...getContacts('character'), ...getContacts('chat')];
             const imageInputPrompt = buildSnsImageInputPrompt(promptSettings.snsImagePrompt, pick.name, postContent);
-            const additionalPrompt = String(getExtensionSettings()?.['st-lifesim']?.tagGenerationAdditionalPrompt || '').trim();
-            const tagResult = await generateImageTags(imageInputPrompt, {
-                includeNames: [pick.name],
-                contacts: allContactsList,
-                getAppearanceTagsByName,
-                tagWeight: Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0,
-                additionalPrompt,
-            });
-            resolvedImagePrompt = imageInputPrompt;
+            const promptResult = await createSnsImagePrompt(freshCtx, imageInputPrompt, pick.name, [...getContacts('character'), ...getContacts('chat')]);
+            resolvedImagePrompt = promptResult.finalPrompt || imageInputPrompt;
 
-            if (tagResult.finalPrompt) {
+            if (promptResult.finalPrompt) {
                 try {
-                    const generatedUrl = await generateImageViaApi(tagResult.finalPrompt);
+                    const generatedUrl = await generateImageViaApi(promptResult.finalPrompt);
                     if (generatedUrl) {
                         finalImageUrl = generatedUrl;
                         imageDescription = '';
@@ -595,7 +636,7 @@ export async function triggerNpcPosting() {
                     console.warn('[ST-LifeSim] SNS 이미지 생성 실패, 기본 이미지 사용:', imgErr);
                 }
             } else {
-                console.warn('[ST-LifeSim] SNS 태그 생성 결과 없음, 이미지 생성 건너뜀');
+                console.warn('[ST-LifeSim] SNS 직접 이미지 프롬프트 생성 결과 없음, 이미지 생성 건너뜀');
             }
         }
         if (!imageDescription && inlineCaption) imageDescription = inlineCaption;
@@ -954,6 +995,31 @@ function showPostContextMenu(e, post, onUpdate) {
     editItem.textContent = '✏️ 편집';
     editItem.onclick = () => { menu.remove(); openEditPostDialog(post, onUpdate); };
 
+    const regenItem = document.createElement('button');
+    regenItem.className = 'slm-context-item';
+    regenItem.textContent = '🔄 이미지 재생성';
+    regenItem.onclick = () => {
+        menu.remove();
+        const promptSource = String(post.imagePrompt || '').trim();
+        if (!promptSource) {
+            showToast('재생성할 이미지 프롬프트가 없습니다.', 'warn', 1800);
+            return;
+        }
+        showToast('이미지 재생성 중...', 'info', 2000);
+        void applyGeneratedImageToPost(post.id, {
+            promptSource,
+            authorName: post.authorName,
+            fallbackImageUrl: getAuthorDefaultImageUrl(post.authorName) || '',
+            onUpdate,
+        }).then((ok) => {
+            if (ok) showToast('이미지 재생성 완료', 'success', 1800);
+            else showToast('이미지 재생성 실패', 'warn', 1800);
+        }).catch((error) => {
+            console.warn('[ST-LifeSim] SNS 이미지 재생성 실패:', error);
+            showToast('이미지 재생성 실패', 'warn', 1800);
+        });
+    };
+
     const delItem = document.createElement('button');
     delItem.className = 'slm-context-item slm-context-danger';
     delItem.textContent = '🗑️ 삭제';
@@ -966,6 +1032,7 @@ function showPostContextMenu(e, post, onUpdate) {
     };
 
     menu.appendChild(editItem);
+    menu.appendChild(regenItem);
     menu.appendChild(delItem);
     document.body.appendChild(menu);
 
@@ -1576,45 +1643,47 @@ function openWritePostDialog(onSave) {
         } else if (useUrlRadio.checked) {
             finalImageUrl = imgInput.value.trim();
         } else if (useAiRadio.checked) {
-            // AI 이미지 생성 (NPC 게시글과 동일한 파이프라인)
             const userImageDesc = aiImgDescInput.value.trim() || text;
             const fallbackImageUrl = getAuthorDefaultImageUrl(authorName) || '';
+            const postId = generateId();
+            finalImageUrl = fallbackImageUrl;
+            const userPromptSettings = getSnsPromptSettings();
+            const imageInputPrompt = buildSnsImageInputPrompt(userPromptSettings.snsImagePrompt, authorName, userImageDesc);
+            resolvedImagePrompt = imageInputPrompt;
+            const feed = loadFeed();
+            feed.push({
+                id: postId,
+                authorName,
+                authorIsUser: true,
+                date: new Date().toISOString(),
+                content: text,
+                imageUrl: finalImageUrl,
+                imageDescription,
+                imagePrompt: resolvedImagePrompt,
+                likes: getInitialLikes(authorName, 0),
+                likedByUser: false,
+                comments: [],
+                isStory: false,
+                includeInContext: true,
+            });
+            saveFeed(feed);
 
-            // 통합 파이프라인: generateImageTags() → Image API
-            // 유저 SNS 게시글용 이미지: 작성자 컨텍스트 포함
-            showToast('🎨 이미지 생성 중...', 'info', 3000);
-            postBtn.disabled = true;
-
-            try {
-                const allContactsList = [...getContacts('character'), ...getContacts('chat')];
-                const userPromptSettings = getSnsPromptSettings();
-                const imageInputPrompt = buildSnsImageInputPrompt(userPromptSettings.snsImagePrompt, authorName, userImageDesc);
-                const additionalPrompt = String(getExtensionSettings()?.['st-lifesim']?.tagGenerationAdditionalPrompt || '').trim();
-                const tagResult = await generateImageTags(imageInputPrompt, {
-                    includeNames: [authorName].filter(Boolean),
-                    contacts: allContactsList,
-                    getAppearanceTagsByName,
-                    tagWeight: Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0,
-                    additionalPrompt,
-                });
-                resolvedImagePrompt = userImageDesc;
-
-                if (tagResult.finalPrompt) {
-                    const generatedUrl = await generateImageViaApi(tagResult.finalPrompt);
-                    finalImageUrl = generatedUrl || fallbackImageUrl;
-                    if (generatedUrl) imageDescription = '';
-                    if (!generatedUrl) showToast('이미지 생성 결과가 없습니다. 기본 이미지를 사용합니다.', 'warn', 2500);
-                } else {
-                    showToast('태그 변환 실패. 기본 이미지를 사용합니다.', 'warn', 2500);
-                    finalImageUrl = fallbackImageUrl;
-                }
-            } catch (imgErr) {
+            close();
+            onSave();
+            showToast('게시물 올리기 완료 (이미지 생성 중...)', 'success');
+            void applyGeneratedImageToPost(postId, {
+                promptSource: imageInputPrompt,
+                authorName,
+                fallbackImageUrl,
+                onUpdate: onSave,
+            }).then((ok) => {
+                if (ok) showToast('SNS 이미지 생성 완료', 'success', 1800);
+                else showToast('이미지 생성 결과가 없어 기본 이미지를 유지합니다.', 'warn', 2200);
+            }).catch((imgErr) => {
                 console.warn('[ST-LifeSim] 유저 SNS 이미지 생성 실패:', imgErr);
-                showToast('이미지 생성 실패. 기본 이미지를 사용합니다.', 'warn', 2500);
-                finalImageUrl = fallbackImageUrl;
-            } finally {
-                postBtn.disabled = false;
-            }
+                showToast('이미지 생성 실패. 기본 이미지를 유지합니다.', 'warn', 2200);
+            });
+            return;
         }
 
         const feed = loadFeed();

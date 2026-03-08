@@ -361,6 +361,137 @@ export function buildImageApiPrompt(danbooruTags, appearanceTags, options) {
 
 
 /**
+ * Resolve image prompt context and matched character appearance data.
+ * Shared by both direct-prompt and AI-assisted generation paths.
+ *
+ * @param {string} rawPrompt
+ * @param {Object} options
+ * @returns {{resolvedRawPrompt: string, matched: Array<{name: string, appearanceTags: string}>, tagWeight: number}}
+ */
+function resolveImagePromptContext(rawPrompt, options = {}) {
+    const allContacts = Array.isArray(options.contacts) ? options.contacts : [];
+    const getAppearanceFn = typeof options.getAppearanceTagsByName === 'function'
+        ? options.getAppearanceTagsByName
+        : () => '';
+    const includeNames = Array.isArray(options.includeNames) ? options.includeNames : [];
+    const tagWeight = Number(options.tagWeight) || 0;
+
+    const appearanceVarMap = options.appearanceVarMap || {};
+    if (Object.keys(appearanceVarMap).length === 0) {
+        for (const contact of allContacts) {
+            const name = String(contact?.name || '').trim();
+            if (!name) continue;
+            const tags = String(getAppearanceFn(name) || '').trim();
+            if (tags) appearanceVarMap[name] = tags;
+        }
+        for (const name of includeNames) {
+            const cleanName = String(name || '').trim();
+            if (!cleanName || appearanceVarMap[cleanName]) continue;
+            const tags = String(getAppearanceFn(cleanName) || '').trim();
+            if (tags) appearanceVarMap[cleanName] = tags;
+        }
+    }
+
+    const resolvedRawPrompt = resolveAppearanceTagRefs(rawPrompt, appearanceVarMap);
+    const textLower = resolvedRawPrompt.toLowerCase();
+    const matched = [];
+    const matchedNamesLower = new Set();
+
+    function isNameMentioned(name) {
+        if (!name) return false;
+        const norm = name.toLowerCase();
+        if (/^[a-z0-9_]+$/i.test(norm)) {
+            const re = new RegExp(`(^|[^a-z0-9_])${norm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9_]|$)`, 'i');
+            return re.test(textLower);
+        }
+        return textLower.includes(norm);
+    }
+
+    for (const name of includeNames) {
+        const cleanName = String(name).trim();
+        if (!cleanName) continue;
+        const normalized = cleanName.toLowerCase();
+        if (matchedNamesLower.has(normalized)) continue;
+        const contact = allContacts.find(c =>
+            String(c.name || '').trim().toLowerCase() === normalized
+            || String(c.displayName || '').trim().toLowerCase() === normalized
+            || String(c.subName || '').trim().toLowerCase() === normalized
+        );
+        const contactName = String(contact?.name || cleanName).trim();
+        matchedNamesLower.add(normalized);
+        if (contactName) matchedNamesLower.add(contactName.toLowerCase());
+        const appearance = getAppearanceFn(contactName || cleanName);
+        matched.push({
+            name: contactName || cleanName,
+            appearanceTags: String(appearance || '').trim(),
+        });
+    }
+
+    for (const contact of allContacts) {
+        const names = [contact?.name, contact?.displayName, contact?.subName]
+            .map(v => String(v || '').trim())
+            .filter(Boolean);
+        if (names.some(n => matchedNamesLower.has(n.toLowerCase()))) continue;
+        const mentioned = names.some(n => isNameMentioned(n));
+        if (mentioned) {
+            const contactName = String(contact?.name || contact?.displayName || '').trim();
+            matchedNamesLower.add(contactName.toLowerCase());
+            matched.push({
+                name: contactName,
+                appearanceTags: String(getAppearanceFn(contactName) || '').trim(),
+            });
+        }
+    }
+
+    return { resolvedRawPrompt, matched, tagWeight };
+}
+
+/**
+ * Build a final image prompt directly from an already-generated prompt string.
+ * This is used when the answer/SNS API itself already outputs the image tags,
+ * so no extra tag-generation API round-trip is needed.
+ *
+ * @param {string} rawPrompt
+ * @param {Object} options
+ * @returns {{sceneTags: string, appearanceGroups: string[], finalPrompt: string}}
+ */
+export function buildDirectImagePrompt(rawPrompt, options = {}) {
+    const emptyResult = { sceneTags: '', appearanceGroups: [], finalPrompt: '' };
+    if (!rawPrompt || typeof rawPrompt !== 'string' || !rawPrompt.trim()) {
+        return emptyResult;
+    }
+
+    const { resolvedRawPrompt, matched, tagWeight } = resolveImagePromptContext(rawPrompt, options);
+    const directPrompt = sanitizeTags(
+        String(resolvedRawPrompt || '')
+            .replace(/[\r\n]+/g, ', ')
+            .trim(),
+    );
+    const appearanceBlockRegex = /\[[^\]]+:[^\]]+\]/g;
+    const promptAppearanceBlocks = directPrompt.match(appearanceBlockRegex) || [];
+    const sceneOnly = directPrompt
+        .replace(appearanceBlockRegex, '')
+        .replace(/\|/g, ',')
+        .split(',')
+        .map(s => s.trim().replace(/^[`"'“”‘’]+|[`"'“”‘’]+$/g, '').replace(/[.!?]+$/g, ''))
+        .filter(Boolean)
+        .join(', ');
+    const appearanceGroups = (promptAppearanceBlocks.length > 0
+        ? promptAppearanceBlocks.map(b => b.slice(1, -1).trim()).filter(Boolean)
+        : matched
+            .map(c => {
+                const name = String(c?.name || '').trim();
+                const tags = String(c?.appearanceTags || '').trim();
+                if (!name || !tags) return '';
+                return `${name}: ${tags}`;
+            })
+            .filter(Boolean));
+    const finalPrompt = buildImageApiPrompt(sceneOnly, appearanceGroups, { tagWeight });
+    if (!finalPrompt && appearanceGroups.length === 0) return emptyResult;
+    return { sceneTags: sceneOnly, appearanceGroups, finalPrompt };
+}
+
+/**
  * Unified image tag generation pipeline.
  * All image generation paths (message, SNS, user) MUST use this function.
  *
@@ -390,88 +521,19 @@ export async function generateImageTags(rawPrompt, options = {}) {
         return emptyResult;
     }
 
-    const allContacts = Array.isArray(options.contacts) ? options.contacts : [];
     const getAppearanceFn = typeof options.getAppearanceTagsByName === 'function'
         ? options.getAppearanceTagsByName
         : () => '';
-    const includeNames = Array.isArray(options.includeNames) ? options.includeNames : [];
-    const tagWeight = Number(options.tagWeight) || 0;
     const additionalPrompt = String(options.additionalPrompt || '').trim();
-
-    // Build appearance variable map from all contacts for the prompt
     const appearanceVarMap = options.appearanceVarMap || {};
-    if (Object.keys(appearanceVarMap).length === 0) {
-        for (const contact of allContacts) {
-            const name = String(contact?.name || '').trim();
-            if (!name) continue;
-            const tags = String(getAppearanceFn(name) || '').trim();
-            if (tags) appearanceVarMap[name] = tags;
-        }
-        for (const name of includeNames) {
-            const cleanName = String(name || '').trim();
-            if (!cleanName || appearanceVarMap[cleanName]) continue;
-            const tags = String(getAppearanceFn(cleanName) || '').trim();
-            if (tags) appearanceVarMap[cleanName] = tags;
-        }
-    }
-
-    const resolvedRawPrompt = resolveAppearanceTagRefs(rawPrompt, appearanceVarMap);
-
-    // ── Step 1: Match mentioned characters ──
-    // Only include characters whose name, displayName, or subName is detected in the input.
-    // includeNames are also checked for mention — they are NOT blindly force-included.
-    const textLower = resolvedRawPrompt.toLowerCase();
-    const matched = [];
-    const matchedNamesLower = new Set();
-
-    /** Check if a name is mentioned in the prompt text */
-    function isNameMentioned(name) {
-        if (!name) return false;
-        const norm = name.toLowerCase();
-        if (/^[a-z0-9_]+$/i.test(norm)) {
-            const re = new RegExp(`(^|[^a-z0-9_])${norm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9_]|$)`, 'i');
-            return re.test(textLower);
-        }
-        return textLower.includes(norm);
-    }
-
-    // includeNames are explicit caller hints (e.g. current speaker/author), so force-include first.
-    for (const name of includeNames) {
-        const cleanName = String(name).trim();
-        if (!cleanName) continue;
-        const normalized = cleanName.toLowerCase();
-        if (matchedNamesLower.has(normalized)) continue;
-        const contact = allContacts.find(c =>
-            String(c.name || '').trim().toLowerCase() === normalized
-            || String(c.displayName || '').trim().toLowerCase() === normalized
-            || String(c.subName || '').trim().toLowerCase() === normalized
-        );
-        const contactName = String(contact?.name || cleanName).trim();
-        matchedNamesLower.add(normalized);
-        if (contactName) matchedNamesLower.add(contactName.toLowerCase());
-        const appearance = getAppearanceFn(contactName || cleanName);
-        matched.push({
-            name: contactName || cleanName,
-            appearanceTags: String(appearance || '').trim(),
-        });
-    }
-
-    // Scan all contacts for names mentioned in the prompt
-    for (const contact of allContacts) {
-        const names = [contact?.name, contact?.displayName, contact?.subName]
-            .map(v => String(v || '').trim())
-            .filter(Boolean);
-        if (names.some(n => matchedNamesLower.has(n.toLowerCase()))) continue;
-        const mentioned = names.some(n => isNameMentioned(n));
-        if (mentioned) {
-            const contactName = String(contact?.name || contact?.displayName || '').trim();
-            matchedNamesLower.add(contactName.toLowerCase());
-            matched.push({
-                name: contactName,
-                appearanceTags: String(getAppearanceFn(contactName) || '').trim(),
-            });
-        }
-    }
+    const {
+        resolvedRawPrompt,
+        matched,
+        tagWeight,
+    } = resolveImagePromptContext(rawPrompt, {
+        ...options,
+        appearanceVarMap,
+    });
 
     // ── Step 2: Generate scene/situation tags via AI ──
     let sceneTags = '';
