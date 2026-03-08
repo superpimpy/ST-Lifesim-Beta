@@ -55,6 +55,8 @@ const TAG_CONVERSION_PROMPT = [
     'Output ONLY comma-separated tags. No sentences, no Korean, no explanation.',
     'Replace underscores with spaces in all tags.',
     'Do NOT fabricate or guess character appearance details (hair color, eye color, clothing, etc.).',
+    'Keep the main tag list focused on action, composition, setting, mood, camera, and framing tags.',
+    'If appearance is explicitly provided, keep it concise and do not repeat it as action tags.',
     'Always include at least one framing tag (upper body, full body, close-up, portrait) and one setting tag (indoor, outdoor, etc.).',
     'Example output: 1girl, selfie, looking at viewer, phone in hand, casual smile, indoor, upper body',
     '',
@@ -114,12 +116,14 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap, additionalPromp
         '6) Include scene/environment tags: cafe, outdoor, indoor, classroom, etc.',
         '7) Include pose/action tags: selfie, standing, sitting, looking at viewer, etc.',
         '8) Include mood/lighting/framing tags: warm lighting, upper body, close-up, etc.',
-        '9) Do not include character poses or facial expressions in scene tags. Specify poses, expressions, and similar attributes within the corresponding character\'s appearance tags instead.',
-        '10) The entire output MUST be in English. No Korean or other languages.',
-        '11) Even if the description is vague, infer a plausible visual scene.',
-        '12) Always include at least one framing tag and one setting tag.',
-        '13) Character appearance tags in the final prompt MUST be wrapped in square brackets with the format [Name: appearance tags].',
-        '14) Only include characters that are relevant to the described scene.',
+        '9) Keep the scene tags focused on action, setting, framing, lighting, camera angle, and composition.',
+        '10) Do not include core appearance descriptions (hair, eyes, clothing, body traits, etc.) in scene tags. Use ONLY the provided character appearance tags for that.',
+        '11) Do not include character poses or facial expressions in scene tags. Specify poses, expressions, and similar attributes within the corresponding character\'s appearance tags instead.',
+        '12) The entire output MUST be in English. No Korean or other languages.',
+        '13) Even if the description is vague, infer a plausible visual scene.',
+        '14) Always include at least one framing tag and one setting tag.',
+        '15) Character appearance tags in the final prompt MUST be wrapped in square brackets with the format [Name: appearance tags].',
+        '16) Only include characters that are relevant to the described scene.',
         '',
         'EXAMPLE:',
         '* Input: "Alice and Bob go to cafe"',
@@ -203,14 +207,7 @@ export async function generateDanbooruTags(rawPrompt, options) {
 
     // Already looks like Danbooru tag-style English input — keep as-is to avoid unnecessary AI rewriting
     // (Natural-language prose with commas should still go through tag generation)
-    const looksLikeDanbooruTagList = (() => {
-        const MIN_TAG_LIST_PARTS = 2;
-        const MAX_DANBOORU_TAG_LENGTH = 40;
-        const parts = trimmed.split(',').map(s => s.trim()).filter(Boolean);
-        if (parts.length === 0) return false;
-        if (parts.length < MIN_TAG_LIST_PARTS && !/\[[^\]]+:[^\]]+\]/.test(trimmed)) return false;
-        return parts.every(tag => tag.length > 0 && tag.length <= MAX_DANBOORU_TAG_LENGTH && !/[.!?'"`]/.test(tag));
-    })();
+    const looksLikeDanbooruTagList = looksLikeDanbooruPrompt(trimmed);
     if (!containsKorean(trimmed) && looksLikeDanbooruTagList) {
         return sanitizeTags(trimmed);
     }
@@ -486,9 +483,10 @@ export function buildDirectImagePrompt(rawPrompt, options = {}) {
                 return `${name}: ${tags}`;
             })
             .filter(Boolean));
-    const finalPrompt = buildImageApiPrompt(sceneOnly, appearanceGroups, { tagWeight });
+    const filteredSceneTags = stripAppearanceTagsFromScene(sceneOnly, appearanceGroups);
+    const finalPrompt = buildImageApiPrompt(filteredSceneTags, appearanceGroups, { tagWeight });
     if (!finalPrompt && appearanceGroups.length === 0) return emptyResult;
-    return { sceneTags: sceneOnly, appearanceGroups, finalPrompt };
+    return { sceneTags: filteredSceneTags, appearanceGroups, finalPrompt };
 }
 
 /**
@@ -593,9 +591,10 @@ export async function generateImageTags(rawPrompt, options = {}) {
 
     // ── Step 4: Build final prompt ──
     // Result: "weight::scene tags::, [name1: appearance1], [name2: appearance2]"
-    const finalPrompt = buildImageApiPrompt(sceneOnly, appearanceGroups, { tagWeight });
+    const filteredSceneTags = stripAppearanceTagsFromScene(sceneOnly, appearanceGroups);
+    const finalPrompt = buildImageApiPrompt(filteredSceneTags, appearanceGroups, { tagWeight });
 
-    return { sceneTags: sceneOnly, appearanceGroups, finalPrompt };
+    return { sceneTags: filteredSceneTags, appearanceGroups, finalPrompt };
 }
 
 
@@ -678,7 +677,7 @@ function sanitizeTags(raw) {
  */
 function safeTags(tags) {
     if (!tags || typeof tags !== 'string') return '';
-    const trimmed = tags.trim();
+    const trimmed = normalizeTagText(tags);
     if (containsKorean(trimmed)) return '';
     return trimmed;
 }
@@ -694,19 +693,94 @@ function safeTags(tags) {
  */
 function safeAppearanceGroup(group) {
     if (!group || typeof group !== 'string') return '';
-    const trimmed = group.trim();
+    const trimmed = String(group).trim().replace(/\s+/g, ' ');
     if (!trimmed) return '';
     // If in "Name: tags" format, only check the tags portion for Korean
     const colonIdx = trimmed.indexOf(':');
     if (colonIdx > 0) {
+        const namePortion = trimmed.substring(0, colonIdx).trim();
         const tagsPortion = trimmed.substring(colonIdx + 1).trim();
         if (!tagsPortion) return '';
         // Reject only if actual tags (after the colon) contain Korean
         if (containsKorean(tagsPortion)) return '';
-        return trimmed;
+        const normalizedTags = normalizeTagText(tagsPortion);
+        return normalizedTags ? `${namePortion}: ${normalizedTags}` : '';
     }
     // No "Name:" format — apply full Korean check
     return safeTags(trimmed);
+}
+
+const APPEARANCE_TAG_KEYWORDS = [
+    'hair', 'hairstyle', 'bangs', 'eyes', 'eyelashes', 'eyebrows', 'eyeshadow', 'pupil', 'pupils',
+    'skin', 'freckles', 'mole', 'beard', 'mustache', 'glasses', 'eyewear', 'earring', 'earrings',
+    'necklace', 'choker', 'shirt', 't-shirt', 'tshirt', 'blouse', 'sweater', 'hoodie', 'jacket', 'coat',
+    'cardigan', 'dress', 'skirt', 'shorts', 'pants', 'jeans', 'leggings', 'stockings', 'socks',
+    'shoes', 'boots', 'heels', 'sandals', 'hat', 'cap', 'ribbon', 'bow', 'tie', 'scarf', 'gloves',
+    'swimsuit', 'bikini', 'uniform', 'kimono', 'apron', 'bra', 'panties', 'cleavage', 'breast', 'breasts',
+    'chest', 'thigh', 'thighs', 'waist', 'navel', 'body', 'figure', 'build', 'muscular', 'slim', 'petite',
+    'tall', 'short', 'young', 'mature', 'face', 'lips', 'nose', 'ear', 'ears',
+];
+const APPEARANCE_TAG_PATTERN = new RegExp(`\\b(${APPEARANCE_TAG_KEYWORDS.join('|')})\\b`, 'i');
+const MAX_DANBOORU_TAG_LENGTH = 80;
+
+function normalizeTagText(text) {
+    return String(text || '')
+        .trim()
+        .replace(/_/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/^[`"'“”‘’]+|[`"'“”‘’]+$/g, '')
+        .replace(/[.!?]+$/g, '')
+        .trim();
+}
+
+function splitTags(text) {
+    return String(text || '')
+        .split(',')
+        .map(normalizeTagText)
+        .filter(Boolean);
+}
+
+function buildAppearanceTagSet(appearanceGroups = []) {
+    const tagSet = new Set();
+    appearanceGroups.forEach((group) => {
+        const trimmed = String(group || '').trim();
+        if (!trimmed) return;
+        const colonIdx = trimmed.indexOf(':');
+        const tagsText = colonIdx >= 0 ? trimmed.substring(colonIdx + 1) : trimmed;
+        splitTags(tagsText).forEach((tag) => tagSet.add(tag.toLowerCase()));
+    });
+    return tagSet;
+}
+
+function stripAppearanceTagsFromScene(sceneTags, appearanceGroups = []) {
+    const sceneTagList = splitTags(sceneTags);
+    if (sceneTagList.length === 0 || appearanceGroups.length === 0) {
+        return sceneTagList.join(', ');
+    }
+    const appearanceTagSet = buildAppearanceTagSet(appearanceGroups);
+    return sceneTagList
+        .filter((tag) => {
+            const lower = tag.toLowerCase();
+            if (appearanceTagSet.has(lower)) return false;
+            if (APPEARANCE_TAG_PATTERN.test(tag)) return false;
+            return true;
+        })
+        .join(', ');
+}
+
+export function looksLikeDanbooruPrompt(text) {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return false;
+    const withoutBlocks = trimmed
+        .replace(/\[[^\]]+:[^\]]+\]/g, '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/[\r\n]+/g, ', ')
+        .trim();
+    if (!withoutBlocks && /\[[^\]]+:[^\]]+\]/.test(trimmed)) return true;
+    if (containsKorean(withoutBlocks)) return false;
+    const parts = splitTags(withoutBlocks);
+    if (parts.length < 2 && !/\[[^\]]+:[^\]]+\]/.test(trimmed)) return false;
+    return parts.every(tag => tag.length <= MAX_DANBOORU_TAG_LENGTH && !/[.!?'"`]/.test(tag));
 }
 
 
