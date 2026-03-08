@@ -28,7 +28,7 @@ import { initWallet, openWalletPopup } from './modules/wallet/wallet.js';
 import { initSns, openSnsPopup, triggerNpcPosting, triggerPendingCommentReaction, hasPendingCommentReaction } from './modules/sns/sns.js';
 import { initCalendar, openCalendarPopup } from './modules/calendar/calendar.js';
 import { initGifticon, openGifticonPopup, trackGifticonUsageFromCharacterMessage } from './modules/gifticon/gifticon.js';
-import { generateImageTags } from './utils/image-tag-generator.js';
+import { buildDirectImagePrompt } from './utils/image-tag-generator.js';
 
 // 설정 키
 const SETTINGS_KEY = 'st-lifesim';
@@ -118,7 +118,7 @@ const DEFAULT_SETTINGS = {
     snsImageMode: false, // SNS 게시물 이미지 자동 생성 여부
     messageImageGenerationMode: false, // 메신저 이미지 자동 생성 여부 (ON: 이미지 API로 생성, OFF: 줄글 텍스트)
     messageImageTextTemplate: '[사진: {description}]', // OFF일 때 줄글 형식 커스텀 템플릿
-    messageImageInjectionPrompt: '<image_generation_rule>\nWhen {{char}} would naturally TAKE A PHOTO and SEND IT via messenger, insert a <pic prompt="image description in English for stable diffusion"> tag at that point in your response.\n\nCRITICAL CONSTRAINT — "Camera in hand" rule:\n{{char}} is sending a photo through a messenger app. The ONLY valid images are ones {{char}} could physically take with their own phone camera and send. Ask yourself: "Would {{char}} realistically pull out their phone, take this exact photo, and send it right now?"\n\nALLOWED ({{char}} can take and send these):\n- Selfies ({{char}}\'s own face/outfit/expression)\n- Photos of food, drinks, surroundings {{char}} is currently at\n- Mirror selfies, gym photos, outfit checks\n- Screenshots or photos of objects {{char}} wants to share\n- Pet photos, scenery {{char}} is looking at\n- Photos {{user}} explicitly requested\n\nFORBIDDEN ({{char}} CANNOT take these — do NOT generate <pic> tags):\n- Third-person shots of {{char}} as if photographed by someone else for narrative/mood purposes\n- Dramatic scene illustrations or situation descriptions\n- Cinematic angles that no phone selfie could capture\n- Photos that exist only to describe {{char}}\'s emotional state or current activity narratively\n- Any image that serves as "narration" rather than something {{char}} deliberately chose to photograph and send\n\nRules:\n1) Default subject is {{char}} only. Always include {{char}}\'s name explicitly in the prompt.\n2) If other characters from the contacts are involved, include their names explicitly so their appearance can be resolved.\n3) Include {{user}} only when the context explicitly says both are together or the photo is clearly about {{user}}. Use {{user}}\'s name explicitly.\n4) Do not mix appearance traits of multiple people unless the scene explicitly includes multiple people.\n5) Keep the prompt visual and concise using Danbooru-style tag concepts.\n6) Each <pic> tag MUST describe a completely NEW unique scene. NEVER reuse, reference, or modify a previously generated image URL from the conversation. Always write a fresh description.\n7) Analyze visual intent from context — if the user implies a visual action (e.g., "do a V sign", "show me your outfit"), generate a <pic> tag even without the word "photo".\n8) Do NOT generate images just because the conversation mentions a visual scene. Only generate when {{char}} would deliberately pick up their phone to take and send a photo.\n</image_generation_rule>',
+    messageImageInjectionPrompt: '<image_generation_rule>\nWhen {{char}} would naturally TAKE A PHOTO and SEND IT via messenger, insert a <pic prompt="final direct image prompt"> tag at that point in your response.\n\nCRITICAL CONSTRAINT — "Camera in hand" rule:\n{{char}} is sending a photo through a messenger app. The ONLY valid images are ones {{char}} could physically take with their own phone camera and send. Ask yourself: "Would {{char}} realistically pull out their phone, take this exact photo, and send it right now?"\n\nALLOWED ({{char}} can take and send these):\n- Selfies ({{char}}\'s own face/outfit/expression)\n- Photos of food, drinks, surroundings {{char}} is currently at\n- Mirror selfies, gym photos, outfit checks\n- Screenshots or photos of objects {{char}} wants to share\n- Pet photos, scenery {{char}} is looking at\n- Photos {{user}} explicitly requested\n\nFORBIDDEN ({{char}} CANNOT take these — do NOT generate <pic> tags):\n- Third-person shots of {{char}} as if photographed by someone else for narrative/mood purposes\n- Dramatic scene illustrations or situation descriptions\n- Cinematic angles that no phone selfie could capture\n- Photos that exist only to describe {{char}}\'s emotional state or current activity narratively\n- Any image that serves as "narration" rather than something {{char}} deliberately chose to photograph and send\n\nOUTPUT RULES:\n1) The prompt inside <pic prompt=\"...\"> must already be ready for direct image generation. Do NOT ask another tag-conversion step to rewrite it.\n2) Output ONLY a concise English Danbooru-style tag prompt.\n3) Default subject is {{char}} only. Always include {{char}}\'s name explicitly.\n4) If other characters from the contacts are involved, include their names explicitly so their appearance can be tracked.\n5) Include {{user}} only when the context explicitly says both are together or the photo is clearly about {{user}}. Use {{user}}\'s name explicitly.\n6) If a character\'s appearance tags are needed, include them directly in square-bracket blocks such as [Name: long hair, blue eyes, white shirt].\n7) Do not mix appearance traits of multiple people unless the scene explicitly includes multiple people.\n8) Each <pic> tag MUST describe a completely NEW unique scene. NEVER reuse, reference, or modify a previously generated image URL from the conversation.\n9) Analyze visual intent from context — if the user implies a visual action (e.g., "do a V sign", "show me your outfit"), generate a <pic> tag even without the word "photo".\n10) Do NOT generate images just because the conversation mentions a visual scene. Only generate when {{char}} would deliberately pick up their phone to take and send a photo.\n11) Output no explanations, no markdown, and no Korean inside the prompt.\n</image_generation_rule>',
     tagGenerationAdditionalPrompt: '',
     snsImagePrompt: '<ImagePrompt>\n<instructions>\nConstruct a detailed image prompt for a photo {{char}} posts on Instagram (or similar SNS) right now.\nBased on the current conversation history and {{char}}\'s Persona.\n\nSTRICT ADHERENCE REQUIRED:\n0. Banned tags\n* handphone\n* handheld phone\n\n1. Fusion of Elements: Do not list traits separately. Fuse {personality}, {appearance}, and {context} into a single "curated moment."\n\n2. Intent: Why is this photo being posted publicly? To show off? To send an indirect message? To craft an image? The expression and composition must reflect this intent.\n\n3. SNS Authenticity: This is an Instagram post. It should look intentionally daily and casually styled — aesthetic lighting, flattering angles, but not overly studio-polished.\n\n4. Sensory Details: Focus on overall composition, color palette mood, background aesthetic, and subtle styling choices (outfit, props, setting) that communicate the character\'s persona.\n\n5. Caption Energy: Briefly note what kind of vibe the photo gives off — the "story" a follower would read into it.\n\n6. Tags: Use Danbooru-style tags for appearance features (e.g., black hair, mole under eye) without underscores in the narrative description.\n</instructions>\n\n<context>\nCurrent situation: {{char}} is crafting a public SNS post.\nRecent emotional tone: Evaluate the last 3 messages.\n</context>\n\n<note>\n* Don\'t merge or edit character\'s own appearance tags.\n* The photo should feel like something real people actually post — aspirational but not impossible.\n* keep this tags: human focus, highres, absurdres, ai-generated\n</note>\n</ImagePrompt>',
     messageImagePrompt: '<ImagePrompt>\n<instructions>\nConstruct a detailed image prompt for a photo {{char}} sends to {{user}} via private messenger right now.\nBased on the current conversation history and {{char}}\'s Persona.\n\nSTRICT ADHERENCE REQUIRED:\n0. Banned tags\n*\n\n1. Fusion of Elements: Do not list traits separately. Fuse {personality}, {appearance}, and {context} into a single "captured moment."\n\n2. Intent: Why is this photo being sent? To tease? To prove a point? To show vulnerability? The expression must reflect this intent.\n\n3. Messenger Authenticity: This is a private DM, NOT a social media post. It must look slightly unpolished and intimate. Avoid studio lighting or perfect symmetry.\n\n4. Sensory Details: Focus on micro-expressions (lip tension, focus), hand placement, and lighting mood.\n\n5. Tags: Use Danbooru-style tags for appearance features (e.g., black hair, mole under eye) without underscores in the narrative description.\n</instructions>\n\n<context>\nCurrent situation: {{char}} is messaging {{user}}.\nRecent emotional tone: Evaluate the last 3 messages.\n</context>\n<note>\n* Don\'t merge or edit character\'s own appearance tags.\n* The photo should feel like something real people actually pictured — aspirational but not impossible.\n* keep this tags: human focus, highres, absurdres, ai-generated.\n</note>\n</ImagePrompt>',
@@ -172,11 +172,12 @@ const DEFAULT_SETTINGS = {
         customLabels: {},       // { [key]: string } - custom display names
         customImages: {},       // { [key]: string } - image URL replacement for emoji
         rightSendFormItems: {}, // { [key]: true } - items to show as extra icons in sendform area
-        order: ['userImage', 'callRequest', 'contacts', 'readReceipt', 'noContact', 'voiceMemo', 'emoticon', 'deletedMessage', 'sns', 'quickSend', 'snsImageToggle', 'messengerImageToggle', 'dayNightToggle', 'settingsShortcut'],
+        order: ['userImage', 'callRequest', 'contacts', 'divider', 'readReceipt', 'noContact', 'voiceMemo', 'emoticon', 'deletedMessage', 'sns', 'quickSend', 'snsImageToggle', 'messengerImageToggle', 'dayNightToggle', 'settingsShortcut'],
         items: {
             userImage: true,
             callRequest: true,
             contacts: true,
+            divider: true,
             readReceipt: true,
             noContact: true,
             voiceMemo: true,
@@ -685,6 +686,7 @@ const QUICK_ACCESS_ITEMS = [
     } },
     { key: 'callRequest', icon: '📞', label: '통화 요청', moduleKey: 'call', action: async () => { await requestActiveCharacterCall(); } },
     { key: 'contacts', icon: '📋', label: '연락처', action: () => { closePopup('quick-access-menu'); openContactsPopup(); } },
+    { key: 'divider', icon: '⏱️', label: '구분선 넣기', moduleKey: 'quickTools', action: () => { closePopup('quick-access-menu'); openQuickToolsPanel(); } },
     { key: 'readReceipt', icon: '🔕', label: '읽씹하기', moduleKey: 'quickTools', action: async () => { await triggerReadReceipt(); } },
     { key: 'noContact', icon: '📵', label: '연락 안 됨(안읽씹)', moduleKey: 'quickTools', action: async () => { await triggerNoContact(); } },
     { key: 'voiceMemo', icon: '🎤', label: '음성메모 삽입', moduleKey: 'quickTools', action: () => {
@@ -3036,7 +3038,7 @@ async function generateMessageImageViaApi(imagePrompt) {
 
 /**
  * 메신저 이미지 생성 파이프라인 (외부 호출용)
- * SNS 게시글 생성 로직과 동일한 패턴: generateImageTags() → Image API
+ * 답변/프롬프트가 이미 직접 이미지 프롬프트를 출력한다고 가정하고 Image API만 호출한다.
  * @param {string} rawPrompt - 원본 이미지 설명
  * @param {Object} options
  * @param {string} options.charName - 캐릭터 이름
@@ -3046,24 +3048,12 @@ async function generateMessageImageViaApi(imagePrompt) {
  * @returns {Promise<{imageUrl: string, fallbackText: string}>}
  */
 async function processMessengerImageGeneration(rawPrompt, options = {}) {
-    const { charName = '', includeNames = [], contacts = [], settings = getSettings() } = options;
-    const additionalTagPrompt = String(settings.tagGenerationAdditionalPrompt || '').trim();
-    const customMsgImgPrompt = settings.messageImagePrompt || '';
-    const charAppearanceTags = String(getAppearanceTagsByName(charName) || '').trim();
-    const resolvedCustomPrompt = customMsgImgPrompt
-        ? customMsgImgPrompt
-            .replace(/\{charName\}/g, charName)
-            .replace(/\{appearanceTags\}/g, charAppearanceTags)
-        : '';
-    const enrichedPrompt = resolvedCustomPrompt
-        ? `${resolvedCustomPrompt}\nScene: ${rawPrompt}`
-        : rawPrompt;
-    const tagResult = await generateImageTags(enrichedPrompt, {
+    const { includeNames = [], contacts = [], settings = getSettings() } = options;
+    const tagResult = buildDirectImagePrompt(rawPrompt, {
         includeNames,
         contacts,
         getAppearanceTagsByName,
         tagWeight: Number(settings.tagWeight) || 0,
-        additionalPrompt: additionalTagPrompt,
     });
     if (!tagResult.finalPrompt) {
         console.warn('[ST-LifeSim] 메신저 이미지 태그 생성 결과 없음');
@@ -3098,6 +3088,7 @@ async function applyCharacterImageDisplayMode() {
     _imageGenInProgress = true;
     try {
         const settings = getSettings();
+        if (!isEnabled()) return;
         const ctx = getContext();
         if (!ctx) return;
         const lastMsg = ctx.chat?.[ctx.chat.length - 1];
@@ -3118,7 +3109,7 @@ async function applyCharacterImageDisplayMode() {
 
         if (allowAutoImageGeneration) {
             // ── ON 모드: 이미지 생성 API로 실제 이미지 생성 (순차적 UI 업데이트) ──
-            // 통합 파이프라인: generateImageTags() → Image API
+            // 응답 내 <pic prompt="...">의 직접 이미지 프롬프트를 추적해 Image API로 생성
             // 최대 이미지 수 제한
             const limitedPicMatches = picMatches.slice(0, MAX_MESSENGER_IMAGES_PER_RESPONSE);
             if (picMatches.length > MAX_MESSENGER_IMAGES_PER_RESPONSE) {
