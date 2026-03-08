@@ -14,7 +14,7 @@ import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
 import { getContacts, getAppearanceTagsByName } from '../contacts/contacts.js';
-import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
+import { buildDirectImagePrompt, generateImageTags, looksLikeDanbooruPrompt } from '../../utils/image-tag-generator.js';
 
 const MODULE_KEY = 'sns-feed';
 const AVATARS_KEY = 'sns-avatars';
@@ -221,7 +221,10 @@ function buildSnsDirectImagePromptRequest(sourcePrompt, authorName) {
         '[Output rule]',
         `Return exactly one final direct image prompt for ${authorName || 'the author'}.`,
         'Output ONLY one line of English Danbooru-style tags for direct image generation.',
+        'Use comma-separated Danbooru tags only. Replace underscores with spaces.',
         'Do not output explanations, markdown, XML tags, captions, or Korean.',
+        'Keep the main tag list focused on action, setting, framing, composition, lighting, and camera tags.',
+        'Do not put core appearance details in the main tag list when [Name: appearance tags] blocks are available.',
         'If character appearance tags are needed, include them directly as [Name: appearance tags].',
         'Keep the named author in-frame unless the prompt clearly describes a subject-only object or scenery post.',
         'Always produce a fresh prompt for a new image.',
@@ -230,16 +233,33 @@ function buildSnsDirectImagePromptRequest(sourcePrompt, authorName) {
 
 async function createSnsImagePrompt(ctx, sourcePrompt, authorName, contacts = []) {
     if (!ctx) return { sceneTags: '', appearanceGroups: [], finalPrompt: '' };
+    const tagWeight = Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0;
+    const additionalPrompt = [
+        String(getExtensionSettings()?.['st-lifesim']?.tagGenerationAdditionalPrompt || '').trim(),
+        'This prompt is for an SNS photo post.',
+        'Use English Danbooru-style tags only, separated by commas, with spaces instead of underscores.',
+        'Keep scene tags focused on SNS framing, composition, background, action, mood, and lighting.',
+        'Do not invent or repeat core appearance tags outside the [Name: appearance tags] blocks.',
+        authorName ? `Keep ${authorName} visible in the frame unless the post is clearly focused on an object, food, pet, or scenery only.` : '',
+    ].filter(Boolean).join('\n');
+    const promptOptions = {
+        includeNames: [authorName].filter(Boolean),
+        contacts,
+        getAppearanceTagsByName,
+        tagWeight,
+    };
     const generatedPrompt = await generateSnsText(
         ctx,
         buildSnsDirectImagePromptRequest(sourcePrompt, authorName),
         `${authorName || 'sns'}-image`,
     );
-    return buildDirectImagePrompt(generatedPrompt, {
-        includeNames: [authorName].filter(Boolean),
-        contacts,
-        getAppearanceTagsByName,
-        tagWeight: Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0,
+    if (looksLikeDanbooruPrompt(generatedPrompt)) {
+        const directPrompt = buildDirectImagePrompt(generatedPrompt, promptOptions);
+        if (directPrompt.finalPrompt) return directPrompt;
+    }
+    return generateImageTags(generatedPrompt || sourcePrompt, {
+        ...promptOptions,
+        additionalPrompt,
     });
 }
 

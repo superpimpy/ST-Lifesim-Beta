@@ -2420,12 +2420,11 @@ function openSettingsPanel(onBack) {
         buildAiRouteEditor('SNS 번역 라우팅', settings.aiRoutes.snsTranslation);
         buildAiRouteEditor('통화 요약 라우팅', settings.aiRoutes.callSummary);
         buildAiRouteEditor('연락처 AI 생성 라우팅', settings.aiRoutes.contactProfile);
-        buildAiRouteEditor('🏷️ 이미지 태그 생성 라우팅', settings.aiRoutes.tagGeneration);
         routeSection.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
 
         const endpointRow = document.createElement('div');
         endpointRow.className = 'slm-form-group';
-        endpointRow.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: 'SNS 외부 API URL (선택)' }));
+        endpointRow.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '외부 생성 API URL (선택)' }));
         const endpointSelect = document.createElement('select');
         endpointSelect.className = 'slm-select';
         const endpointOptions = ['', '/api/backends/chat-completions/generate', '/api/openai/chat/completions'];
@@ -2433,7 +2432,7 @@ function openSettingsPanel(onBack) {
         endpointOptions.forEach((value) => {
             endpointSelect.appendChild(Object.assign(document.createElement('option'), {
                 value,
-                textContent: value || '내부 생성 사용',
+                textContent: value || '외부 API 미사용',
             }));
         });
         endpointSelect.value = settings.snsExternalApiUrl || '';
@@ -2959,8 +2958,7 @@ function isUrlAlreadyInChat(url, ctx) {
 }
 
 /**
- * 메신저 이미지 생성 API를 사용하여 실제 이미지를 생성한다
- * SillyTavern의 /sd 슬래시 커맨드를 사용한다
+ * 메신저 자동 이미지 생성은 외부 API를 통해서만 처리한다.
  * @param {string} imagePrompt - 이미지 생성에 사용할 프롬프트
  * @returns {Promise<string>} 생성된 이미지의 URL 또는 빈 문자열
  */
@@ -2975,59 +2973,48 @@ async function generateMessageImageViaApi(imagePrompt) {
         const settings = getSettings();
         const externalApiUrl = String(settings?.snsExternalApiUrl || '').trim();
         const externalApiTimeoutMs = Math.max(1000, Math.min(60000, Number(settings?.snsExternalApiTimeoutMs) || 12000));
-        if (externalApiUrl) {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), externalApiTimeoutMs);
-            try {
-                const headers = { 'Content-Type': 'application/json' };
-                if (typeof ctx.getRequestHeaders === 'function') {
-                    Object.assign(headers, ctx.getRequestHeaders());
-                }
-                const response = await fetch(externalApiUrl, {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({ prompt: imagePrompt, module: 'st-lifesim-messenger-image' }),
-                    signal: controller.signal,
-                });
-                if (response.ok) {
-                    const rawText = await response.text();
-                    let resultStr = String(rawText || '').trim();
-                    try {
-                        const json = JSON.parse(rawText || 'null');
-                        if (typeof json === 'string') resultStr = json.trim();
-                        else if (typeof json?.url === 'string') resultStr = json.url.trim();
-                        else if (typeof json?.imageUrl === 'string') resultStr = json.imageUrl.trim();
-                        else if (typeof json?.text === 'string') resultStr = json.text.trim();
-                    } catch { /* non-JSON 응답은 그대로 사용 */ }
-                    if (resultStr && (resultStr.startsWith('http') || resultStr.startsWith('/') || resultStr.startsWith('data:'))) {
-                        if (isUrlAlreadyInChat(resultStr, ctx)) {
-                            console.warn('[ST-LifeSim] 외부 API 이미지 URL이 이미 채팅에 존재합니다. 재사용 방지를 위해 거부합니다.');
-                            return '';
-                        }
-                        return resultStr;
-                    }
-                    console.warn('[ST-LifeSim] 외부 API가 유효한 이미지 URL을 반환하지 않음');
-                } else {
-                    console.warn('[ST-LifeSim] 메신저 이미지 외부 API 응답 오류:', response.status);
-                }
-            } catch (error) {
-                console.warn('[ST-LifeSim] 메신저 이미지 외부 API 호출 실패, /sd로 폴백:', error);
-            } finally {
-                clearTimeout(timer);
-            }
+        if (!externalApiUrl || typeof fetch !== 'function') {
+            console.warn('[ST-LifeSim] 메신저 자동 이미지 생성은 외부 API URL 설정이 필요합니다.');
+            return '';
         }
-        if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
-            const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true ${imagePrompt}`, { showOutput: false });
-            const resultStr = String(result?.pipe || result || '').trim();
-            if (resultStr && (resultStr.startsWith('http') || resultStr.startsWith('/') || resultStr.startsWith('data:'))) {
-                // C2: Reject URLs that already exist in chat history to prevent reuse
-                if (isUrlAlreadyInChat(resultStr, ctx)) {
-                    console.warn('[ST-LifeSim] 이미지 URL이 이미 채팅에 존재합니다. 재사용 방지를 위해 거부합니다.');
-                    return '';
-                }
-                return resultStr;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), externalApiTimeoutMs);
+        try {
+            const headers = { 'Content-Type': 'application/json' };
+            if (typeof ctx.getRequestHeaders === 'function') {
+                Object.assign(headers, ctx.getRequestHeaders());
             }
-            console.warn('[ST-LifeSim] /sd 커맨드가 유효한 URL을 반환하지 않음:', resultStr ? resultStr.substring(0, 120) : '(빈 응답)');
+            const response = await fetch(externalApiUrl, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ prompt: imagePrompt, module: 'st-lifesim-messenger-image' }),
+                signal: controller.signal,
+            });
+            if (response.ok) {
+                const rawText = await response.text();
+                let resultStr = String(rawText || '').trim();
+                try {
+                    const json = JSON.parse(rawText || 'null');
+                    if (typeof json === 'string') resultStr = json.trim();
+                    else if (typeof json?.url === 'string') resultStr = json.url.trim();
+                    else if (typeof json?.imageUrl === 'string') resultStr = json.imageUrl.trim();
+                    else if (typeof json?.text === 'string') resultStr = json.text.trim();
+                } catch { /* non-JSON 응답은 그대로 사용 */ }
+                if (resultStr && (resultStr.startsWith('http') || resultStr.startsWith('/') || resultStr.startsWith('data:'))) {
+                    if (isUrlAlreadyInChat(resultStr, ctx)) {
+                        console.warn('[ST-LifeSim] 외부 API 이미지 URL이 이미 채팅에 존재합니다. 재사용 방지를 위해 거부합니다.');
+                        return '';
+                    }
+                    return resultStr;
+                }
+                console.warn('[ST-LifeSim] 외부 API가 유효한 이미지 URL을 반환하지 않음');
+            } else {
+                console.warn('[ST-LifeSim] 메신저 이미지 외부 API 응답 오류:', response.status);
+            }
+        } catch (error) {
+            console.warn('[ST-LifeSim] 메신저 이미지 외부 API 호출 실패:', error);
+        } finally {
+            clearTimeout(timer);
         }
         return '';
     } catch (e) {
