@@ -3,7 +3,7 @@
     "loading_order": 50,
     "requires": [],
     "optional": [],
-    "js": "index.js",
+    "js": "bootstrap.js",
     "css": "style.css",
     "author": "ST-LifeSim",
     "version": "1.0.0",

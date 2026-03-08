@@ -7,7 +7,7 @@
  */
 
 // 현재 열려있는 팝업 목록
-const openPopups = new Set();
+const openPopups = new Map();
 
 /**
  * 팝업 오버레이를 생성하고 반환한다
@@ -101,16 +101,19 @@ export function createPopup({ id, title, content, className = '', footer, onClos
         if (e.target === overlay) close();
     });
 
-    // 팝업 등록
-    openPopups.add(id);
-
     // 닫기 함수
+    let closed = false;
     function close() {
+        if (closed) return;
+        closed = true;
         overlay.remove();
         document.removeEventListener('keydown', onKeyDown);
         openPopups.delete(id);
         if (typeof onClose === 'function') onClose();
     }
+
+    // 팝업 등록
+    openPopups.set(id, close);
 
     return { overlay, panel, body, close };
 }
@@ -120,16 +123,21 @@ export function createPopup({ id, title, content, className = '', footer, onClos
  * @param {string} id - 팝업 ID
  */
 export function closePopup(id) {
+    const close = openPopups.get(id);
+    if (typeof close === 'function') {
+        close();
+        return;
+    }
+
     const existing = document.getElementById(`slm-overlay-${id}`);
     if (existing) existing.remove();
-    openPopups.delete(id);
 }
 
 /**
  * 모든 팝업을 닫는다
  */
 export function closeAllPopups() {
-    for (const id of [...openPopups]) {
+    for (const id of [...openPopups.keys()]) {
         closePopup(id);
     }
 }
