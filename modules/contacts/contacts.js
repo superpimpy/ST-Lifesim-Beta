@@ -13,6 +13,7 @@ import { loadData, saveData, getExtensionSettings } from '../../utils/storage.js
 import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, escapeHtml, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
+import { applyProfileImageStyle, normalizeProfileImageStyle, readImageFileAsDataUrl } from '../../utils/profile-image.js';
 
 const MODULE_KEY = 'contacts';
 const MAX_AI_CONTACT_KEYWORD_LENGTH = 200;
@@ -57,6 +58,7 @@ const MODEL_KEY_BY_SOURCE = {
  * @property {string} phone
  * @property {string[]} tags
  * @property {string} [appearanceTags] - 외관 태그 (이미지 생성 시 사용)
+ * @property {{ width?: number, height?: number, objectFit?: string }} [avatarStyle]
  * @property {'chat'|'character'} binding
  * @property {boolean} [isCharAuto] - {{char}} 자동 추가 여부
  * @property {boolean} [isUserAuto] - {{user}} 자동 추가 여부
@@ -78,6 +80,10 @@ function loadContacts(binding = 'chat') {
  */
 function saveContacts(contacts, binding = 'chat') {
     saveData(MODULE_KEY, contacts, binding);
+}
+
+function getAvatarStyle(contact, defaults) {
+    return normalizeProfileImageStyle(contact?.avatarStyle, defaults);
 }
 
 function getContactDisplayName(contact) {
@@ -346,11 +352,13 @@ function buildContactsContent() {
             // 아바타
             const avatar = document.createElement('div');
             avatar.className = 'slm-contact-avatar';
+            applyProfileImageStyle(avatar, null, getAvatarStyle(contact, { width: 40, height: 40, objectFit: 'cover' }), { width: 40, height: 40, objectFit: 'cover' });
             if (contact.avatar) {
                 const img = document.createElement('img');
                 img.src = contact.avatar;
                 img.alt = displayName;
                 img.onerror = () => { avatar.textContent = displayName[0] || '?'; };
+                applyProfileImageStyle(avatar, img, getAvatarStyle(contact, { width: 40, height: 40, objectFit: 'cover' }), { width: 40, height: 40, objectFit: 'cover' });
                 avatar.appendChild(img);
             } else {
                 avatar.textContent = displayName[0] || '?';
@@ -438,11 +446,13 @@ function openContactDetailPopup(contact) {
     // 아바타
     const avatar = document.createElement('div');
     avatar.className = 'slm-contact-detail-avatar';
+    applyProfileImageStyle(avatar, null, getAvatarStyle(contact, { width: 72, height: 72, objectFit: 'cover' }), { width: 72, height: 72, objectFit: 'cover' });
     if (contact.avatar) {
         const img = document.createElement('img');
         img.src = contact.avatar;
         img.alt = contact.name;
         img.onerror = () => { avatar.textContent = contact.name[0] || '?'; };
+        applyProfileImageStyle(avatar, img, getAvatarStyle(contact, { width: 72, height: 72, objectFit: 'cover' }), { width: 72, height: 72, objectFit: 'cover' });
         avatar.appendChild(img);
     } else {
         avatar.textContent = contact.name[0] || '?';
@@ -509,8 +519,120 @@ function openContactDialog(existing, defaultBinding, onSave) {
         personality: createFormField(wrapper, '성격/말투', 'text', existing?.personality || ''),
         appearanceTags: createFormField(wrapper, '🏷️ 외관 태그 (이미지 생성용)', 'text', existing?.appearanceTags || ''),
     };
+    const initialAvatarStyle = getAvatarStyle(existing, { width: 72, height: 72, objectFit: 'cover' });
+    const avatarActionRow = document.createElement('div');
+    avatarActionRow.className = 'slm-input-row';
+    avatarActionRow.style.marginTop = '6px';
+    const avatarUploadInput = document.createElement('input');
+    avatarUploadInput.type = 'file';
+    avatarUploadInput.accept = 'image/*';
+    avatarUploadInput.style.display = 'none';
+    const avatarUploadBtn = document.createElement('button');
+    avatarUploadBtn.type = 'button';
+    avatarUploadBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
+    avatarUploadBtn.textContent = '📁 로컬 이미지 업로드';
+    const avatarClearBtn = document.createElement('button');
+    avatarClearBtn.type = 'button';
+    avatarClearBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+    avatarClearBtn.textContent = '🧹 이미지 비우기';
+    avatarActionRow.append(avatarUploadBtn, avatarClearBtn, avatarUploadInput);
+    fields.avatar.insertAdjacentElement('afterend', avatarActionRow);
+
+    const avatarPreviewLabel = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '아바타 미리보기 / 크기 설정' });
+    const avatarPreview = document.createElement('div');
+    avatarPreview.className = 'slm-contact-detail-avatar';
+    avatarPreview.style.marginBottom = '8px';
+    const avatarSizeRow = document.createElement('div');
+    avatarSizeRow.className = 'slm-input-row';
+    avatarSizeRow.style.marginBottom = '8px';
+    const avatarWidthInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input',
+        type: 'number',
+        min: '16',
+        max: '256',
+        value: String(initialAvatarStyle.width),
+    });
+    avatarWidthInput.style.width = '82px';
+    const avatarHeightInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input',
+        type: 'number',
+        min: '16',
+        max: '256',
+        value: String(initialAvatarStyle.height),
+    });
+    avatarHeightInput.style.width = '82px';
+    const avatarFitSelect = document.createElement('select');
+    avatarFitSelect.className = 'slm-select';
+    [
+        ['cover', '꽉 채우기'],
+        ['contain', '전체 보이기'],
+        ['fill', '늘이기'],
+        ['scale-down', '축소만'],
+    ].forEach(([value, label]) => {
+        avatarFitSelect.appendChild(Object.assign(document.createElement('option'), { value, textContent: label }));
+    });
+    avatarFitSelect.value = initialAvatarStyle.objectFit;
+    avatarSizeRow.append(
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '너비' }),
+        avatarWidthInput,
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '높이' }),
+        avatarHeightInput,
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '표시 방식' }),
+        avatarFitSelect,
+    );
+    fields.appearanceTags.insertAdjacentElement('afterend', avatarPreviewLabel);
+    avatarPreviewLabel.insertAdjacentElement('afterend', avatarPreview);
+    avatarPreview.insertAdjacentElement('afterend', avatarSizeRow);
     fields.subName.placeholder = '예: 유레오, ユレオ (이미지 생성 시 이 이름도 인식됩니다)';
     fields.appearanceTags.placeholder = '예: long hair, school uniform, warm smile';
+    fields.avatar.placeholder = 'https://... 또는 업로드한 이미지';
+
+    const getDraftAvatarStyle = () => normalizeProfileImageStyle({
+        width: avatarWidthInput.value,
+        height: avatarHeightInput.value,
+        objectFit: avatarFitSelect.value,
+    }, { width: 72, height: 72, objectFit: 'cover' });
+
+    const renderAvatarPreview = () => {
+        avatarPreview.innerHTML = '';
+        const draftStyle = getDraftAvatarStyle();
+        const src = fields.avatar.value.trim();
+        if (src) {
+            const img = document.createElement('img');
+            img.src = src;
+            img.alt = existing?.name || fields.name.value.trim() || 'avatar preview';
+            img.onerror = () => { avatarPreview.textContent = ((existing?.name || fields.name.value || '?')[0] || '?').toUpperCase(); };
+            applyProfileImageStyle(avatarPreview, img, draftStyle, { width: 72, height: 72, objectFit: 'cover' });
+            avatarPreview.appendChild(img);
+        } else {
+            applyProfileImageStyle(avatarPreview, null, draftStyle, { width: 72, height: 72, objectFit: 'cover' });
+            avatarPreview.textContent = ((existing?.name || fields.name.value || '?')[0] || '?').toUpperCase();
+        }
+    };
+    avatarUploadBtn.onclick = () => avatarUploadInput.click();
+    avatarClearBtn.onclick = () => {
+        fields.avatar.value = '';
+        avatarUploadInput.value = '';
+        renderAvatarPreview();
+    };
+    avatarUploadInput.onchange = async (event) => {
+        const file = event.target?.files?.[0];
+        if (!file) return;
+        try {
+            fields.avatar.value = await readImageFileAsDataUrl(file);
+            renderAvatarPreview();
+        } catch (error) {
+            showToast(error.message || '이미지 업로드 실패', 'error');
+        } finally {
+            avatarUploadInput.value = '';
+        }
+    };
+    fields.avatar.addEventListener('input', renderAvatarPreview);
+    fields.name.addEventListener('input', renderAvatarPreview);
+    avatarWidthInput.addEventListener('input', renderAvatarPreview);
+    avatarHeightInput.addEventListener('input', renderAvatarPreview);
+    avatarFitSelect.addEventListener('change', renderAvatarPreview);
+    renderAvatarPreview();
     if (existing?.isCharAuto) {
         fields.name.disabled = true;
         fields.description.disabled = true;
@@ -596,6 +718,7 @@ function openContactDialog(existing, defaultBinding, onSave) {
             displayName,
             subName: fields.subName.value.trim(),
             avatar: fields.avatar.value.trim(),
+            avatarStyle: getDraftAvatarStyle(),
             description: (isCharAuto || isUserAuto) ? (existing?.description || '') : fields.description.value.trim(),
             relationToUser: isUserAuto ? (existing?.relationToUser || '본인') : relationToUser,
             relationToChar: fields.relationToChar.value.trim(),

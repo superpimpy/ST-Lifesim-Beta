@@ -14,10 +14,12 @@ import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
 import { getContacts, getAppearanceTagsByName } from '../contacts/contacts.js';
-import { buildDirectImagePrompt, generateImageTags, looksLikeDanbooruPrompt } from '../../utils/image-tag-generator.js';
+import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
+import { applyProfileImageStyle, normalizeProfileImageStyle, readImageFileAsDataUrl } from '../../utils/profile-image.js';
 
 const MODULE_KEY = 'sns-feed';
 const AVATARS_KEY = 'sns-avatars';
+const AVATAR_STYLES_KEY = 'sns-avatar-styles';
 const USER_IDS_KEY = 'sns-user-ids';      // { authorName: '@handle' }
 const CONTACT_LINK_KEY = 'sns-contact-link'; // boolean: link avatars to contacts
 const AUTHOR_DEFAULT_IMAGE_KEY = 'sns-author-default-images'; // { authorName: imageUrl }
@@ -206,12 +208,41 @@ function applyPromptTemplate(template, vars) {
     return String(template || '').replace(/\{\{(\w+)}}/g, (_, key) => String(vars?.[key] ?? ''));
 }
 
+function resolveContactProfile(authorName) {
+    const cleanName = String(authorName || '').trim();
+    if (!cleanName) return null;
+    const allContacts = [...getContacts('character'), ...getContacts('chat')];
+    return allContacts.find((contact) => {
+        const names = [contact?.name, contact?.displayName, contact?.subName]
+            .map(value => String(value || '').trim())
+            .filter(Boolean);
+        return names.includes(cleanName);
+    }) || null;
+}
+
+function getProfileSummary(authorName) {
+    const contact = resolveContactProfile(authorName);
+    return [contact?.description, contact?.personality].filter(Boolean).join(' / ').trim();
+}
+
 function buildSnsImageInputPrompt(customTemplate, authorName, postContent) {
     if (!customTemplate) return `${authorName}'s social media photo post: "${postContent}"`;
+    const authorProfile = getProfileSummary(authorName);
     const authorAppearanceTags = String(getAppearanceTagsByName(authorName) || '').trim();
     return customTemplate
+        .replace(/\{\{authorName\}\}/g, authorName)
+        .replace(/\{\{charName\}\}/g, authorName)
+        .replace(/\{\{personality\}\}/g, authorProfile)
+        .replace(/\{\{appearance\}\}/g, authorAppearanceTags)
+        .replace(/\{\{appearanceTags\}\}/g, authorAppearanceTags)
+        .replace(/\{\{context\}\}/g, postContent)
+        .replace(/\{\{postContent\}\}/g, postContent)
         .replace(/\{authorName\}/g, authorName)
+        .replace(/\{charName\}/g, authorName)
+        .replace(/\{personality\}/g, authorProfile)
+        .replace(/\{appearance\}/g, authorAppearanceTags)
         .replace(/\{appearanceTags\}/g, authorAppearanceTags)
+        .replace(/\{context\}/g, postContent)
         .replace(/\{postContent\}/g, postContent);
 }
 
@@ -235,14 +266,6 @@ function buildSnsDirectImagePromptRequest(sourcePrompt, authorName) {
 async function createSnsImagePrompt(ctx, sourcePrompt, authorName, contacts = []) {
     if (!ctx) return { sceneTags: '', appearanceGroups: [], finalPrompt: '' };
     const tagWeight = Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0;
-    const additionalPrompt = [
-        String(getExtensionSettings()?.['st-lifesim']?.tagGenerationAdditionalPrompt || '').trim(),
-        'This prompt is for an SNS photo post.',
-        DANBOORU_SPACE_TAG_RULE,
-        'Keep scene tags focused on SNS framing, composition, background, action, mood, and lighting.',
-        'Do not invent or repeat core appearance tags outside the [Name: appearance tags] blocks.',
-        authorName ? `Keep ${authorName} visible in the frame unless the post is clearly focused on an object, food, pet, or scenery only.` : '',
-    ].filter(Boolean).join('\n');
     const promptOptions = {
         includeNames: [authorName].filter(Boolean),
         contacts,
@@ -254,16 +277,9 @@ async function createSnsImagePrompt(ctx, sourcePrompt, authorName, contacts = []
         buildSnsDirectImagePromptRequest(sourcePrompt, authorName),
         `${authorName || 'sns'}-image`,
     );
-    if (looksLikeDanbooruPrompt(generatedPrompt)) {
-        const directPrompt = buildDirectImagePrompt(generatedPrompt, promptOptions);
-        // 일부 외부 응답은 태그처럼 보이지만 후처리 시 비어질 수 있으므로,
-        // 그 경우에는 기본 태그 생성 파이프라인으로 다시 정규화한다.
-        if (directPrompt.finalPrompt) return directPrompt;
-    }
-    return generateImageTags(generatedPrompt || sourcePrompt, {
-        ...promptOptions,
-        additionalPrompt,
-    });
+    const directPrompt = buildDirectImagePrompt(generatedPrompt, promptOptions);
+    if (directPrompt.finalPrompt) return directPrompt;
+    return { sceneTags: '', appearanceGroups: [], finalPrompt: '' };
 }
 
 async function applyGeneratedImageToPost(postId, { promptSource, authorName, fallbackImageUrl = '', onUpdate } = {}) {
@@ -557,6 +573,18 @@ function saveAvatars(avatars) {
     saveData(AVATARS_KEY, avatars, getDefaultBinding());
 }
 
+function loadAvatarStyles() {
+    return loadData(AVATAR_STYLES_KEY, {}, getDefaultBinding());
+}
+
+function saveAvatarStyles(styles) {
+    saveData(AVATAR_STYLES_KEY, styles, getDefaultBinding());
+}
+
+function getAvatarStyle(authorName, avatarStyles, defaults) {
+    return normalizeProfileImageStyle(avatarStyles?.[authorName], defaults);
+}
+
 /**
  * SNS 모듈을 초기화한다
  */
@@ -825,6 +853,7 @@ function buildPostCard(post, onUpdate) {
     const isCollapsed = collapsedIds.has(post.id);
 
     const avatars = loadAvatars();
+    const avatarStyles = loadAvatarStyles();
     const avatarUrl = resolveAvatar(post.authorName, avatars);
     const userIds = loadUserIds();
     const displayId = getAuthorHandle(post.authorName, userIds);
@@ -837,11 +866,14 @@ function buildPostCard(post, onUpdate) {
     avatarWrap.className = 'slm-post-avatar';
     const avatarInner = document.createElement('div');
     avatarInner.className = 'slm-post-avatar-inner';
+    const resolvedAvatarStyle = getAvatarStyle(post.authorName, avatarStyles, { width: 32, height: 32, objectFit: 'cover' });
+    applyProfileImageStyle(avatarWrap, null, resolvedAvatarStyle, { width: 32, height: 32, objectFit: 'cover' });
     if (avatarUrl) {
         const avatarImg = document.createElement('img');
         avatarImg.src = avatarUrl;
         avatarImg.alt = post.authorName;
-        avatarImg.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%';
+        avatarImg.style.cssText = 'width:100%;height:100%;border-radius:50%';
+        applyProfileImageStyle(avatarWrap, avatarImg, resolvedAvatarStyle, { width: 32, height: 32, objectFit: 'cover' });
         avatarImg.onerror = () => {
             avatarInner.removeChild(avatarImg);
             avatarInner.textContent = ((post.authorName || '?')[0] || '?').toUpperCase();
@@ -1914,6 +1946,7 @@ function openAvatarSettingsDialog(onUpdate) {
         const freshNames = new Set(freshProfiles.map(c => c.name));
         Object.keys(userIds).forEach(k => { if (!freshNames.has(k)) delete userIds[k]; });
         Object.keys(avatars).forEach(k => { if (!freshNames.has(k)) delete avatars[k]; });
+        Object.keys(avatarStyles).forEach(k => { if (!freshNames.has(k)) delete avatarStyles[k]; });
         Object.keys(defaultImages).forEach(k => { if (!freshNames.has(k)) delete defaultImages[k]; });
         Object.keys(postingEnabled).forEach(k => { if (!freshNames.has(k)) delete postingEnabled[k]; });
         Object.keys(authorLanguages).forEach(k => { if (!freshNames.has(k)) delete authorLanguages[k]; });
@@ -1928,6 +1961,7 @@ function openAvatarSettingsDialog(onUpdate) {
         });
         saveUserIds(userIds);
         saveAvatars(avatars);
+        saveAvatarStyles(avatarStyles);
         saveAuthorDefaultImages(defaultImages);
         savePostingEnabledMap(postingEnabled);
         saveAuthorLanguages(authorLanguages);
@@ -1943,6 +1977,7 @@ function openAvatarSettingsDialog(onUpdate) {
 
     const userIds = loadUserIds();
     const avatars = loadAvatars();
+    const avatarStyles = loadAvatarStyles();
     const defaultImages = loadAuthorDefaultImages();
     const postingEnabled = loadPostingEnabledMap();
     const authorLanguages = loadAuthorLanguages();
@@ -1965,6 +2000,7 @@ function openAvatarSettingsDialog(onUpdate) {
     });
     saveUserIds(userIds);
     saveAvatars(avatars);
+    saveAvatarStyles(avatarStyles);
     savePostingEnabledMap(postingEnabled);
     saveAuthorLanguages(authorLanguages);
     saveAuthorMinLikesMap(authorMinLikes);
@@ -1984,10 +2020,12 @@ function openAvatarSettingsDialog(onUpdate) {
             summary.className = 'slm-sns-profile-summary';
             const avatarSpan = document.createElement('span');
             avatarSpan.className = 'slm-sns-profile-avatar';
+            applyProfileImageStyle(avatarSpan, null, getAvatarStyle(c.name, avatarStyles, { width: 24, height: 24, objectFit: 'cover' }), { width: 24, height: 24, objectFit: 'cover' });
             if (avatars[c.name]) {
                 const img = document.createElement('img');
                 img.src = avatars[c.name];
                 img.alt = c.name;
+                applyProfileImageStyle(avatarSpan, img, getAvatarStyle(c.name, avatarStyles, { width: 24, height: 24, objectFit: 'cover' }), { width: 24, height: 24, objectFit: 'cover' });
                 avatarSpan.appendChild(img);
             } else {
                 avatarSpan.textContent = ((c.name || '?')[0] || '?').toUpperCase();
@@ -2019,7 +2057,130 @@ function openAvatarSettingsDialog(onUpdate) {
                 avatars[c.name] = avatarInput.value.trim();
                 saveAvatars(avatars);
                 onUpdate();
+                renderContactList();
             };
+            const avatarUploadInput = document.createElement('input');
+            avatarUploadInput.type = 'file';
+            avatarUploadInput.accept = 'image/*';
+            avatarUploadInput.style.display = 'none';
+            const avatarUploadBtn = Object.assign(document.createElement('button'), {
+                type: 'button',
+                className: 'slm-btn slm-btn-secondary slm-btn-sm',
+                textContent: '📁 로컬 업로드',
+            });
+            avatarUploadBtn.onclick = () => avatarUploadInput.click();
+            avatarUploadInput.onchange = async (event) => {
+                const file = event.target?.files?.[0];
+                if (!file) return;
+                try {
+                    avatars[c.name] = await readImageFileAsDataUrl(file);
+                    avatarInput.value = avatars[c.name];
+                    saveAvatars(avatars);
+                    onUpdate();
+                    renderContactList();
+                } catch (error) {
+                    showToast(error.message || '이미지 업로드 실패', 'error');
+                } finally {
+                    avatarUploadInput.value = '';
+                }
+            };
+            const avatarClearBtn = Object.assign(document.createElement('button'), {
+                type: 'button',
+                className: 'slm-btn slm-btn-ghost slm-btn-sm',
+                textContent: '🧹 비우기',
+            });
+            avatarClearBtn.onclick = () => {
+                delete avatars[c.name];
+                avatarInput.value = '';
+                saveAvatars(avatars);
+                onUpdate();
+                renderContactList();
+            };
+            const avatarButtonRow = document.createElement('div');
+            avatarButtonRow.className = 'slm-input-row';
+            avatarButtonRow.style.margin = '6px 0 8px';
+            avatarButtonRow.append(avatarUploadBtn, avatarClearBtn, avatarUploadInput);
+            const initialAvatarStyle = getAvatarStyle(c.name, avatarStyles, { width: 32, height: 32, objectFit: 'cover' });
+            const avatarWidthInput = Object.assign(document.createElement('input'), {
+                className: 'slm-input',
+                type: 'number',
+                min: '16',
+                max: '256',
+                value: String(initialAvatarStyle.width),
+            });
+            avatarWidthInput.style.width = '82px';
+            const avatarHeightInput = Object.assign(document.createElement('input'), {
+                className: 'slm-input',
+                type: 'number',
+                min: '16',
+                max: '256',
+                value: String(initialAvatarStyle.height),
+            });
+            avatarHeightInput.style.width = '82px';
+            const avatarFitSelect = document.createElement('select');
+            avatarFitSelect.className = 'slm-select';
+            [
+                ['cover', '꽉 채우기'],
+                ['contain', '전체 보이기'],
+                ['fill', '늘이기'],
+                ['scale-down', '축소만'],
+            ].forEach(([value, label]) => {
+                avatarFitSelect.appendChild(Object.assign(document.createElement('option'), { value, textContent: label }));
+            });
+            avatarFitSelect.value = initialAvatarStyle.objectFit;
+            const avatarPreview = document.createElement('span');
+            avatarPreview.className = 'slm-sns-profile-avatar';
+            avatarPreview.style.display = 'inline-flex';
+            avatarPreview.style.marginRight = '6px';
+            const getDraftAvatarStyle = () => normalizeProfileImageStyle({
+                width: avatarWidthInput.value,
+                height: avatarHeightInput.value,
+                objectFit: avatarFitSelect.value,
+            }, { width: 32, height: 32, objectFit: 'cover' });
+            const renderAvatarPreview = () => {
+                avatarPreview.innerHTML = '';
+                const style = getDraftAvatarStyle();
+                applyProfileImageStyle(avatarPreview, null, style, { width: 32, height: 32, objectFit: 'cover' });
+                const src = avatarInput.value.trim();
+                if (src) {
+                    const img = document.createElement('img');
+                    img.src = src;
+                    img.alt = c.name;
+                    applyProfileImageStyle(avatarPreview, img, style, { width: 32, height: 32, objectFit: 'cover' });
+                    img.onerror = () => {
+                        avatarPreview.innerHTML = '';
+                        avatarPreview.textContent = ((c.name || '?')[0] || '?').toUpperCase();
+                    };
+                    avatarPreview.appendChild(img);
+                    return;
+                }
+                avatarPreview.textContent = ((c.name || '?')[0] || '?').toUpperCase();
+            };
+            const saveDraftAvatarStyle = () => {
+                avatarStyles[c.name] = getDraftAvatarStyle();
+                saveAvatarStyles(avatarStyles);
+                renderAvatarPreview();
+                onUpdate();
+                renderContactList();
+            };
+            avatarWidthInput.onchange = saveDraftAvatarStyle;
+            avatarHeightInput.onchange = saveDraftAvatarStyle;
+            avatarFitSelect.onchange = saveDraftAvatarStyle;
+            avatarInput.addEventListener('input', renderAvatarPreview);
+            const avatarSizeRow = document.createElement('div');
+            avatarSizeRow.className = 'slm-input-row';
+            avatarSizeRow.style.margin = '6px 0 8px';
+            avatarSizeRow.append(
+                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '미리보기' }),
+                avatarPreview,
+                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '너비' }),
+                avatarWidthInput,
+                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '높이' }),
+                avatarHeightInput,
+                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '표시 방식' }),
+                avatarFitSelect,
+            );
+            renderAvatarPreview();
 
             const presetSelect = document.createElement('select');
             presetSelect.className = 'slm-select';
@@ -2083,6 +2244,8 @@ function openAvatarSettingsDialog(onUpdate) {
             item.appendChild(handleInput);
             item.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '프로필 이미지 URL' }));
             item.appendChild(avatarInput);
+            item.appendChild(avatarButtonRow);
+            item.appendChild(avatarSizeRow);
             item.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '게시글/댓글 출력 언어' }));
             item.appendChild(languageSelect);
             item.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '최소 좋아요 수' }));
