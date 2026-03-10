@@ -1,20 +1,32 @@
-const DEFAULT_OBJECT_FIT = 'cover';
-const ALLOWED_OBJECT_FIT = new Set(['cover', 'contain', 'fill', 'scale-down']);
-
 function clampDimension(value, fallback) {
     const parsed = Number.parseInt(value, 10);
     if (!Number.isFinite(parsed)) return fallback;
     return Math.max(16, Math.min(256, parsed));
 }
 
+function clampPercent(value, fallback) {
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(0, Math.min(100, parsed));
+}
+
+function clampScale(value, fallback) {
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(100, Math.min(250, parsed));
+}
+
 export function normalizeProfileImageStyle(rawStyle, defaults = {}) {
     const fallbackWidth = clampDimension(defaults.width, 40);
     const fallbackHeight = clampDimension(defaults.height, fallbackWidth);
-    const objectFit = String(rawStyle?.objectFit || defaults.objectFit || DEFAULT_OBJECT_FIT).trim().toLowerCase();
     return {
-        width: clampDimension(rawStyle?.width, fallbackWidth),
-        height: clampDimension(rawStyle?.height, fallbackHeight),
-        objectFit: ALLOWED_OBJECT_FIT.has(objectFit) ? objectFit : DEFAULT_OBJECT_FIT,
+        // 아바타 프레임 크기는 사용 지점의 기본값을 고정으로 따르고,
+        // 저장값은 크롭(확대/위치) 정보만 유지한다. 이전 width/height 값은 무시한다.
+        width: fallbackWidth,
+        height: fallbackHeight,
+        positionX: clampPercent(rawStyle?.positionX, clampPercent(defaults.positionX, 50)),
+        positionY: clampPercent(rawStyle?.positionY, clampPercent(defaults.positionY, 50)),
+        scale: clampScale(rawStyle?.scale, clampScale(defaults.scale, 100)),
     };
 }
 
@@ -25,7 +37,13 @@ export function applyProfileImageStyle(frameEl, imageEl, rawStyle, defaults = {}
         frameEl.style.height = `${style.height}px`;
     }
     if (imageEl?.style) {
-        imageEl.style.objectFit = style.objectFit;
+        imageEl.style.width = '100%';
+        imageEl.style.height = '100%';
+        imageEl.style.display = 'block';
+        imageEl.style.objectFit = 'cover';
+        imageEl.style.objectPosition = `${style.positionX}% ${style.positionY}%`;
+        imageEl.style.transform = `scale(${style.scale / 100})`;
+        imageEl.style.transformOrigin = `${style.positionX}% ${style.positionY}%`;
     }
     return style;
 }

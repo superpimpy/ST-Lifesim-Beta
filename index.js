@@ -21,7 +21,7 @@ import { showToast, showConfirm, escapeHtml } from './utils/ui.js';
 import { exportAllData, importAllData, clearAllData } from './utils/storage.js';
 import { renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEventGeneratorUI, renderVoiceMemoUI, triggerQuickSend, triggerReadReceipt, triggerNoContact, triggerUserImageGenerationAndSend, triggerVoiceMemoInsertion, triggerDeletedMessage } from './modules/quick-tools/quick-tools.js';
 import { startFirstMsgTimer, renderFirstMsgSettingsUI } from './modules/firstmsg/firstmsg.js';
-import { initEmoticon, openEmoticonPopup } from './modules/emoticon/emoticon.js';
+import { initEmoticon, openEmoticonPopup, replaceAiSelectedEmoticons } from './modules/emoticon/emoticon.js';
 import { initContacts, openContactsPopup, getContacts, getAppearanceTagsByName, buildAppearanceTagVariableMap, resolveAppearanceTagVariables } from './modules/contacts/contacts.js';
 import { initCall, isCallActive, onCharacterMessageRenderedForProactiveCall, openCallLogsPopup, triggerProactiveIncomingCall, requestActiveCharacterCall } from './modules/call/call.js';
 import { initWallet, openWalletPopup } from './modules/wallet/wallet.js';
@@ -3241,6 +3241,37 @@ async function applyCharacterImageDisplayMode() {
     }
 }
 
+async function applyCharacterEmoticonDisplayMode() {
+    if (!isEnabled()) return;
+    const ctx = getContext();
+    if (!ctx) return;
+    const lastMsg = ctx.chat?.[ctx.chat.length - 1];
+    if (!lastMsg || lastMsg.is_user) return;
+
+    const mes = String(lastMsg.mes || '');
+    const senderName = String(lastMsg.name || ctx?.name2 || '{{char}}');
+    const updatedMes = replaceAiSelectedEmoticons(mes, senderName);
+    if (updatedMes === mes) return;
+
+    lastMsg.mes = updatedMes;
+    // DOM mesid는 숫자 인덱스를 사용하므로 lastMsg 참조와 별개로 마지막 메시지 인덱스를 구한다.
+    const msgIdx = Number(ctx.chat.length - 1);
+    if (Number.isFinite(msgIdx) && msgIdx >= 0) {
+        try {
+            const msgEl = document.querySelector(`.mes[mesid="${msgIdx}"]`);
+            if (msgEl) {
+                const mesTextEl = msgEl.querySelector('.mes_text');
+                if (mesTextEl) mesTextEl.innerHTML = updatedMes;
+            }
+        } catch (uiErr) {
+            console.warn('[ST-LifeSim] 이모티콘 UI 업데이트 실패:', uiErr);
+        }
+    }
+    if (typeof ctx.saveChat === 'function') {
+        await ctx.saveChat();
+    }
+}
+
 // ── 주간/야간 테마 토글 ──────────────────────────────────────────
 /**
  * 사용자가 명시적으로 저장한 강제 테마를 반환한다.
@@ -3466,6 +3497,7 @@ async function init() {
         evSrc.on(eventTypes.CHARACTER_MESSAGE_RENDERED, async () => {
             onCharacterMessageRenderedForProactiveCall();
             trackGifticonUsageFromCharacterMessage();
+            await applyCharacterEmoticonDisplayMode().catch((e) => console.error('[ST-LifeSim] 이모티콘 표시 모드 적용 오류:', e));
             await applyCharacterImageDisplayMode().catch((e) => console.error('[ST-LifeSim] 이미지 표시 모드 적용 오류:', e));
         });
     }

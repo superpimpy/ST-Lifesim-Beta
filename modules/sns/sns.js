@@ -16,6 +16,7 @@ import { createPopup } from '../../utils/popup.js';
 import { getContacts, getAppearanceTagsByName } from '../contacts/contacts.js';
 import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
 import { applyProfileImageStyle, normalizeProfileImageStyle, readImageFileAsDataUrl } from '../../utils/profile-image.js';
+import { isHtmlTextResponse } from '../../utils/text-response.js';
 
 const MODULE_KEY = 'sns-feed';
 const AVATARS_KEY = 'sns-avatars';
@@ -866,14 +867,14 @@ function buildPostCard(post, onUpdate) {
     avatarWrap.className = 'slm-post-avatar';
     const avatarInner = document.createElement('div');
     avatarInner.className = 'slm-post-avatar-inner';
-    const resolvedAvatarStyle = getAvatarStyle(post.authorName, avatarStyles, { width: 32, height: 32, objectFit: 'cover' });
-    applyProfileImageStyle(avatarWrap, null, resolvedAvatarStyle, { width: 32, height: 32, objectFit: 'cover' });
+    const resolvedAvatarStyle = getAvatarStyle(post.authorName, avatarStyles, { width: 32, height: 32, scale: 100, positionX: 50, positionY: 50 });
+    applyProfileImageStyle(avatarWrap, null, resolvedAvatarStyle, { width: 32, height: 32, scale: 100, positionX: 50, positionY: 50 });
     if (avatarUrl) {
         const avatarImg = document.createElement('img');
         avatarImg.src = avatarUrl;
         avatarImg.alt = post.authorName;
         avatarImg.style.cssText = 'width:100%;height:100%;border-radius:50%';
-        applyProfileImageStyle(avatarWrap, avatarImg, resolvedAvatarStyle, { width: 32, height: 32, objectFit: 'cover' });
+        applyProfileImageStyle(avatarWrap, avatarImg, resolvedAvatarStyle, { width: 32, height: 32, scale: 100, positionX: 50, positionY: 50 });
         avatarImg.onerror = () => {
             avatarInner.removeChild(avatarImg);
             avatarInner.textContent = ((post.authorName || '?')[0] || '?').toUpperCase();
@@ -1398,12 +1399,17 @@ async function generateSnsText(ctx, quietPrompt, quietName, routeKey = 'sns') {
             });
             if (response.ok) {
                 const rawText = await response.text();
-                try {
-                    const json = JSON.parse(rawText || 'null');
-                    if (typeof json === 'string') return json.trim();
-                    if (typeof json?.text === 'string') return json.text.trim();
-                } catch { /* non-JSON 응답은 그대로 사용 */ }
-                if (rawText) return rawText.trim();
+                const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
+                if (isHtmlTextResponse(rawText, contentType)) {
+                    console.warn('[ST-LifeSim] SNS 외부 API가 HTML 응답을 반환하여 무시합니다.');
+                } else {
+                    try {
+                        const json = JSON.parse(rawText || 'null');
+                        if (typeof json === 'string') return json.trim();
+                        if (typeof json?.text === 'string') return json.text.trim();
+                    } catch { /* non-JSON 응답은 그대로 사용 */ }
+                    if (rawText) return rawText.trim();
+                }
             } else {
                 console.warn('[ST-LifeSim] SNS 외부 API 응답 오류:', response.status);
             }
@@ -2020,12 +2026,12 @@ function openAvatarSettingsDialog(onUpdate) {
             summary.className = 'slm-sns-profile-summary';
             const avatarSpan = document.createElement('span');
             avatarSpan.className = 'slm-sns-profile-avatar';
-            applyProfileImageStyle(avatarSpan, null, getAvatarStyle(c.name, avatarStyles, { width: 24, height: 24, objectFit: 'cover' }), { width: 24, height: 24, objectFit: 'cover' });
+            applyProfileImageStyle(avatarSpan, null, getAvatarStyle(c.name, avatarStyles, { width: 24, height: 24, scale: 100, positionX: 50, positionY: 50 }), { width: 24, height: 24, scale: 100, positionX: 50, positionY: 50 });
             if (avatars[c.name]) {
                 const img = document.createElement('img');
                 img.src = avatars[c.name];
                 img.alt = c.name;
-                applyProfileImageStyle(avatarSpan, img, getAvatarStyle(c.name, avatarStyles, { width: 24, height: 24, objectFit: 'cover' }), { width: 24, height: 24, objectFit: 'cover' });
+                applyProfileImageStyle(avatarSpan, img, getAvatarStyle(c.name, avatarStyles, { width: 24, height: 24, scale: 100, positionX: 50, positionY: 50 }), { width: 24, height: 24, scale: 100, positionX: 50, positionY: 50 });
                 avatarSpan.appendChild(img);
             } else {
                 avatarSpan.textContent = ((c.name || '?')[0] || '?').toUpperCase();
@@ -2100,53 +2106,53 @@ function openAvatarSettingsDialog(onUpdate) {
             avatarButtonRow.className = 'slm-input-row';
             avatarButtonRow.style.margin = '6px 0 8px';
             avatarButtonRow.append(avatarUploadBtn, avatarClearBtn, avatarUploadInput);
-            const initialAvatarStyle = getAvatarStyle(c.name, avatarStyles, { width: 32, height: 32, objectFit: 'cover' });
-            const avatarWidthInput = Object.assign(document.createElement('input'), {
+            const initialAvatarStyle = getAvatarStyle(c.name, avatarStyles, { width: 32, height: 32, scale: 100, positionX: 50, positionY: 50 });
+            const avatarScaleInput = Object.assign(document.createElement('input'), {
                 className: 'slm-input',
-                type: 'number',
-                min: '16',
-                max: '256',
-                value: String(initialAvatarStyle.width),
+                type: 'range',
+                min: '100',
+                max: '250',
+                step: '1',
+                value: String(initialAvatarStyle.scale),
             });
-            avatarWidthInput.style.width = '82px';
-            const avatarHeightInput = Object.assign(document.createElement('input'), {
+            avatarScaleInput.style.width = '140px';
+            const avatarPositionXInput = Object.assign(document.createElement('input'), {
                 className: 'slm-input',
-                type: 'number',
-                min: '16',
-                max: '256',
-                value: String(initialAvatarStyle.height),
+                type: 'range',
+                min: '0',
+                max: '100',
+                step: '1',
+                value: String(initialAvatarStyle.positionX),
             });
-            avatarHeightInput.style.width = '82px';
-            const avatarFitSelect = document.createElement('select');
-            avatarFitSelect.className = 'slm-select';
-            [
-                ['cover', '꽉 채우기'],
-                ['contain', '전체 보이기'],
-                ['fill', '늘이기'],
-                ['scale-down', '축소만'],
-            ].forEach(([value, label]) => {
-                avatarFitSelect.appendChild(Object.assign(document.createElement('option'), { value, textContent: label }));
+            avatarPositionXInput.style.width = '140px';
+            const avatarPositionYInput = Object.assign(document.createElement('input'), {
+                className: 'slm-input',
+                type: 'range',
+                min: '0',
+                max: '100',
+                step: '1',
+                value: String(initialAvatarStyle.positionY),
             });
-            avatarFitSelect.value = initialAvatarStyle.objectFit;
+            avatarPositionYInput.style.width = '140px';
             const avatarPreview = document.createElement('span');
             avatarPreview.className = 'slm-sns-profile-avatar';
             avatarPreview.style.display = 'inline-flex';
             avatarPreview.style.marginRight = '6px';
             const getDraftAvatarStyle = () => normalizeProfileImageStyle({
-                width: avatarWidthInput.value,
-                height: avatarHeightInput.value,
-                objectFit: avatarFitSelect.value,
-            }, { width: 32, height: 32, objectFit: 'cover' });
+                scale: avatarScaleInput.value,
+                positionX: avatarPositionXInput.value,
+                positionY: avatarPositionYInput.value,
+            }, { width: 32, height: 32, scale: 100, positionX: 50, positionY: 50 });
             const renderAvatarPreview = () => {
                 avatarPreview.innerHTML = '';
                 const style = getDraftAvatarStyle();
-                applyProfileImageStyle(avatarPreview, null, style, { width: 32, height: 32, objectFit: 'cover' });
+                applyProfileImageStyle(avatarPreview, null, style, { width: 32, height: 32, scale: 100, positionX: 50, positionY: 50 });
                 const src = avatarInput.value.trim();
                 if (src) {
                     const img = document.createElement('img');
                     img.src = src;
                     img.alt = c.name;
-                    applyProfileImageStyle(avatarPreview, img, style, { width: 32, height: 32, objectFit: 'cover' });
+                    applyProfileImageStyle(avatarPreview, img, style, { width: 32, height: 32, scale: 100, positionX: 50, positionY: 50 });
                     img.onerror = () => {
                         avatarPreview.innerHTML = '';
                         avatarPreview.textContent = ((c.name || '?')[0] || '?').toUpperCase();
@@ -2163,22 +2169,25 @@ function openAvatarSettingsDialog(onUpdate) {
                 onUpdate();
                 renderContactList();
             };
-            avatarWidthInput.onchange = saveDraftAvatarStyle;
-            avatarHeightInput.onchange = saveDraftAvatarStyle;
-            avatarFitSelect.onchange = saveDraftAvatarStyle;
+            [avatarScaleInput, avatarPositionXInput, avatarPositionYInput].forEach((input) => {
+                input.addEventListener('input', renderAvatarPreview);
+                input.addEventListener('change', saveDraftAvatarStyle);
+            });
             avatarInput.addEventListener('input', renderAvatarPreview);
-            const avatarSizeRow = document.createElement('div');
-            avatarSizeRow.className = 'slm-input-row';
-            avatarSizeRow.style.margin = '6px 0 8px';
-            avatarSizeRow.append(
+            const avatarCropRow = document.createElement('div');
+            avatarCropRow.className = 'slm-input-row';
+            avatarCropRow.style.margin = '6px 0 8px';
+            avatarCropRow.style.alignItems = 'center';
+            avatarCropRow.style.flexWrap = 'wrap';
+            avatarCropRow.append(
                 Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '미리보기' }),
                 avatarPreview,
-                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '너비' }),
-                avatarWidthInput,
-                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '높이' }),
-                avatarHeightInput,
-                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '표시 방식' }),
-                avatarFitSelect,
+                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '확대' }),
+                avatarScaleInput,
+                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '좌우 이동' }),
+                avatarPositionXInput,
+                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '상하 이동' }),
+                avatarPositionYInput,
             );
             renderAvatarPreview();
 
@@ -2245,7 +2254,7 @@ function openAvatarSettingsDialog(onUpdate) {
             item.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '프로필 이미지 URL' }));
             item.appendChild(avatarInput);
             item.appendChild(avatarButtonRow);
-            item.appendChild(avatarSizeRow);
+            item.appendChild(avatarCropRow);
             item.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '게시글/댓글 출력 언어' }));
             item.appendChild(languageSelect);
             item.appendChild(Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '최소 좋아요 수' }));
