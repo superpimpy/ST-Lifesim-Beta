@@ -70,8 +70,48 @@ const MODEL_KEY_BY_SOURCE = {
  * @param {'chat'|'character'} binding
  * @returns {Contact[]}
  */
+function buildLegacyContactId(contact, binding) {
+    const seed = [
+        binding,
+        String(contact?.name || '').trim().toLowerCase(),
+        String(contact?.displayName || '').trim().toLowerCase(),
+        String(contact?.subName || '').trim().toLowerCase(),
+    ].join(':');
+    return `legacy:${seed}`;
+}
+
+function normalizeContact(contact, binding = 'chat') {
+    if (!contact || typeof contact !== 'object') return null;
+    const normalizedBinding = binding === 'character' ? 'character' : 'chat';
+    const isCharAuto = contact.isCharAuto === true;
+    const isUserAuto = contact.isUserAuto === true;
+    return {
+        ...contact,
+        id: String(contact.id || '').trim() || buildLegacyContactId(contact, normalizedBinding),
+        name: String(contact.name || '').trim(),
+        displayName: String(contact.displayName || '').trim(),
+        subName: String(contact.subName || '').trim(),
+        avatar: String(contact.avatar || '').trim(),
+        description: String(contact.description || '').trim(),
+        relationToUser: String(contact.relationToUser || '').trim(),
+        relationToChar: String(contact.relationToChar || '').trim(),
+        personality: String(contact.personality || '').trim(),
+        phone: String(contact.phone || '').trim(),
+        tags: Array.isArray(contact.tags) ? contact.tags : [],
+        appearanceTags: String(contact.appearanceTags || '').trim(),
+        binding: normalizedBinding,
+        isCharAuto,
+        isUserAuto,
+        groupChatParticipant: isUserAuto ? false : contact.groupChatParticipant === true,
+    };
+}
+
 function loadContacts(binding = 'chat') {
-    return loadData(MODULE_KEY, [], binding);
+    const contacts = loadData(MODULE_KEY, [], binding);
+    if (!Array.isArray(contacts)) return [];
+    return contacts
+        .map((contact) => normalizeContact(contact, binding))
+        .filter((contact) => contact && contact.name);
 }
 
 /**
@@ -80,7 +120,12 @@ function loadContacts(binding = 'chat') {
  * @param {'chat'|'character'} binding
  */
 function saveContacts(contacts, binding = 'chat') {
-    saveData(MODULE_KEY, contacts, binding);
+    const normalizedContacts = Array.isArray(contacts)
+        ? contacts
+            .map((contact) => normalizeContact(contact, binding))
+            .filter((contact) => contact && contact.name)
+        : [];
+    saveData(MODULE_KEY, normalizedContacts, binding);
 }
 
 function getAvatarStyle(contact, defaults) {
@@ -171,6 +216,7 @@ function ensureCharContact() {
         tags: [],
         binding: 'character',
         isCharAuto: true,
+        groupChatParticipant: false,
     });
     saveContacts(contacts, 'character');
 }
@@ -203,6 +249,7 @@ function ensureUserContact() {
         }
         existing.isUserAuto = true;
         existing.binding = 'character';
+        existing.groupChatParticipant = false;
         saveContacts(contacts, 'character');
         return;
     }
@@ -222,6 +269,7 @@ function ensureUserContact() {
         appearanceTags: globalProfile.appearanceTags || '',
         binding: 'character',
         isUserAuto: true,
+        groupChatParticipant: false,
     });
     saveContacts(contacts, 'character');
 }
@@ -249,7 +297,7 @@ export function initContacts() {
             return line;
         });
 
-        const groupParticipants = all.filter((contact) => contact?.groupChatParticipant && !contact?.isUserAuto);
+        const groupParticipants = all.filter((contact) => contact?.groupChatParticipant === true && !contact?.isUserAuto && !contact?.isCharAuto);
         const groupLines = groupParticipants.map((contact) => {
             let line = `• ${getContactDisplayName(contact)}`;
             if (contact.relationToUser) line += ` | Relation to {{user}}: ${contact.relationToUser}`;
@@ -751,8 +799,10 @@ function openContactDialog(existing, defaultBinding, onSave) {
             : isUserAuto ? (existing?.name || getContext()?.name1 || name)
             : name;
         const displayName = (isCharAuto || isUserAuto) && name !== canonicalName ? name : '';
-        const groupChatParticipant = (isCharAuto || isUserAuto)
-            ? !!existing?.groupChatParticipant
+        const groupChatParticipant = isUserAuto
+            ? false
+            : isCharAuto
+                ? !!existing?.groupChatParticipant
             : groupParticipantCheck.checked;
         const data = {
             id: existing?.id || generateId(),
