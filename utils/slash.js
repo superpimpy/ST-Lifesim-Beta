@@ -29,7 +29,7 @@ async function run(command) {
     }
 }
 
-function findContactByName(name) {
+function findContactByNameVariant(name) {
     const requested = String(name || '').trim().toLowerCase();
     if (!requested) return null;
     const allContacts = [...getContacts('character'), ...getContacts('chat')];
@@ -40,7 +40,7 @@ function findContactByName(name) {
 }
 
 async function applyLatestSendAsContactAvatar(name) {
-    const contact = findContactByName(name);
+    const contact = findContactByNameVariant(name);
     if (!contact?.avatar) return;
     const ctx = getContext();
     const msgIdx = Number((ctx?.chat?.length ?? 0) - 1);
@@ -59,7 +59,7 @@ async function applyLatestSendAsContactAvatar(name) {
         const avatarImg = existingImg || (avatarFrame ? document.createElement('img') : null);
         if (avatarFrame && avatarImg) {
             avatarImg.src = contact.avatar;
-            avatarImg.alt = String(name || contact.displayName || contact.name || 'avatar');
+            avatarImg.alt = String(name || contact.displayName || contact.name || '');
             avatarImg.removeAttribute('srcset');
             applyProfileImageStyle(
                 avatarFrame,

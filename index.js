@@ -45,12 +45,14 @@ const AI_ROUTE_DEFAULTS = {
     modelSettingKey: '',
     model: '',
 };
+const GROUP_CHAT_TRANSCRIPT_LIMIT = 12;
 const GROUP_CHAT_SETTINGS_DEFAULTS = {
     enabled: false,
     responseProbability: 35,
     extraResponseProbability: 25,
     maxResponsesPerTurn: 2,
     includeMainCharacter: true,
+    contactOnlyProbability: 35,
 };
 const ROUTE_MODEL_KEY_BY_SOURCE = {
     openai: 'openai_model',
@@ -315,6 +317,9 @@ function getSettings() {
     }
     if (typeof ext[SETTINGS_KEY].groupChat.includeMainCharacter !== 'boolean') {
         ext[SETTINGS_KEY].groupChat.includeMainCharacter = GROUP_CHAT_SETTINGS_DEFAULTS.includeMainCharacter;
+    }
+    if (!Number.isFinite(ext[SETTINGS_KEY].groupChat.contactOnlyProbability)) {
+        ext[SETTINGS_KEY].groupChat.contactOnlyProbability = GROUP_CHAT_SETTINGS_DEFAULTS.contactOnlyProbability;
     }
     if (ext[SETTINGS_KEY].modules?.gifticon == null) {
         if (!ext[SETTINGS_KEY].modules) ext[SETTINGS_KEY].modules = {};
@@ -1018,6 +1023,7 @@ function getGroupChatRuntimeSettings() {
         extraResponseProbability: clampPercentage(raw.extraResponseProbability, GROUP_CHAT_SETTINGS_DEFAULTS.extraResponseProbability),
         maxResponsesPerTurn: Math.max(1, Math.min(3, Number.parseInt(raw.maxResponsesPerTurn, 10) || GROUP_CHAT_SETTINGS_DEFAULTS.maxResponsesPerTurn)),
         includeMainCharacter: raw.includeMainCharacter !== false,
+        contactOnlyProbability: clampPercentage(raw.contactOnlyProbability, GROUP_CHAT_SETTINGS_DEFAULTS.contactOnlyProbability),
     };
 }
 
@@ -1064,6 +1070,19 @@ function buildGroupChatRosterEntries(settings) {
     return roster;
 }
 
+function buildGroupChatContactRoster() {
+    return buildGroupChatContactPool().map((contact) => ({
+        type: 'contact',
+        name: contact.name,
+        displayName: contact.displayName || contact.name,
+        relationToUser: contact.relationToUser,
+        relationToChar: contact.relationToChar,
+        personality: contact.personality,
+        description: contact.description,
+        avatar: contact.avatar,
+    }));
+}
+
 function normalizeGroupChatText(text) {
     return String(text || '')
         .replace(/\r/g, '')
@@ -1072,7 +1091,7 @@ function normalizeGroupChatText(text) {
 }
 
 function sanitizeGroupChatReply(text, responderName) {
-    // 입력 텍스트 정규화(개행/공백 정리)까지 함께 담당한다.
+    // 응답 텍스트를 정리하고, 모델이 붙인 화자명/불필요한 접두어를 함께 제거한다.
     let cleaned = normalizeGroupChatText(text);
     if (!cleaned) return '';
     const escapedName = String(responderName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1087,7 +1106,7 @@ function sanitizeGroupChatReply(text, responderName) {
     return cleaned;
 }
 
-function buildGroupChatTranscript(limit = 12) {
+function buildGroupChatTranscript(limit = GROUP_CHAT_TRANSCRIPT_LIMIT) {
     const ctx = getContext();
     const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
     // 최근 12개 발화면 1:1/단톡 맥락과 말투를 이어가기에 충분하면서도 프롬프트 길이를 과하게 늘리지 않는다.
@@ -1141,13 +1160,13 @@ async function generateGroupChatReply(responder, roster) {
         `Output only ${responder.displayName}'s next message.`,
     ].filter(Boolean).join('\n');
 
+    let rawReply = '';
     if (typeof ctx.generateQuietPrompt === 'function') {
-        return sanitizeGroupChatReply(await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: responder.displayName }), responder.displayName);
+        rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: responder.displayName });
+    } else if (typeof ctx.generateRaw === 'function') {
+        rawReply = await ctx.generateRaw({ prompt, quietToLoud: false, trimNames: true });
     }
-    if (typeof ctx.generateRaw === 'function') {
-        return sanitizeGroupChatReply(await ctx.generateRaw({ prompt, quietToLoud: false, trimNames: true }), responder.displayName);
-    }
-    return '';
+    return sanitizeGroupChatReply(rawReply, responder.displayName);
 }
 
 function pickRandomGroupResponder(candidates) {
@@ -1155,23 +1174,11 @@ function pickRandomGroupResponder(candidates) {
     return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
-async function triggerGroupChatResponses() {
-    const settings = getGroupChatRuntimeSettings();
-    if (!settings.enabled) return;
-    const ctx = getContext();
-    const latestMessage = ctx?.chat?.[ctx.chat.length - 1];
-    if (!latestMessage?.is_user) return;
-    const latestText = normalizeGroupChatText(latestMessage.mes || '');
-    if (!latestText || latestText.startsWith('/')) return;
-
-    const roster = buildGroupChatRosterEntries(settings);
-    if (roster.length === 0) return;
-    if (Math.random() >= (settings.responseProbability / 100)) return;
-
+function selectGroupChatContacts(candidates, settings) {
     const responders = [];
-    const pool = [...roster];
+    const pool = [...candidates];
     const firstResponder = pickRandomGroupResponder(pool);
-    if (!firstResponder) return;
+    if (!firstResponder) return responders;
     responders.push(firstResponder);
     const firstIndex = pool.findIndex((entry) => entry.name === firstResponder.name && entry.type === firstResponder.type);
     if (firstIndex !== -1) pool.splice(firstIndex, 1);
@@ -1184,9 +1191,65 @@ async function triggerGroupChatResponses() {
         const nextIndex = pool.findIndex((entry) => entry.name === nextResponder.name && entry.type === nextResponder.type);
         if (nextIndex !== -1) pool.splice(nextIndex, 1);
     }
+    return responders;
+}
 
-    for (const responder of responders) {
-        const reply = await generateGroupChatReply(responder, roster);
+function shouldSuppressMainCharacter(settings) {
+    if (settings.includeMainCharacter !== true) return true;
+    return Math.random() < (settings.contactOnlyProbability / 100);
+}
+
+function planGroupChatTurn() {
+    const settings = getGroupChatRuntimeSettings();
+    if (!settings.enabled) return null;
+    const ctx = getContext();
+    const latestMessage = ctx?.chat?.[ctx.chat.length - 1];
+    if (!latestMessage?.is_user) return null;
+    const latestText = normalizeGroupChatText(latestMessage.mes || '');
+    if (!latestText || latestText.startsWith('/')) return null;
+
+    const roster = buildGroupChatRosterEntries(settings);
+    const contactRoster = buildGroupChatContactRoster();
+    if (roster.length === 0 || contactRoster.length === 0) return null;
+    if (Math.random() >= (settings.responseProbability / 100)) return null;
+
+    const suppressMainCharacterReply = shouldSuppressMainCharacter(settings);
+    const responders = selectGroupChatContacts(contactRoster, settings);
+    if (responders.length === 0) return null;
+
+    return {
+        userMessageIndex: Number(ctx.chat.length - 1),
+        suppressMainCharacterReply,
+        responders,
+        roster,
+    };
+}
+
+let pendingGroupChatTurn = null;
+let isGroupChatExecutionInFlight = false;
+
+async function executePlannedGroupChatTurn(plan) {
+    if (!plan?.responders?.length) return;
+    const ctx = getContext();
+    if (!ctx) return;
+    const latestIdx = Number((ctx.chat?.length ?? 0) - 1);
+    if (!Number.isFinite(latestIdx) || latestIdx <= Number(plan.userMessageIndex)) return;
+    if (!ctx.chat?.[plan.userMessageIndex]?.is_user) return;
+
+    if (plan.suppressMainCharacterReply) {
+        const latestMsg = ctx.chat?.[latestIdx];
+        const canDeleteLastReply = Number.isFinite(latestIdx)
+            && latestIdx >= 0
+            && latestMsg
+            && !latestMsg.is_user
+            && typeof ctx.executeSlashCommandsWithOptions === 'function';
+        if (canDeleteLastReply) {
+            await ctx.executeSlashCommandsWithOptions(`/cut ${latestIdx}`, { showOutput: false });
+        }
+    }
+
+    for (const responder of plan.responders) {
+        const reply = await generateGroupChatReply(responder, plan.roster);
         if (!reply) continue;
         await slashSendAs(responder.displayName || responder.name, reply);
     }
@@ -1398,6 +1461,33 @@ function openSettingsPanel(onBack) {
         groupChatExtraRow.append(groupChatExtraLbl, groupChatExtraInput, groupChatExtraPctLbl, groupChatExtraApplyBtn);
         wrapper.appendChild(groupChatExtraRow);
 
+        const groupChatContactOnlyRow = document.createElement('div');
+        groupChatContactOnlyRow.className = 'slm-input-row';
+        groupChatContactOnlyRow.style.marginTop = '8px';
+        const groupChatContactOnlyLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '연락처만 응답 확률:' });
+        const groupChatContactOnlyInput = Object.assign(document.createElement('input'), {
+            className: 'slm-input slm-input-sm',
+            type: 'number',
+            min: '0',
+            max: '100',
+            value: String(settings.groupChat?.contactOnlyProbability ?? GROUP_CHAT_SETTINGS_DEFAULTS.contactOnlyProbability),
+        });
+        groupChatContactOnlyInput.style.width = '70px';
+        const groupChatContactOnlyPctLbl = Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '%' });
+        const groupChatContactOnlyApplyBtn = document.createElement('button');
+        groupChatContactOnlyApplyBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
+        groupChatContactOnlyApplyBtn.textContent = '적용';
+        groupChatContactOnlyApplyBtn.onclick = () => {
+            if (!settings.groupChat) settings.groupChat = { ...GROUP_CHAT_SETTINGS_DEFAULTS };
+            const val = parseInt(groupChatContactOnlyInput.value, 10);
+            settings.groupChat.contactOnlyProbability = Math.max(0, Math.min(100, Number.isNaN(val) ? GROUP_CHAT_SETTINGS_DEFAULTS.contactOnlyProbability : val));
+            groupChatContactOnlyInput.value = String(settings.groupChat.contactOnlyProbability);
+            saveSettings();
+            showToast(`연락처만 응답 확률: ${settings.groupChat.contactOnlyProbability}%`, 'success', 1500);
+        };
+        groupChatContactOnlyRow.append(groupChatContactOnlyLbl, groupChatContactOnlyInput, groupChatContactOnlyPctLbl, groupChatContactOnlyApplyBtn);
+        wrapper.appendChild(groupChatContactOnlyRow);
+
         const groupChatMaxRow = document.createElement('div');
         groupChatMaxRow.className = 'slm-input-row';
         groupChatMaxRow.style.marginTop = '8px';
@@ -1429,7 +1519,7 @@ function openSettingsPanel(onBack) {
         groupChatHint.style.fontSize = '12px';
         groupChatHint.style.opacity = '0.8';
         groupChatHint.style.marginTop = '6px';
-        groupChatHint.textContent = '참여자는 연락처 편집에서 "단톡 자동 응답 참여 가능"을 켜서 지정합니다.';
+        groupChatHint.textContent = '연락처만 응답 확률이 발동하면 이번 턴의 기본 {{char}} 응답은 지우고, 체크된 연락처가 무작위로 답합니다.';
         wrapper.appendChild(groupChatHint);
 
         wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
@@ -3812,7 +3902,6 @@ async function init() {
     if (evSrc && eventTypes?.MESSAGE_SENT) {
         let snsTriggerInFlight = false;
         let snsReactionInFlight = false;
-        let groupChatInFlight = false;
         evSrc.on(eventTypes.MESSAGE_SENT, () => {
             if (isModuleEnabled('sns')) {
                 const prob = (getSettings().snsPostingProbability ?? 10) / 100;
@@ -3837,12 +3926,7 @@ async function init() {
                         .catch(e => console.error('[ST-LifeSim] 선전화 트리거 오류:', e));
                 }
             }
-            if (!groupChatInFlight) {
-                groupChatInFlight = true;
-                triggerGroupChatResponses()
-                    .catch((e) => console.error('[ST-LifeSim] 단톡 자동 응답 오류:', e))
-                    .finally(() => { groupChatInFlight = false; });
-            }
+            pendingGroupChatTurn = planGroupChatTurn();
         });
     }
 
@@ -3852,6 +3936,14 @@ async function init() {
             trackGifticonUsageFromCharacterMessage();
             await applyCharacterEmoticonDisplayMode().catch((e) => console.error('[ST-LifeSim] 이모티콘 표시 모드 적용 오류:', e));
             await applyCharacterImageDisplayMode().catch((e) => console.error('[ST-LifeSim] 이미지 표시 모드 적용 오류:', e));
+            if (!isGroupChatExecutionInFlight && pendingGroupChatTurn) {
+                const plan = pendingGroupChatTurn;
+                pendingGroupChatTurn = null;
+                isGroupChatExecutionInFlight = true;
+                await executePlannedGroupChatTurn(plan)
+                    .catch((e) => console.error('[ST-LifeSim] 단톡 자동 응답 오류:', e))
+                    .finally(() => { isGroupChatExecutionInFlight = false; });
+            }
         });
     }
 
