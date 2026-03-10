@@ -369,21 +369,22 @@ function buildContactsContent() {
     const actionRow = document.createElement('div');
     actionRow.className = 'slm-btn-row';
     actionRow.style.marginBottom = '8px';
-    const addBtn = document.createElement('button');
-    addBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
-    addBtn.textContent = '+ 새 연락처';
-    addBtn.onclick = () => openContactDialog(null, 'chat', renderList);
-    const aiAddBtn = document.createElement('button');
-    aiAddBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
-    aiAddBtn.textContent = '🤖 AI 생성';
-    aiAddBtn.onclick = () => openAiContactDialog('chat', renderList);
-    const refreshBtn = document.createElement('button');
-    refreshBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
-    refreshBtn.textContent = '🔄 갱신';
-    refreshBtn.onclick = () => {
+    const syncAndRenderList = () => {
         refreshAutoContacts();
         renderList();
     };
+    const addBtn = document.createElement('button');
+    addBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
+    addBtn.textContent = '+ 새 연락처';
+    addBtn.onclick = () => openContactDialog(null, 'chat', syncAndRenderList);
+    const aiAddBtn = document.createElement('button');
+    aiAddBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
+    aiAddBtn.textContent = '🤖 AI 생성';
+    aiAddBtn.onclick = () => openAiContactDialog('chat', syncAndRenderList);
+    const refreshBtn = document.createElement('button');
+    refreshBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
+    refreshBtn.textContent = '🔄 갱신';
+    refreshBtn.onclick = () => syncAndRenderList();
     actionRow.appendChild(addBtn);
     actionRow.appendChild(aiAddBtn);
     actionRow.appendChild(refreshBtn);
@@ -480,7 +481,7 @@ function buildContactsContent() {
             const editBtn = document.createElement('button');
             editBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
             editBtn.textContent = '편집';
-            editBtn.onclick = (e) => { e.stopPropagation(); openContactDialog(contact, contact.binding || 'chat', renderList); };
+            editBtn.onclick = (e) => { e.stopPropagation(); openContactDialog(contact, contact.binding || 'chat', syncAndRenderList); };
 
             // 삭제 버튼
             const delBtn = document.createElement('button');
@@ -491,7 +492,7 @@ function buildContactsContent() {
                 const targetBinding = contact.binding || 'chat';
                 const updated = loadContacts(targetBinding).filter(c => c.id !== contact.id);
                 saveContacts(updated, targetBinding);
-                renderList();
+                syncAndRenderList();
                 showToast('연락처 삭제', 'success', 1500);
             };
 
@@ -504,7 +505,7 @@ function buildContactsContent() {
         });
     }
 
-    renderList();
+    syncAndRenderList();
     return wrapper;
 }
 

@@ -1041,6 +1041,18 @@ function buildGroupChatContactPool() {
 function buildGroupChatRosterEntries(settings) {
     const ctx = getContext();
     const roster = [];
+    if (ctx?.name1) {
+        roster.push({
+            type: 'user',
+            name: ctx.name1,
+            displayName: ctx.name1,
+            relationToUser: '본인 (인간 플레이어)',
+            relationToChar: '',
+            personality: '',
+            description: 'Human player controlling the conversation. Never write this person\'s messages for them.',
+            avatar: '',
+        });
+    }
     if (settings.includeMainCharacter && ctx?.name2) {
         roster.push({
             type: 'char',
@@ -1090,7 +1102,7 @@ function normalizeGroupChatText(text) {
         .trim();
 }
 
-function sanitizeGroupChatReply(text, responderName) {
+function sanitizeGroupChatReply(text, responderName, roster = []) {
     // 응답 텍스트를 정리하고, 모델이 붙인 화자명/불필요한 접두어를 함께 제거한다.
     let cleaned = normalizeGroupChatText(text);
     if (!cleaned) return '';
@@ -1102,6 +1114,33 @@ function sanitizeGroupChatReply(text, responderName) {
     prefixPatterns.forEach((pattern) => {
         cleaned = cleaned.replace(pattern, '');
     });
+    const ctx = getContext();
+    const participantNames = [
+        responderName,
+        ctx?.name1,
+        ctx?.name2,
+        ...roster.map((entry) => entry?.displayName || entry?.name),
+    ]
+        .map((name) => String(name || '').trim())
+        .filter(Boolean);
+    const uniqueNames = [...new Set(participantNames)];
+    let earliestForeignSpeakerIndex = -1;
+    uniqueNames
+        .filter((name) => name.toLowerCase() !== String(responderName || '').trim().toLowerCase())
+        .sort((a, b) => b.length - a.length)
+        .forEach((name) => {
+            const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const match = cleaned.match(new RegExp(`(^|\\n)\\s*${escaped}\\s*[:：-]\\s*`, 'i'));
+            if (!match) return;
+            const index = match.index ?? -1;
+            if (earliestForeignSpeakerIndex === -1 || (index !== -1 && index < earliestForeignSpeakerIndex)) {
+                earliestForeignSpeakerIndex = index;
+            }
+        });
+    if (earliestForeignSpeakerIndex === 0) return '';
+    if (earliestForeignSpeakerIndex > 0) {
+        cleaned = cleaned.slice(0, earliestForeignSpeakerIndex).trim();
+    }
     cleaned = cleaned.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
     return cleaned;
 }
@@ -1137,6 +1176,8 @@ async function generateGroupChatReply(responder, roster) {
         'This is a mobile messenger group chat involving {{user}} and the listed participants.',
         'Rules:',
         `- Reply only as ${responder.displayName}. Never narrate or describe actions outside the message.`,
+        '- {{user}} is the human player. Never write {{user}}\'s dialogue, reactions, choices, or actions.',
+        '- Stay inside this same group-chat room context. Do not turn it into a private 1:1 conversation.',
         '- Keep it to 1-3 natural chat sentences.',
         '- Continue the ongoing conversation naturally, acknowledging the latest flow of the chat.',
         '- Match the responder profile, relationship, and speaking style below.',
@@ -1166,7 +1207,7 @@ async function generateGroupChatReply(responder, roster) {
     } else if (typeof ctx.generateRaw === 'function') {
         rawReply = await ctx.generateRaw({ prompt, quietToLoud: false, trimNames: true });
     }
-    return sanitizeGroupChatReply(rawReply, responder.displayName);
+    return sanitizeGroupChatReply(rawReply, responder.displayName, roster);
 }
 
 function pickRandomGroupResponder(candidates) {
@@ -1248,7 +1289,12 @@ async function executePlannedGroupChatTurn(plan) {
         }
     }
 
+    const userName = String(ctx?.name1 || '{{user}}').trim().toLowerCase();
     for (const responder of plan.responders) {
+        const responderNames = [responder?.displayName, responder?.name]
+            .map((name) => String(name || '').trim().toLowerCase())
+            .filter(Boolean);
+        if (responderNames.includes(userName)) continue;
         const reply = await generateGroupChatReply(responder, plan.roster);
         if (!reply) continue;
         await slashSendAs(responder.displayName || responder.name, reply);
