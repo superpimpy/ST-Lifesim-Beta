@@ -17,6 +17,7 @@ import { applyProfileImageStyle, normalizeProfileImageStyle, readImageFileAsData
 
 const MODULE_KEY = 'contacts';
 const MAX_AI_CONTACT_KEYWORD_LENGTH = 200;
+const LEGACY_CONTACT_ID_FIELDS = ['name', 'displayName', 'subName'];
 const MODEL_KEY_BY_SOURCE = {
     openai: 'openai_model',
     claude: 'claude_model',
@@ -73,11 +74,13 @@ const MODEL_KEY_BY_SOURCE = {
 function buildLegacyContactId(contact, binding) {
     const seed = [
         binding,
-        String(contact?.name || '').trim().toLowerCase(),
-        String(contact?.displayName || '').trim().toLowerCase(),
-        String(contact?.subName || '').trim().toLowerCase(),
+        ...LEGACY_CONTACT_ID_FIELDS.map((field) => String(contact?.[field] || '').trim().toLowerCase()),
     ].join(':');
     return `legacy:${seed}`;
+}
+
+function isGroupChatContact(contact) {
+    return contact?.groupChatParticipant === true && !contact?.isUserAuto && !contact?.isCharAuto;
 }
 
 function normalizeContact(contact, binding = 'chat') {
@@ -102,7 +105,7 @@ function normalizeContact(contact, binding = 'chat') {
         binding: normalizedBinding,
         isCharAuto,
         isUserAuto,
-        groupChatParticipant: isUserAuto ? false : contact.groupChatParticipant === true,
+        groupChatParticipant: isGroupChatContact({ ...contact, isCharAuto, isUserAuto }),
     };
 }
 
@@ -297,7 +300,7 @@ export function initContacts() {
             return line;
         });
 
-        const groupParticipants = all.filter((contact) => contact?.groupChatParticipant === true && !contact?.isUserAuto && !contact?.isCharAuto);
+        const groupParticipants = all.filter(isGroupChatContact);
         const groupLines = groupParticipants.map((contact) => {
             let line = `• ${getContactDisplayName(contact)}`;
             if (contact.relationToUser) line += ` | Relation to {{user}}: ${contact.relationToUser}`;
@@ -802,8 +805,8 @@ function openContactDialog(existing, defaultBinding, onSave) {
         const groupChatParticipant = isUserAuto
             ? false
             : isCharAuto
-                ? !!existing?.groupChatParticipant
-            : groupParticipantCheck.checked;
+                ? isGroupChatContact(existing)
+                : groupParticipantCheck.checked;
         const data = {
             id: existing?.id || generateId(),
             name: canonicalName,
