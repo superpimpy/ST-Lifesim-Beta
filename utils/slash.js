@@ -5,6 +5,8 @@
  */
 
 import { getContext } from './st-context.js';
+import { getContacts } from '../modules/contacts/contacts.js';
+import { applyProfileImageStyle } from './profile-image.js';
 
 /**
  * 슬래시 커맨드를 실행하는 내부 함수
@@ -27,6 +29,55 @@ async function run(command) {
     }
 }
 
+function findContactByName(name) {
+    const requested = String(name || '').trim().toLowerCase();
+    if (!requested) return null;
+    const allContacts = [...getContacts('character'), ...getContacts('chat')];
+    return allContacts.find((contact) => [contact?.name, contact?.displayName, contact?.subName]
+        .map((value) => String(value || '').trim().toLowerCase())
+        .filter(Boolean)
+        .includes(requested)) || null;
+}
+
+async function applyLatestSendAsContactAvatar(name) {
+    const contact = findContactByName(name);
+    if (!contact?.avatar) return;
+    const ctx = getContext();
+    const msgIdx = Number((ctx?.chat?.length ?? 0) - 1);
+    if (!Number.isFinite(msgIdx) || msgIdx < 0) return;
+    const lastMsg = ctx?.chat?.[msgIdx];
+    if (!lastMsg || lastMsg.is_user) return;
+    lastMsg.force_avatar = contact.avatar;
+    lastMsg.original_avatar = contact.avatar;
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    try {
+        const msgEl = document.querySelector(`.mes[mesid="${msgIdx}"]`);
+        const avatarFrame = msgEl?.querySelector('.mesAvatar, .avatar');
+        const existingImg = avatarFrame?.querySelector('img');
+        const avatarImg = existingImg || (avatarFrame ? document.createElement('img') : null);
+        if (avatarFrame && avatarImg) {
+            avatarImg.src = contact.avatar;
+            avatarImg.alt = String(name || contact.displayName || contact.name || 'avatar');
+            avatarImg.removeAttribute('srcset');
+            applyProfileImageStyle(
+                avatarFrame,
+                avatarImg,
+                contact.avatarStyle,
+                { width: 40, height: 40, scale: 100, positionX: 50, positionY: 50 },
+            );
+            if (!existingImg) avatarFrame.appendChild(avatarImg);
+        }
+    } catch (error) {
+        console.warn('[ST-LifeSim] /sendas 연락처 프사 적용 실패:', error);
+    }
+
+    if (typeof ctx?.saveChat === 'function') {
+        await ctx.saveChat();
+    }
+}
+
 /**
  * 유저 말풍선으로 텍스트를 전송한다 (AI 응답 없음)
  * @param {string} text - 전송할 텍스트
@@ -43,6 +94,7 @@ export async function slashSend(text) {
  */
 export async function slashSendAs(name, text) {
     await run(`/sendas name="${name}" ${text}`);
+    await applyLatestSendAsContactAvatar(name);
 }
 
 /**

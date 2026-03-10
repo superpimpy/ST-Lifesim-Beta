@@ -62,6 +62,7 @@ const MODEL_KEY_BY_SOURCE = {
  * @property {'chat'|'character'} binding
  * @property {boolean} [isCharAuto] - {{char}} 자동 추가 여부
  * @property {boolean} [isUserAuto] - {{user}} 자동 추가 여부
+ * @property {boolean} [groupChatParticipant] - 단톡 자동 응답 참여 여부
  */
 
 /**
@@ -88,6 +89,10 @@ function getAvatarStyle(contact, defaults) {
 
 function getContactDisplayName(contact) {
     return String(contact?.displayName || contact?.name || '').trim();
+}
+
+function loadAllContacts() {
+    return [...loadContacts('chat'), ...loadContacts('character')];
 }
 
 /**
@@ -232,9 +237,7 @@ function refreshAutoContacts() {
 export function initContacts() {
     // 컨텍스트 빌더 등록
     registerContextBuilder('contacts', () => {
-        const chatContacts = loadContacts('chat');
-        const charContacts = loadContacts('character');
-        const all = [...chatContacts, ...charContacts];
+        const all = loadAllContacts();
 
         if (all.length === 0) return null;
 
@@ -246,7 +249,20 @@ export function initContacts() {
             return line;
         });
 
-        return `=== Contacts ===\n${lines.join('\n')}\n→ These characters may contact {{user}} or be mentioned in {{char}}'s conversation at any time.`;
+        const groupParticipants = all.filter((contact) => contact?.groupChatParticipant && !contact?.isUserAuto);
+        const groupLines = groupParticipants.map((contact) => {
+            let line = `• ${getContactDisplayName(contact)}`;
+            if (contact.relationToUser) line += ` | Relation to {{user}}: ${contact.relationToUser}`;
+            if (contact.personality) line += ` | Personality: ${contact.personality}`;
+            return line;
+        });
+
+        return [
+            `=== Contacts ===\n${lines.join('\n')}\n→ These characters may contact {{user}} or be mentioned in {{char}}'s conversation at any time.`,
+            groupLines.length
+                ? `=== Group Chat Participants ===\n${groupLines.join('\n')}\n→ When group chat mode is enabled, only these contacts may join the conversation.`
+                : '',
+        ].filter(Boolean).join('\n\n');
     });
 
     // 채팅 로드 시 {{char}} 자동 추가
@@ -384,6 +400,12 @@ function buildContactsContent() {
                 scope.textContent = contact.binding === 'character' ? '캐릭터' : '이 채팅';
                 nameRow.appendChild(scope);
             }
+            if (contact.groupChatParticipant) {
+                const groupTag = document.createElement('span');
+                groupTag.className = 'slm-contact-scope';
+                groupTag.textContent = '단톡';
+                nameRow.appendChild(groupTag);
+            }
 
             const rel = document.createElement('span');
             rel.className = 'slm-contact-rel';
@@ -474,6 +496,7 @@ function openContactDetailPopup(contact) {
         { label: '관계', value: contact.relationToUser },
         { label: '성격/말투', value: contact.personality },
         { label: '외관 태그', value: contact.appearanceTags },
+        { label: '단톡 참여', value: contact.groupChatParticipant ? '활성화' : '' },
     ];
 
     fieldDefs.forEach(({ label, value }) => {
@@ -519,6 +542,15 @@ function openContactDialog(existing, defaultBinding, onSave) {
         personality: createFormField(wrapper, '성격/말투', 'text', existing?.personality || ''),
         appearanceTags: createFormField(wrapper, '🏷️ 외관 태그 (이미지 생성용)', 'text', existing?.appearanceTags || ''),
     };
+    const groupParticipantWrap = document.createElement('label');
+    groupParticipantWrap.className = 'slm-toggle-label';
+    groupParticipantWrap.style.marginTop = '4px';
+    const groupParticipantCheck = document.createElement('input');
+    groupParticipantCheck.type = 'checkbox';
+    groupParticipantCheck.checked = existing?.groupChatParticipant === true;
+    groupParticipantWrap.appendChild(groupParticipantCheck);
+    groupParticipantWrap.appendChild(document.createTextNode(' 단톡 자동 응답 참여 가능'));
+    fields.appearanceTags.insertAdjacentElement('afterend', groupParticipantWrap);
     const initialAvatarStyle = getAvatarStyle(existing, { width: 72, height: 72, scale: 100, positionX: 50, positionY: 50 });
     const avatarActionRow = document.createElement('div');
     avatarActionRow.className = 'slm-input-row';
@@ -657,6 +689,10 @@ function openContactDialog(existing, defaultBinding, onSave) {
         fields.description.disabled = true;
         fields.relationToUser.disabled = true;
     }
+    if (existing?.isCharAuto || existing?.isUserAuto) {
+        groupParticipantCheck.disabled = true;
+        groupParticipantWrap.style.opacity = '0.65';
+    }
     let selectedBinding = existing?.binding || defaultBinding || 'chat';
     if (!existing?.isCharAuto && !existing?.isUserAuto) {
         const bindingLbl = document.createElement('label');
@@ -729,6 +765,7 @@ function openContactDialog(existing, defaultBinding, onSave) {
             phone: '',
             tags: existing?.tags || [],
             appearanceTags: fields.appearanceTags.value.trim(),
+            groupChatParticipant: (isCharAuto || isUserAuto) ? !!existing?.groupChatParticipant : groupParticipantCheck.checked,
             binding: targetBinding,
             isCharAuto,
             isUserAuto,
@@ -825,6 +862,7 @@ function openAiContactDialog(binding, onSave) {
                 personality: (parsed.personality || '').trim(),
                 phone: '',
                 tags: [],
+                groupChatParticipant: false,
                 binding,
             });
             saveContacts(contacts, binding);
