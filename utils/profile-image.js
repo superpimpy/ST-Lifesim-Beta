@@ -20,6 +20,8 @@ export function normalizeProfileImageStyle(rawStyle, defaults = {}) {
     const fallbackWidth = clampDimension(defaults.width, 40);
     const fallbackHeight = clampDimension(defaults.height, fallbackWidth);
     return {
+        // 아바타 프레임 크기는 사용 지점의 기본값을 고정으로 따르고,
+        // 저장값은 크롭(확대/위치) 정보만 유지한다. 이전 width/height 값은 무시한다.
         width: fallbackWidth,
         height: fallbackHeight,
         positionX: clampPercent(rawStyle?.positionX, clampPercent(defaults.positionX, 50)),

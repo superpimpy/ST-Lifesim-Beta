@@ -16,6 +16,7 @@ import { createPopup } from '../../utils/popup.js';
 import { getContacts, getAppearanceTagsByName } from '../contacts/contacts.js';
 import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
 import { applyProfileImageStyle, normalizeProfileImageStyle, readImageFileAsDataUrl } from '../../utils/profile-image.js';
+import { isHtmlTextResponse } from '../../utils/text-response.js';
 
 const MODULE_KEY = 'sns-feed';
 const AVATARS_KEY = 'sns-avatars';
@@ -33,7 +34,6 @@ const SNS_POST_TEXT_MAX = 280;
 const SNS_IMAGE_DESC_MAX = 220;
 const SNS_RANDOM_LIKES_BONUS_MAX = 30;
 const DANBOORU_SPACE_TAG_RULE = 'Use English Danbooru-style tags only, separated by commas, with spaces instead of underscores.';
-const HTML_RESPONSE_REGEX = /<(?:!doctype|html|head|body|h1|p|div|span|title)\b/i;
 const DEFAULT_SNS_PROMPTS = {
     postChar: 'Write exactly one SNS post as {{charName}}.\n\n* Before writing, internalize these:\n- {{charName}}\'s personality, speech patterns, and worldview based on profile.\n- Extract the setting and genre from {{charName}}\'s profile itself — it could be modern, medieval fantasy, zombie apocalypse, sci-fi, or anything else. Let that world shape what feels natural to say and how to say it\n- What {{charName}} would actually care about or casually mention on a given day\n--------\n* {{charName}}\'s profile:\n{{personality}}\n--------\n* System Rules:\n- 1–4 sentences, casual and off-the-cuff, like a real personal post\n- Write in the voice and language style that fits {{charName}}\'s background and personality\n- If {{charName}}\'s personality strongly suggests they\'d use emojis, you may include them — otherwise, don\'t\n- No hashtags, no image tags, no quotation marks, no other characters\' reactions, no [caption: ...] blocks\n- Word choice, references, and tone must stay true to the detected world — never bleed in elements from the wrong setting\n- Don\'t be stiff or formal. This is a glimpse into {{charName}}\'s actual inner life, not a public announcement\n\n* System Note\n- Output only {{charName}}\'s post text. Nothing else.\n- Please comply with the output language.\n* This is a post aimed at an unspecified number of people. It is not a 1:1 session to communicate with {{user}}.',
     postContact: 'Write exactly one SNS post as {{authorName}}.\n\n* Before writing, internalize these:\n- {{authorName}}\'s personality, speech patterns, and worldview based on profile.\n- Extract the setting and genre from {{authorName}}\'s profile itself — it could be modern, medieval fantasy, zombie apocalypse, sci-fi, or anything else. Let that world shape what feels natural to say and how to say it\n- What {{authorName}} would actually care about or casually mention on a given day\n-------\n* {{authorName}}\'s profile:\n{{personality}}\n-------\n* System Rules:\n- 1–2 sentences, casual and off-the-cuff, like a real personal post\n- Write in the voice and language style that fits {{authorName}}\'s background and personality\n- If {{authorName}}\'s personality strongly suggests they\'d use emojis, you may include them — otherwise, don\'t\n- No hashtags, no image tags, no quotation marks, no other characters\' reactions, no [caption: ...] blocks\n- Word choice, references, and tone must stay true to the detected world — never bleed in elements from the wrong setting\n- Don\'t be stiff or formal. This is a glimpse into {{authorName}}\'s actual inner life, not a public announcement\n\n* System Note\n- Output only {{authorName}}\'s post text. Nothing else.\n- Please comply with the output language.',
@@ -1400,7 +1400,7 @@ async function generateSnsText(ctx, quietPrompt, quietName, routeKey = 'sns') {
             if (response.ok) {
                 const rawText = await response.text();
                 const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
-                if (contentType.includes('text/html') || HTML_RESPONSE_REGEX.test(rawText || '')) {
+                if (isHtmlTextResponse(rawText, contentType)) {
                     console.warn('[ST-LifeSim] SNS 외부 API가 HTML 응답을 반환하여 무시합니다.');
                 } else {
                     try {
@@ -2169,9 +2169,10 @@ function openAvatarSettingsDialog(onUpdate) {
                 onUpdate();
                 renderContactList();
             };
-            avatarScaleInput.oninput = saveDraftAvatarStyle;
-            avatarPositionXInput.oninput = saveDraftAvatarStyle;
-            avatarPositionYInput.oninput = saveDraftAvatarStyle;
+            [avatarScaleInput, avatarPositionXInput, avatarPositionYInput].forEach((input) => {
+                input.addEventListener('input', renderAvatarPreview);
+                input.addEventListener('change', saveDraftAvatarStyle);
+            });
             avatarInput.addEventListener('input', renderAvatarPreview);
             const avatarCropRow = document.createElement('div');
             avatarCropRow.className = 'slm-input-row';
