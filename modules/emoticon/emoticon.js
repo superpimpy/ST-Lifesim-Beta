@@ -40,6 +40,11 @@ const MODULE_KEY = 'emoticons';
 const CATEGORY_AI_KEY = 'emoticon-category-ai';
 const CHAR_CATEGORY_AI_KEY = 'emoticon-char-category-ai';
 const CATEGORY_VISIBILITY_KEY = 'emoticon-category-visibility';
+// 지원 형식:
+// - [[emoticon:이름]]
+// - <emoticon:이름>
+const AI_EMOTICON_TOKEN_REGEX = /\[\[\s*emoticon\s*:\s*([^\]]+?)\s*\]\]|<\s*emoticon\s*:\s*([^>]+?)\s*>/gi;
+const AI_EMOTICON_BULLET_LINE_REGEX = /^[•*-]\s+(.+)$/;
 
 /**
  * @typedef {Object} Emoticon
@@ -143,10 +148,13 @@ function getAiUsableEmoticons() {
 
 function buildEmoticonHtml(emoticon, senderName) {
     if (!emoticon) return '';
+    const emoticonName = normalizeEmoticonName(emoticon.name);
+    const emoticonUrl = String(emoticon.url || '').trim();
+    if (!emoticonName || !emoticonUrl) return '';
     const size = getEmoticonSize();
     const radius = getEmoticonRadius();
-    const safeName = escapeHtml(emoticon.name);
-    const safeUrl = escapeHtml(emoticon.url);
+    const safeName = escapeHtml(emoticonName);
+    const safeUrl = escapeHtml(emoticonUrl);
     const safeSenderName = escapeHtml(senderName || '{{char}}');
     const label = `${safeSenderName}이(가) ${safeName} 이모티콘을 보냈습니다.`;
     return `<img src="${safeUrl}" alt="${safeName}" aria-label="${label}" style="width:${size}px;height:${size}px;object-fit:contain;display:inline-block;vertical-align:middle;border-radius:${radius}px">`;
@@ -156,10 +164,14 @@ function normalizeEmoticonName(value) {
     return String(value || '').trim();
 }
 
+function isSafeEmoticonTokenName(value) {
+    return value && !/[<>]/.test(value);
+}
+
 function resolveAiEmoticonHtmlMap(senderName) {
     const htmlMap = new Map();
     getAiUsableEmoticons().forEach((emoticon) => {
-        const normalizedName = normalizeEmoticonName(emoticon?.name).toLowerCase();
+        const normalizedName = normalizeEmoticonName(emoticon.name).toLowerCase();
         if (!normalizedName || htmlMap.has(normalizedName)) return;
         htmlMap.set(normalizedName, buildEmoticonHtml(emoticon, senderName));
     });
@@ -172,6 +184,7 @@ function resolveAiEmoticonHtmlMap(senderName) {
  * - [[emoticon:이름]]
  * - <emoticon:이름>
  * - 메시지 한 줄이 이모티콘 이름만 단독으로 있는 경우
+ * - 메시지 한 줄이 "• 이름" 같은 bullet 형식인 경우
  * @param {string} text
  * @param {string} senderName
  * @returns {string}
@@ -183,11 +196,13 @@ export function replaceAiSelectedEmoticons(text, senderName = '{{char}}') {
     if (htmlMap.size === 0) return source;
 
     const resolveToken = (rawName) => {
-        const normalizedName = normalizeEmoticonName(rawName).toLowerCase();
+        const normalizedSource = normalizeEmoticonName(rawName);
+        if (!isSafeEmoticonTokenName(normalizedSource)) return null;
+        const normalizedName = normalizedSource.toLowerCase();
         return htmlMap.get(normalizedName) || null;
     };
 
-    let replaced = source.replace(/\[\[\s*emoticon\s*:\s*([^\]]+?)\s*\]\]|<\s*emoticon\s*:\s*([^>]+?)\s*>/gi, (match, bracketName, angleName) => {
+    let replaced = source.replace(AI_EMOTICON_TOKEN_REGEX, (match, bracketName, angleName) => {
         const resolved = resolveToken(bracketName || angleName);
         return resolved || match;
     });
@@ -196,10 +211,10 @@ export function replaceAiSelectedEmoticons(text, senderName = '{{char}}') {
         .split('\n')
         .map((line) => {
             const trimmedLine = line.trim();
-            if (!trimmedLine || trimmedLine.includes('<img ')) return line;
+            if (!trimmedLine) return line;
             const resolved = resolveToken(trimmedLine);
             if (resolved) return resolved;
-            const bulletMatch = trimmedLine.match(/^[•*-]\s+(.+)$/);
+            const bulletMatch = trimmedLine.match(AI_EMOTICON_BULLET_LINE_REGEX);
             if (!bulletMatch) return line;
             return resolveToken(bulletMatch[1]) || line;
         })
@@ -220,16 +235,19 @@ export function initEmoticon() {
         const aiEmoticons = getAiUsableEmoticons();
         if (aiEmoticons.length === 0) return null;
         const list = [...new Set(aiEmoticons
-            .map(e => normalizeEmoticonName(e?.name))
+            .map(e => normalizeEmoticonName(e.name))
             .filter(Boolean))]
             .map(name => `• ${name}`)
             .join('\n');
         return [
             '<당신이 사용할 수 있는 이모티콘 목록입니다>',
+            '<Available emoticons you can use>',
             list,
             '',
             '이모티콘을 보내고 싶다면 위 목록에서 정확히 하나를 골라 [[emoticon:이름]] 형식으로만 출력하세요.',
+            'If you want to send one, choose exactly one name from the list and output only [[emoticon:NAME]].',
             '이모티콘용 HTML, 이미지 URL, markdown, 설명은 직접 출력하지 마세요.',
+            'Do not output emoticon HTML, image URLs, markdown, or explanations directly.',
         ].join('\n');
     });
 }

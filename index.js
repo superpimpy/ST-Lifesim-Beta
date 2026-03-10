@@ -3254,6 +3254,7 @@ async function applyCharacterEmoticonDisplayMode() {
     if (updatedMes === mes) return;
 
     lastMsg.mes = updatedMes;
+    // DOM mesid는 숫자 인덱스를 사용하므로 lastMsg 참조와 별개로 마지막 메시지 인덱스를 구한다.
     const msgIdx = Number(ctx.chat.length - 1);
     if (Number.isFinite(msgIdx) && msgIdx >= 0) {
         try {
