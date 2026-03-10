@@ -16,6 +16,7 @@ import { getExtensionSettings } from './storage.js';
 
 // Korean character detection regex (Hangul syllables, Jamo, compatibility Jamo)
 const KOREAN_REGEX = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/;
+const HTML_RESPONSE_REGEX = /<(?:!doctype|html|head|body|h1|p|div|span|title)\b/i;
 
 const MODEL_KEY_BY_SOURCE = {
     openai: 'openai_model',
@@ -247,12 +248,17 @@ export async function generateDanbooruTags(rawPrompt, options) {
                 });
                 if (response.ok) {
                     const rawText = await response.text();
-                    try {
-                        const json = JSON.parse(rawText || 'null');
-                        if (typeof json === 'string') result = json.trim();
-                        else if (typeof json?.text === 'string') result = json.text.trim();
-                    } catch { /* non-JSON 응답은 그대로 사용 */ }
-                    if (!result && rawText) result = rawText.trim();
+                    const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
+                    if (contentType.includes('text/html') || HTML_RESPONSE_REGEX.test(rawText || '')) {
+                        console.warn('[image-tag-generator] 태그 생성 외부 API가 HTML 응답을 반환하여 무시합니다.');
+                    } else {
+                        try {
+                            const json = JSON.parse(rawText || 'null');
+                            if (typeof json === 'string') result = json.trim();
+                            else if (typeof json?.text === 'string') result = json.text.trim();
+                        } catch { /* non-JSON 응답은 그대로 사용 */ }
+                        if (!result && rawText) result = rawText.trim();
+                    }
                 } else {
                     console.warn('[image-tag-generator] 태그 생성 외부 API 응답 오류:', response.status);
                 }

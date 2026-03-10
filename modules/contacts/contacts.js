@@ -58,7 +58,7 @@ const MODEL_KEY_BY_SOURCE = {
  * @property {string} phone
  * @property {string[]} tags
  * @property {string} [appearanceTags] - 외관 태그 (이미지 생성 시 사용)
- * @property {{ width?: number, height?: number, objectFit?: string }} [avatarStyle]
+ * @property {{ positionX?: number, positionY?: number, scale?: number }} [avatarStyle]
  * @property {'chat'|'character'} binding
  * @property {boolean} [isCharAuto] - {{char}} 자동 추가 여부
  * @property {boolean} [isUserAuto] - {{user}} 자동 추가 여부
@@ -352,13 +352,13 @@ function buildContactsContent() {
             // 아바타
             const avatar = document.createElement('div');
             avatar.className = 'slm-contact-avatar';
-            applyProfileImageStyle(avatar, null, getAvatarStyle(contact, { width: 40, height: 40, objectFit: 'cover' }), { width: 40, height: 40, objectFit: 'cover' });
+            applyProfileImageStyle(avatar, null, getAvatarStyle(contact, { width: 40, height: 40, scale: 100, positionX: 50, positionY: 50 }), { width: 40, height: 40, scale: 100, positionX: 50, positionY: 50 });
             if (contact.avatar) {
                 const img = document.createElement('img');
                 img.src = contact.avatar;
                 img.alt = displayName;
                 img.onerror = () => { avatar.textContent = displayName[0] || '?'; };
-                applyProfileImageStyle(avatar, img, getAvatarStyle(contact, { width: 40, height: 40, objectFit: 'cover' }), { width: 40, height: 40, objectFit: 'cover' });
+                applyProfileImageStyle(avatar, img, getAvatarStyle(contact, { width: 40, height: 40, scale: 100, positionX: 50, positionY: 50 }), { width: 40, height: 40, scale: 100, positionX: 50, positionY: 50 });
                 avatar.appendChild(img);
             } else {
                 avatar.textContent = displayName[0] || '?';
@@ -446,13 +446,13 @@ function openContactDetailPopup(contact) {
     // 아바타
     const avatar = document.createElement('div');
     avatar.className = 'slm-contact-detail-avatar';
-    applyProfileImageStyle(avatar, null, getAvatarStyle(contact, { width: 72, height: 72, objectFit: 'cover' }), { width: 72, height: 72, objectFit: 'cover' });
+    applyProfileImageStyle(avatar, null, getAvatarStyle(contact, { width: 72, height: 72, scale: 100, positionX: 50, positionY: 50 }), { width: 72, height: 72, scale: 100, positionX: 50, positionY: 50 });
     if (contact.avatar) {
         const img = document.createElement('img');
         img.src = contact.avatar;
         img.alt = contact.name;
         img.onerror = () => { avatar.textContent = contact.name[0] || '?'; };
-        applyProfileImageStyle(avatar, img, getAvatarStyle(contact, { width: 72, height: 72, objectFit: 'cover' }), { width: 72, height: 72, objectFit: 'cover' });
+        applyProfileImageStyle(avatar, img, getAvatarStyle(contact, { width: 72, height: 72, scale: 100, positionX: 50, positionY: 50 }), { width: 72, height: 72, scale: 100, positionX: 50, positionY: 50 });
         avatar.appendChild(img);
     } else {
         avatar.textContent = contact.name[0] || '?';
@@ -519,7 +519,7 @@ function openContactDialog(existing, defaultBinding, onSave) {
         personality: createFormField(wrapper, '성격/말투', 'text', existing?.personality || ''),
         appearanceTags: createFormField(wrapper, '🏷️ 외관 태그 (이미지 생성용)', 'text', existing?.appearanceTags || ''),
     };
-    const initialAvatarStyle = getAvatarStyle(existing, { width: 72, height: 72, objectFit: 'cover' });
+    const initialAvatarStyle = getAvatarStyle(existing, { width: 72, height: 72, scale: 100, positionX: 50, positionY: 50 });
     const avatarActionRow = document.createElement('div');
     avatarActionRow.className = 'slm-input-row';
     avatarActionRow.style.marginTop = '6px';
@@ -538,60 +538,62 @@ function openContactDialog(existing, defaultBinding, onSave) {
     avatarActionRow.append(avatarUploadBtn, avatarClearBtn, avatarUploadInput);
     fields.avatar.insertAdjacentElement('afterend', avatarActionRow);
 
-    const avatarPreviewLabel = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '아바타 미리보기 / 크기 설정' });
+    const avatarPreviewLabel = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '아바타 미리보기 / 크롭 설정' });
     const avatarPreview = document.createElement('div');
     avatarPreview.className = 'slm-contact-detail-avatar';
     avatarPreview.style.marginBottom = '8px';
-    const avatarSizeRow = document.createElement('div');
-    avatarSizeRow.className = 'slm-input-row';
-    avatarSizeRow.style.marginBottom = '8px';
-    const avatarWidthInput = Object.assign(document.createElement('input'), {
+    const avatarCropRow = document.createElement('div');
+    avatarCropRow.className = 'slm-input-row';
+    avatarCropRow.style.marginBottom = '8px';
+    avatarCropRow.style.alignItems = 'center';
+    avatarCropRow.style.flexWrap = 'wrap';
+    const avatarScaleInput = Object.assign(document.createElement('input'), {
         className: 'slm-input',
-        type: 'number',
-        min: '16',
-        max: '256',
-        value: String(initialAvatarStyle.width),
+        type: 'range',
+        min: '100',
+        max: '250',
+        step: '1',
+        value: String(initialAvatarStyle.scale),
     });
-    avatarWidthInput.style.width = '82px';
-    const avatarHeightInput = Object.assign(document.createElement('input'), {
+    avatarScaleInput.style.width = '140px';
+    const avatarPositionXInput = Object.assign(document.createElement('input'), {
         className: 'slm-input',
-        type: 'number',
-        min: '16',
-        max: '256',
-        value: String(initialAvatarStyle.height),
+        type: 'range',
+        min: '0',
+        max: '100',
+        step: '1',
+        value: String(initialAvatarStyle.positionX),
     });
-    avatarHeightInput.style.width = '82px';
-    const avatarFitSelect = document.createElement('select');
-    avatarFitSelect.className = 'slm-select';
-    [
-        ['cover', '꽉 채우기'],
-        ['contain', '전체 보이기'],
-        ['fill', '늘이기'],
-        ['scale-down', '축소만'],
-    ].forEach(([value, label]) => {
-        avatarFitSelect.appendChild(Object.assign(document.createElement('option'), { value, textContent: label }));
+    avatarPositionXInput.style.width = '140px';
+    const avatarPositionYInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input',
+        type: 'range',
+        min: '0',
+        max: '100',
+        step: '1',
+        value: String(initialAvatarStyle.positionY),
     });
-    avatarFitSelect.value = initialAvatarStyle.objectFit;
-    avatarSizeRow.append(
-        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '너비' }),
-        avatarWidthInput,
-        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '높이' }),
-        avatarHeightInput,
-        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '표시 방식' }),
-        avatarFitSelect,
+    avatarPositionYInput.style.width = '140px';
+    avatarCropRow.append(
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '확대' }),
+        avatarScaleInput,
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '좌우 이동' }),
+        avatarPositionXInput,
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '상하 이동' }),
+        avatarPositionYInput,
     );
     fields.appearanceTags.insertAdjacentElement('afterend', avatarPreviewLabel);
     avatarPreviewLabel.insertAdjacentElement('afterend', avatarPreview);
-    avatarPreview.insertAdjacentElement('afterend', avatarSizeRow);
+    avatarPreview.insertAdjacentElement('afterend', avatarCropRow);
     fields.subName.placeholder = '예: 유레오, ユレオ (이미지 생성 시 이 이름도 인식됩니다)';
     fields.appearanceTags.placeholder = '예: long hair, school uniform, warm smile';
     fields.avatar.placeholder = 'https://... 또는 업로드한 이미지';
 
     const getDraftAvatarStyle = () => normalizeProfileImageStyle({
-        width: avatarWidthInput.value,
-        height: avatarHeightInput.value,
-        objectFit: avatarFitSelect.value,
-    }, { width: 72, height: 72, objectFit: 'cover' });
+        scale: avatarScaleInput.value,
+        positionX: avatarPositionXInput.value,
+        positionY: avatarPositionYInput.value,
+    }, { width: 72, height: 72, scale: 100, positionX: 50, positionY: 50 });
 
     const renderAvatarPreview = () => {
         avatarPreview.innerHTML = '';
@@ -602,10 +604,10 @@ function openContactDialog(existing, defaultBinding, onSave) {
             img.src = src;
             img.alt = existing?.name || fields.name.value.trim() || 'avatar preview';
             img.onerror = () => { avatarPreview.textContent = ((existing?.name || fields.name.value || '?')[0] || '?').toUpperCase(); };
-            applyProfileImageStyle(avatarPreview, img, draftStyle, { width: 72, height: 72, objectFit: 'cover' });
+            applyProfileImageStyle(avatarPreview, img, draftStyle, { width: 72, height: 72, scale: 100, positionX: 50, positionY: 50 });
             avatarPreview.appendChild(img);
         } else {
-            applyProfileImageStyle(avatarPreview, null, draftStyle, { width: 72, height: 72, objectFit: 'cover' });
+            applyProfileImageStyle(avatarPreview, null, draftStyle, { width: 72, height: 72, scale: 100, positionX: 50, positionY: 50 });
             avatarPreview.textContent = ((existing?.name || fields.name.value || '?')[0] || '?').toUpperCase();
         }
     };
@@ -629,9 +631,9 @@ function openContactDialog(existing, defaultBinding, onSave) {
     };
     fields.avatar.addEventListener('input', renderAvatarPreview);
     fields.name.addEventListener('input', renderAvatarPreview);
-    avatarWidthInput.addEventListener('input', renderAvatarPreview);
-    avatarHeightInput.addEventListener('input', renderAvatarPreview);
-    avatarFitSelect.addEventListener('change', renderAvatarPreview);
+    avatarScaleInput.addEventListener('input', renderAvatarPreview);
+    avatarPositionXInput.addEventListener('input', renderAvatarPreview);
+    avatarPositionYInput.addEventListener('input', renderAvatarPreview);
     renderAvatarPreview();
     if (existing?.isCharAuto) {
         fields.name.disabled = true;
@@ -646,6 +648,7 @@ function openContactDialog(existing, defaultBinding, onSave) {
             fields.avatar.value = ctx?.characters?.[ctx?.characterId]?.avatar
                 ? `/characters/${ctx?.characters?.[ctx?.characterId]?.avatar}`
                 : '';
+            renderAvatarPreview();
         };
         fields.avatar.insertAdjacentElement('afterend', restoreAvatarBtn);
     }
