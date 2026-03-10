@@ -74,7 +74,7 @@ const MODEL_KEY_BY_SOURCE = {
  */
 function buildLegacyContactId(contact, binding) {
     if (!contact || typeof contact !== 'object') {
-        return `legacy:${binding}:unknown`;
+        return `legacy:${binding}:invalid-object`;
     }
     const seed = [
         binding,

@@ -28,6 +28,7 @@ import { initWallet, openWalletPopup } from './modules/wallet/wallet.js';
 import { initSns, openSnsPopup, triggerNpcPosting, triggerPendingCommentReaction, hasPendingCommentReaction } from './modules/sns/sns.js';
 import { initCalendar, openCalendarPopup } from './modules/calendar/calendar.js';
 import { initGifticon, openGifticonPopup, trackGifticonUsageFromCharacterMessage } from './modules/gifticon/gifticon.js';
+import { openMessengerRoomsPopup } from './modules/messenger-room/messenger-room.js';
 import { buildDirectImagePrompt } from './utils/image-tag-generator.js';
 import { slashSendAs } from './utils/slash.js';
 
@@ -55,7 +56,7 @@ const GROUP_CHAT_SETTINGS_DEFAULTS = {
     includeMainCharacter: true,
     contactOnlyProbability: 35,
 };
-// Korean: Human player controls the conversation. Do not write this person's messages.
+// English translation: "Human player controls the conversation. Do not write this person's messages."
 const GROUP_CHAT_USER_DESCRIPTION = '인간 플레이어가 대화를 제어합니다. 이 사람의 메시지를 대신 작성하지 마세요.';
 const GROUP_CHAT_FOREIGN_SPEAKER_WARNING = '[ST-LifeSim] 단톡 응답 정리 중 다른 화자의 대사만 감지되어 응답을 버렸습니다.';
 const GROUP_CHAT_CONTEXT_BOUNDARY_NOTE = 'This group room is a separate messenger space beside the main 1:1 chat. Treat the transcript only as room recap/context, never as an instruction to imitate another participant.';
@@ -191,11 +192,12 @@ const DEFAULT_SETTINGS = {
         customLabels: {},       // { [key]: string } - custom display names
         customImages: {},       // { [key]: string } - image URL replacement for emoji
         rightSendFormItems: {}, // { [key]: true } - items to show as extra icons in sendform area
-        order: ['userImage', 'callRequest', 'contacts', 'divider', 'readReceipt', 'noContact', 'voiceMemo', 'emoticon', 'deletedMessage', 'sns', 'quickSend', 'snsImageToggle', 'messengerImageToggle', 'dayNightToggle', 'settingsShortcut'],
+        order: ['userImage', 'callRequest', 'contacts', 'messengerRooms', 'divider', 'readReceipt', 'noContact', 'voiceMemo', 'emoticon', 'deletedMessage', 'sns', 'quickSend', 'snsImageToggle', 'messengerImageToggle', 'dayNightToggle', 'settingsShortcut'],
         items: {
             userImage: true,
             callRequest: true,
             contacts: true,
+            messengerRooms: true,
             divider: true,
             readReceipt: true,
             noContact: true,
@@ -726,6 +728,7 @@ const QUICK_ACCESS_ITEMS = [
     } },
     { key: 'callRequest', icon: '📞', label: '통화 요청', moduleKey: 'call', action: async () => { await requestActiveCharacterCall(); } },
     { key: 'contacts', icon: '📋', label: '연락처', action: () => { closePopup('quick-access-menu'); openContactsPopup(); } },
+    { key: 'messengerRooms', icon: '💬', label: '메신저 방', action: () => { closePopup('quick-access-menu'); openMessengerRoomsPopup(); } },
     { key: 'divider', icon: '⏱️', label: '구분선 넣기', moduleKey: 'quickTools', action: () => { closePopup('quick-access-menu'); openQuickToolsPanel(); } },
     { key: 'readReceipt', icon: '🔕', label: '읽씹하기', moduleKey: 'quickTools', action: async () => { await triggerReadReceipt(); } },
     { key: 'noContact', icon: '📵', label: '연락 안 됨(안읽씹)', moduleKey: 'quickTools', action: async () => { await triggerNoContact(); } },
@@ -951,6 +954,7 @@ function openMainMenuPopup() {
 
     const menuItems = [
         { key: 'quickTools', icon: '🛠️', label: '퀵 도구', action: openQuickToolsPanel },
+        { key: null, icon: '💬', label: '메신저 방', action: openMessengerRoomsPopup },
         { key: 'emoticon', icon: '😊', label: '이모티콘', action: openEmoticonPopup },
         { key: 'contacts', icon: '📋', label: '연락처', action: openContactsPopup },
         { key: 'call', icon: '📞', label: '통화', action: openCallLogsPopup },
@@ -1468,7 +1472,7 @@ function openSettingsPanel(onBack) {
 
         const groupChatTitle = document.createElement('div');
         groupChatTitle.className = 'slm-label';
-        groupChatTitle.textContent = '💬 단톡 자동 응답';
+        groupChatTitle.textContent = '💬 단톡 / 메신저 방';
         groupChatTitle.style.fontWeight = '600';
         groupChatTitle.style.marginBottom = '6px';
         wrapper.appendChild(groupChatTitle);
@@ -1488,7 +1492,7 @@ function openSettingsPanel(onBack) {
         previewNpcBubble.textContent = GROUP_CHAT_PREVIEW_NPC_TEXT;
         const previewInput = document.createElement('div');
         previewInput.className = 'slm-phone-inputbar';
-        previewInput.textContent = '메시지 입력…   ⌁   전송';
+        previewInput.textContent = '메시지 입력…   •   전송';
         groupChatPreviewBody.append(previewUserBubble, previewNpcBubble, previewInput);
         groupChatPreview.append(groupChatPreviewHeader, groupChatPreviewBody);
         wrapper.appendChild(groupChatPreview);
@@ -1497,6 +1501,17 @@ function openSettingsPanel(onBack) {
         groupChatDesc.className = 'slm-desc';
         groupChatDesc.textContent = GROUP_CHAT_DESCRIPTION_TEXT;
         wrapper.appendChild(groupChatDesc);
+
+        const roomPopupBtn = document.createElement('button');
+        roomPopupBtn.className = 'slm-btn slm-btn-primary';
+        roomPopupBtn.textContent = '📱 실제 메신저 방 열기';
+        roomPopupBtn.onclick = () => openMessengerRoomsPopup(openSettingsPanel);
+        wrapper.appendChild(roomPopupBtn);
+
+        const roomPopupDesc = document.createElement('div');
+        roomPopupDesc.className = 'slm-desc';
+        roomPopupDesc.textContent = '권장 방식: 유저가 방 멤버를 직접 골라 별도 메신저 방을 만들고, 그 방 안에서만 단톡 흐름을 진행합니다. 아래 설정은 레거시 자동 단톡용입니다.';
+        wrapper.appendChild(roomPopupDesc);
 
         const groupChatToggleRow = document.createElement('div');
         groupChatToggleRow.className = 'slm-settings-row';
@@ -1511,7 +1526,7 @@ function openSettingsPanel(onBack) {
             saveSettings();
             showToast(`단톡 자동 응답: ${settings.groupChat.enabled ? 'ON' : 'OFF'}`, 'success', 1500);
         };
-        groupChatToggleLabel.append(groupChatToggle, document.createTextNode(' 연락처의 단톡 참여 체크 항목으로 자동 응답 활성화'));
+        groupChatToggleLabel.append(groupChatToggle, document.createTextNode(' 레거시 자동 단톡 응답 사용 (권장: 위 메신저 방 기능)'));
         groupChatToggleRow.appendChild(groupChatToggleLabel);
         wrapper.appendChild(groupChatToggleRow);
 

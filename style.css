@@ -34,7 +34,7 @@
   --slm-shadow: 0 12px 40px rgba(120,80,200,0.12), 0 4px 12px rgba(0,0,0,0.08);
   --slm-z: 99999;
   --slm-emoticon-radius: 10px;
-  /* 56px image + top margin + 2 lines of caption/padding fits without clipping on the dense mobile-like grid */
+  /* Keep enough vertical room for the 56px preview image plus compact caption padding on the dense mobile-like grid */
   --slm-emoticon-cell-min-height: 98px;
 }
 
@@ -831,6 +831,265 @@ body[data-theme="dark"],
   color: var(--slm-text-secondary);
   font-size: 12px;
   border: 1px solid var(--slm-border);
+}
+
+.slm-room-list-panel,
+.slm-room-detail-panel,
+.slm-room-create-panel {
+  max-width: 390px;
+}
+
+.slm-room-list,
+.slm-room-view,
+.slm-room-create {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.slm-room-hero {
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(155,114,208,0.18), rgba(155,114,208,0.08));
+  border: 1px solid rgba(155,114,208,0.16);
+  color: var(--slm-text);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.slm-room-cards,
+.slm-room-message-list,
+.slm-room-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.slm-room-cards,
+.slm-room-message-list {
+  max-height: 46vh;
+}
+
+.slm-room-card {
+  width: 100%;
+  padding: 14px 14px 12px;
+  border: 1px solid var(--slm-border);
+  border-radius: 20px;
+  background: var(--slm-bg-secondary);
+  text-align: left;
+  color: var(--slm-text);
+  cursor: pointer;
+  transition: transform 0.12s, border-color 0.15s, background 0.15s;
+}
+
+.slm-room-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--slm-accent);
+  background: var(--slm-bg-tertiary);
+}
+
+.slm-room-card.active {
+  border-color: var(--slm-accent);
+  box-shadow: 0 0 0 1px rgba(155,114,208,0.16);
+}
+
+.slm-room-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--slm-text);
+  margin-bottom: 4px;
+}
+
+.slm-room-card-subtitle {
+  font-size: 12px;
+  color: var(--slm-text-secondary);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.slm-room-card-meta {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--slm-text-secondary);
+}
+
+.slm-room-list-footer {
+  padding-left: 0;
+  padding-right: 0;
+  justify-content: space-between;
+  background: transparent;
+  border-top: none;
+}
+
+.slm-room-meta-card {
+  padding: 12px;
+  border-radius: 18px;
+  background: var(--slm-bg-secondary);
+  border: 1px solid var(--slm-border);
+}
+
+.slm-room-member-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.slm-room-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--slm-bg);
+  border: 1px solid var(--slm-border);
+  font-size: 11px;
+  color: var(--slm-text);
+}
+
+.slm-room-message {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.slm-room-message.user {
+  justify-content: flex-end;
+}
+
+.slm-room-message.outsider .slm-room-message-bubble {
+  background: rgba(155,114,208,0.12);
+  border-color: rgba(155,114,208,0.2);
+}
+
+.slm-room-message-avatar,
+.slm-room-member-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--slm-bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.slm-room-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.slm-room-avatar-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--slm-text);
+  background: linear-gradient(135deg, rgba(155,114,208,0.32), rgba(155,114,208,0.12));
+}
+
+.slm-room-bubble-wrap {
+  max-width: calc(100% - 40px);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.slm-room-message.user .slm-room-bubble-wrap {
+  align-items: flex-end;
+}
+
+.slm-room-message-author {
+  font-size: 11px;
+  color: var(--slm-text-secondary);
+}
+
+.slm-room-message-bubble {
+  padding: 10px 12px;
+  border-radius: 18px 18px 18px 8px;
+  background: var(--slm-bg-secondary);
+  border: 1px solid var(--slm-border);
+  color: var(--slm-text);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.slm-room-message.user .slm-room-message-bubble {
+  background: var(--slm-accent);
+  border-color: var(--slm-accent);
+  color: #fff;
+  border-radius: 18px 18px 8px 18px;
+}
+
+.slm-room-message-time {
+  font-size: 10px;
+  color: var(--slm-text-secondary);
+}
+
+.slm-room-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--slm-border);
+  background: var(--slm-bg);
+}
+
+.slm-room-textarea {
+  flex: 1;
+  min-height: 44px;
+  max-height: 120px;
+  border-radius: 18px;
+  margin: 0;
+}
+
+.slm-room-member-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--slm-border);
+  background: var(--slm-bg-secondary);
+  cursor: pointer;
+}
+
+.slm-room-member-row input[type="checkbox"] {
+  accent-color: var(--slm-accent);
+}
+
+.slm-room-member-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.slm-room-member-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--slm-text);
+}
+
+.slm-room-member-subtitle {
+  font-size: 11px;
+  color: var(--slm-text-secondary);
+  line-height: 1.4;
 }
 
 /* 사건 기록 아카이브 */
