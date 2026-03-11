@@ -261,6 +261,55 @@ function appendRoomMessage(room, message) {
     return upsertMessengerRoom(nextRoom);
 }
 
+function getContactMemberKey(contact) {
+    return String(contact?.displayName || contact?.name || '').trim();
+}
+
+function findDirectMessengerRoom(memberKey) {
+    const normalizedKey = String(memberKey || '').trim().toLowerCase();
+    if (!normalizedKey) return null;
+    return loadMessengerRooms().find((room) => {
+        const members = Array.isArray(room?.members) ? room.members : [];
+        return members.length === 1 && String(members[0] || '').trim().toLowerCase() === normalizedKey;
+    }) || null;
+}
+
+export function openDirectMessengerWithContact(contact, onBack) {
+    if (!contact || contact.isUserAuto || contact.isCharAuto) {
+        showToast('NPC 연락처에서만 1:1 메신저를 시작할 수 있습니다.', 'warn');
+        return null;
+    }
+    const memberKey = getContactMemberKey(contact);
+    if (!memberKey) {
+        showToast('대화를 시작할 연락처를 찾을 수 없습니다.', 'warn');
+        return null;
+    }
+    const candidateMap = getCandidateMap();
+    if (!candidateMap.has(memberKey)) {
+        showToast('현재 메신저 멤버 후보에 없는 연락처입니다.', 'warn');
+        return null;
+    }
+    const existingRoom = findDirectMessengerRoom(memberKey);
+    const room = existingRoom || normalizeMessengerRooms([{
+        id: generateId(),
+        name: `${getMemberDisplayLabel(memberKey, candidateMap)} 개인톡`,
+        members: [memberKey],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        messages: [],
+        settings: {
+            ...ROOM_DEFAULTS,
+            autoReplyEnabled: true,
+        },
+    }])[0];
+    if (!existingRoom) {
+        upsertMessengerRoom(room);
+    }
+    closePopup('messenger-rooms');
+    openMessengerRoomDetail(room.id, onBack);
+    return room;
+}
+
 function buildRoomTranscript(room, candidateMap) {
     const messages = Array.isArray(room?.messages) ? room.messages.slice(-ROOM_MESSAGE_LIMIT) : [];
     return messages.map((message) => {
@@ -910,7 +959,58 @@ function buildRoomListContent(onBack, initialRoomId = null) {
         }
         openMessengerRoomDetail(rooms[0].id, onBack);
     };
-    footer.append(createBtn, latestBtn);
+    const quickDmBtn = document.createElement('button');
+    quickDmBtn.className = 'slm-btn slm-btn-secondary';
+    quickDmBtn.textContent = '👤 NPC 1:1 시작';
+    quickDmBtn.onclick = () => {
+        const npcContacts = [...getContacts('chat'), ...getContacts('character')]
+            .filter((contact) => !contact?.isUserAuto && !contact?.isCharAuto);
+        if (npcContacts.length === 0) {
+            showToast('1:1 메신저를 시작할 NPC 연락처가 없습니다.', 'warn');
+            return;
+        }
+        const dialog = document.createElement('div');
+        dialog.className = 'slm-form';
+        const hint = document.createElement('div');
+        hint.className = 'slm-desc';
+        hint.textContent = '연락처에 등록된 NPC와 개인 메신저 방을 바로 엽니다.';
+        const select = document.createElement('select');
+        select.className = 'slm-select';
+        npcContacts.forEach((contact) => {
+            const option = document.createElement('option');
+            option.value = getContactMemberKey(contact);
+            option.textContent = getContactMemberKey(contact);
+            select.appendChild(option);
+        });
+        dialog.append(hint, select);
+        const dialogFooter = document.createElement('div');
+        dialogFooter.className = 'slm-panel-footer';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'slm-btn slm-btn-secondary';
+        cancelBtn.textContent = '취소';
+        const startBtn = document.createElement('button');
+        startBtn.className = 'slm-btn slm-btn-primary';
+        startBtn.textContent = '시작';
+        dialogFooter.append(cancelBtn, startBtn);
+        const { close } = createPopup({
+            id: 'messenger-room-direct-start',
+            title: '👤 NPC 1:1 메신저',
+            content: dialog,
+            footer: dialogFooter,
+            className: 'slm-sub-panel',
+        });
+        cancelBtn.onclick = () => close();
+        startBtn.onclick = () => {
+            const contact = npcContacts.find((entry) => getContactMemberKey(entry) === select.value);
+            if (!contact) {
+                showToast('선택한 NPC 연락처를 찾지 못했습니다.', 'warn');
+                return;
+            }
+            close();
+            openDirectMessengerWithContact(contact, () => openMessengerRoomsPopup(onBack, initialRoomId));
+        };
+    };
+    footer.append(createBtn, latestBtn, quickDmBtn);
     wrapper.appendChild(footer);
 
     function renderRooms() {

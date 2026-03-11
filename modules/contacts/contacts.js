@@ -12,7 +12,7 @@ import { getContext } from '../../utils/st-context.js';
 import { loadData, saveData, getExtensionSettings } from '../../utils/storage.js';
 import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, escapeHtml, generateId } from '../../utils/ui.js';
-import { createPopup } from '../../utils/popup.js';
+import { createPopup, closePopup } from '../../utils/popup.js';
 import { applyProfileImageStyle, normalizeProfileImageStyle, readImageFileAsDataUrl } from '../../utils/profile-image.js';
 import { getAllEmoticonCategories } from '../emoticon/emoticon.js';
 
@@ -603,10 +603,40 @@ function openContactDetailPopup(contact) {
 
     wrapper.appendChild(fields);
 
+    const footer = document.createElement('div');
+    footer.className = 'slm-panel-footer';
+    const editBtn = document.createElement('button');
+    editBtn.className = 'slm-btn slm-btn-secondary';
+    editBtn.textContent = '편집';
+    editBtn.onclick = () => {
+        closePopup('contact-detail');
+        openContactDialog(contact, contact.binding || 'chat', () => {
+            openContactsPopup();
+        });
+    };
+    footer.appendChild(editBtn);
+    if (!contact?.isUserAuto && !contact?.isCharAuto) {
+        const dmBtn = document.createElement('button');
+        dmBtn.className = 'slm-btn slm-btn-primary';
+        dmBtn.textContent = '💬 NPC 1:1 메신저';
+        dmBtn.onclick = async () => {
+            try {
+                const roomModule = await import('../messenger-room/messenger-room.js');
+                closePopup('contact-detail');
+                roomModule.openDirectMessengerWithContact(contact, () => openContactsPopup());
+            } catch (error) {
+                console.error('[ST-LifeSim] NPC 1:1 메신저 열기 실패:', error);
+                showToast('NPC 1:1 메신저를 열지 못했습니다.', 'error');
+            }
+        };
+        footer.appendChild(dmBtn);
+    }
+
     createPopup({
         id: 'contact-detail',
         title: `👤 ${getContactDisplayName(contact)}`,
         content: wrapper,
+        footer,
         className: 'slm-sub-panel',
         onBack: () => openContactsPopup(),
     });

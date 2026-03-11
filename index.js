@@ -3719,6 +3719,36 @@ async function processMessengerImageGeneration(rawPrompt, options = {}) {
     return { imageUrl: '', fallbackText: template.replace(/\{description\}/g, rawPrompt) };
 }
 
+function waitForDelay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function updateRenderedMessageHtml(msgIdx, html, logLabel = '메시지') {
+    if (!Number.isFinite(msgIdx) || msgIdx < 0) return false;
+    const selectors = [
+        `.mes[mesid="${msgIdx}"] .mes_text`,
+        `div.mes[mesid="${msgIdx}"] .mes_text`,
+        `#chat .mes[mesid="${msgIdx}"] .mes_text`,
+    ];
+    for (let attempt = 0; attempt < 6; attempt++) {
+        try {
+            const mesTextEl = selectors
+                .map(selector => document.querySelector(selector))
+                .find(Boolean);
+            if (mesTextEl) {
+                mesTextEl.innerHTML = html;
+                return true;
+            }
+        } catch (uiErr) {
+            console.warn(`[ST-LifeSim] ${logLabel} UI 업데이트 실패:`, uiErr);
+            return false;
+        }
+        await waitForDelay(attempt < 2 ? 50 : 120);
+    }
+    console.warn(`[ST-LifeSim] ${logLabel} UI 업데이트 대상 요소를 찾지 못했습니다.`, { msgIdx });
+    return false;
+}
+
 /**
  * char 메시지 렌더링 후 이미지 태그를 처리한다
  * - ON: <pic prompt="..."> 태그를 감지하여 이미지 생성 API로 실제 이미지 생성
@@ -3820,17 +3850,7 @@ async function applyCharacterImageDisplayMode() {
 
                 // 매 생성마다 메시지 데이터 + UI를 즉시 업데이트하여 순차적으로 결과가 표시되도록 한다
                 lastMsg.mes = currentMes;
-                if (Number.isFinite(msgIdx) && msgIdx >= 0) {
-                    try {
-                        const msgEl = document.querySelector(`.mes[mesid="${msgIdx}"]`);
-                        if (msgEl) {
-                            const mesTextEl = msgEl.querySelector('.mes_text');
-                            if (mesTextEl) mesTextEl.innerHTML = currentMes;
-                        }
-                    } catch (uiErr) {
-                        console.warn('[ST-LifeSim] 메시지 UI 업데이트 실패:', uiErr);
-                    }
-                }
+                await updateRenderedMessageHtml(msgIdx, currentMes, '이미지');
             }
 
             // 모든 이미지 처리 완료 후 채팅 저장
@@ -3870,6 +3890,7 @@ async function applyCharacterImageDisplayMode() {
 
             if (updatedMes !== mes) {
                 lastMsg.mes = updatedMes;
+                await updateRenderedMessageHtml(msgIdx, updatedMes, '이미지 텍스트');
                 if (typeof ctx.saveChat === 'function') {
                     await ctx.saveChat();
                 }
@@ -3904,17 +3925,7 @@ async function applyCharacterEmoticonDisplayMode() {
     lastMsg.mes = updatedMes;
     // DOM mesid는 숫자 인덱스를 사용하므로 lastMsg 참조와 별개로 마지막 메시지 인덱스를 구한다.
     const msgIdx = Number(ctx.chat.length - 1);
-    if (Number.isFinite(msgIdx) && msgIdx >= 0) {
-        try {
-            const msgEl = document.querySelector(`.mes[mesid="${msgIdx}"]`);
-            if (msgEl) {
-                const mesTextEl = msgEl.querySelector('.mes_text');
-                if (mesTextEl) mesTextEl.innerHTML = updatedMes;
-            }
-        } catch (uiErr) {
-            console.warn('[ST-LifeSim] 이모티콘 UI 업데이트 실패:', uiErr);
-        }
-    }
+    await updateRenderedMessageHtml(msgIdx, updatedMes, '이모티콘');
     if (typeof ctx.saveChat === 'function') {
         await ctx.saveChat();
     }
