@@ -54,6 +54,7 @@ export function normalizeMessengerRooms(rooms = []) {
             return {
                 id: String(room?.id || generateId()),
                 name,
+                categories: normalizeCategoryList(room?.categories),
                 members,
                 createdAt,
                 updatedAt,
@@ -66,6 +67,15 @@ export function normalizeMessengerRooms(rooms = []) {
         })
         .filter((room) => room.members.length > 0)
         .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+}
+
+function normalizeCategoryList(categories) {
+    if (!Array.isArray(categories)) return [];
+    return [...new Set(categories.map((category) => String(category || '').trim()).filter(Boolean))];
+}
+
+function parseCategoryInput(value) {
+    return normalizeCategoryList(String(value || '').split(','));
 }
 
 /**
@@ -336,6 +346,7 @@ export function openDirectMessengerWithContact(contact, onBack) {
     const room = existingRoom || normalizeMessengerRooms([{
         id: generateId(),
         name: `${getMemberDisplayLabel(memberKey, candidateMap)} 개인톡`,
+        categories: normalizeCategoryList(contact?.categories),
         members: [memberKey],
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -871,6 +882,12 @@ function openRoomCreatePopup(onBack, roomId = null) {
     nameInput.placeholder = '방 이름 (비워두면 멤버 기준 자동 생성)';
     nameInput.value = existingRoom?.name || '';
     wrapper.appendChild(nameInput);
+    const categoryInput = document.createElement('input');
+    categoryInput.className = 'slm-input';
+    categoryInput.type = 'text';
+    categoryInput.placeholder = '카테고리 (쉼표로 구분)';
+    categoryInput.value = normalizeCategoryList(existingRoom?.categories).join(', ');
+    wrapper.appendChild(categoryInput);
 
     const list = document.createElement('div');
     list.className = 'slm-room-member-list';
@@ -938,6 +955,7 @@ function openRoomCreatePopup(onBack, roomId = null) {
             ...(existingRoom || {}),
             id: existingRoom?.id || generateId(),
             name: String(nameInput.value || '').trim() || buildMessengerRoomName(labels),
+            categories: parseCategoryInput(categoryInput.value),
             members,
             createdAt: existingRoom?.createdAt || Date.now(),
             updatedAt: Date.now(),
@@ -984,6 +1002,17 @@ function openMessengerRoomDetail(roomId, onBack) {
         ? '이 방에는 {{char}}가 포함되어 있어 직접 참가자처럼 답할 수 있습니다.'
         : '{{char}}는 이 방 멤버가 아니므로, 정확한 대화 내용 대신 바깥에서 본 분위기만 간접적으로 말할 수 있습니다.';
     headerMeta.append(members, metaText);
+    if (normalizeCategoryList(room.categories).length > 0) {
+        const categoryChips = document.createElement('div');
+        categoryChips.className = 'slm-room-member-chips';
+        normalizeCategoryList(room.categories).forEach((category) => {
+            const chip = document.createElement('span');
+            chip.className = 'slm-room-chip';
+            chip.textContent = `#${category}`;
+            categoryChips.appendChild(chip);
+        });
+        headerMeta.appendChild(categoryChips);
+    }
     wrapper.appendChild(headerMeta);
 
     const actions = document.createElement('div');
@@ -1192,7 +1221,7 @@ function buildRoomListContent(onBack, initialRoomId = null) {
     const search = document.createElement('input');
     search.className = 'slm-input';
     search.type = 'search';
-    search.placeholder = '🔍 방 이름 / 멤버 검색';
+    search.placeholder = '🔍 방 이름 / 멤버 / 카테고리 검색';
     wrapper.appendChild(search);
 
     const list = document.createElement('div');
@@ -1278,6 +1307,7 @@ function buildRoomListContent(onBack, initialRoomId = null) {
             const haystack = [
                 room.name,
                 getRoomTitle(room, candidateMap),
+                ...normalizeCategoryList(room.categories),
                 ...room.members.map((memberKey) => getMemberDisplayLabel(memberKey, candidateMap)),
             ].join(' ').toLowerCase();
             return haystack.includes(query);
@@ -1297,6 +1327,11 @@ function buildRoomListContent(onBack, initialRoomId = null) {
             const title = document.createElement('div');
             title.className = 'slm-room-card-title';
             title.textContent = getRoomTitle(room, candidateMap);
+            const categoryText = document.createElement('div');
+            categoryText.className = 'slm-desc';
+            categoryText.textContent = normalizeCategoryList(room.categories).length > 0
+                ? `카테고리: ${normalizeCategoryList(room.categories).join(', ')}`
+                : '';
             const subtitle = document.createElement('div');
             subtitle.className = 'slm-room-card-subtitle';
             subtitle.textContent = room.messages[room.messages.length - 1]?.text || '아직 메시지가 없습니다.';
@@ -1307,7 +1342,9 @@ function buildRoomListContent(onBack, initialRoomId = null) {
             const time = document.createElement('span');
             time.textContent = formatRelativeTime(room.updatedAt);
             meta.append(members, time);
-            card.append(title, subtitle, meta);
+            card.append(title);
+            if (categoryText.textContent) card.appendChild(categoryText);
+            card.append(subtitle, meta);
             card.onclick = () => openMessengerRoomDetail(room.id, onBack);
             list.appendChild(card);
         });

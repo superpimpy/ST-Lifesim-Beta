@@ -19,6 +19,7 @@ import { getAllEmoticonCategories } from '../emoticon/emoticon.js';
 const MODULE_KEY = 'contacts';
 const MAX_AI_CONTACT_KEYWORD_LENGTH = 200;
 const MAX_CONTACT_DESCRIPTION_LENGTH = 20000;
+const MIN_AUTOGROW_TEXTAREA_HEIGHT = 96;
 const LEGACY_CONTACT_ID_FIELDS = ['name', 'displayName', 'subName'];
 const MODEL_KEY_BY_SOURCE = {
     openai: 'openai_model',
@@ -60,6 +61,7 @@ const MODEL_KEY_BY_SOURCE = {
  * @property {string} personality
  * @property {string} phone
  * @property {string[]} tags
+ * @property {string[]} [categories]
  * @property {string} [appearanceTags] - 외관 태그 (이미지 생성 시 사용)
  * @property {string[]|null} [emoticonCategories] - AI가 사용할 수 있는 이모티콘 카테고리 (null이면 전체 허용)
  * @property {{ positionX?: number, positionY?: number, scale?: number }} [avatarStyle]
@@ -136,6 +138,7 @@ function normalizeContact(contact, binding = 'chat') {
         personality: String(contact.personality || '').trim(),
         phone: String(contact.phone || '').trim(),
         tags: Array.isArray(contact.tags) ? contact.tags : [],
+        categories: normalizeCategoryList(contact.categories),
         appearanceTags: String(contact.appearanceTags || '').trim(),
         emoticonCategories: Array.isArray(contact.emoticonCategories)
             ? [...new Set(contact.emoticonCategories.map((category) => String(category || '').trim()).filter(Boolean))]
@@ -175,6 +178,15 @@ function getAvatarStyle(contact, defaults) {
 
 function getContactDisplayName(contact) {
     return String(contact?.displayName || contact?.name || '').trim();
+}
+
+function normalizeCategoryList(categories) {
+    if (!Array.isArray(categories)) return [];
+    return [...new Set(categories.map((category) => String(category || '').trim()).filter(Boolean))];
+}
+
+function parseCategoryInput(value) {
+    return normalizeCategoryList(String(value || '').split(','));
 }
 
 function loadAllContacts() {
@@ -255,6 +267,7 @@ function ensureCharContact() {
         personality: syncedPersonality,
         phone: '',
         tags: [],
+        categories: [],
         binding: 'character',
         isCharAuto: true,
         groupChatParticipant: false,
@@ -307,6 +320,7 @@ function ensureUserContact() {
         personality: '',
         phone: '',
         tags: [],
+        categories: [],
         appearanceTags: globalProfile.appearanceTags || '',
         binding: 'character',
         isUserAuto: true,
@@ -399,7 +413,7 @@ function buildContactsContent() {
     const searchInput = document.createElement('input');
     searchInput.className = 'slm-input slm-search';
     searchInput.type = 'text';
-    searchInput.placeholder = '🔍 검색...';
+    searchInput.placeholder = '🔍 이름 / 설명 / 카테고리 검색...';
     searchInput.oninput = () => renderList();
     wrapper.appendChild(searchInput);
 
@@ -438,7 +452,14 @@ function buildContactsContent() {
         const contacts = [...loadContacts('chat'), ...loadContacts('character')];
         const query = searchInput.value.toLowerCase();
         const filtered = query
-            ? contacts.filter(c => getContactDisplayName(c).toLowerCase().includes(query) || (c.description || '').toLowerCase().includes(query))
+            ? contacts.filter((c) => {
+                const haystack = [
+                    getContactDisplayName(c),
+                    c.description || '',
+                    ...(Array.isArray(c.categories) ? c.categories : []),
+                ].join(' ').toLowerCase();
+                return haystack.includes(query);
+            })
             : contacts;
 
         if (filtered.length === 0) {
@@ -496,6 +517,12 @@ function buildContactsContent() {
                 groupTag.textContent = '단톡';
                 nameRow.appendChild(groupTag);
             }
+            normalizeCategoryList(contact.categories).forEach((category) => {
+                const categoryTag = document.createElement('span');
+                categoryTag.className = 'slm-contact-scope';
+                categoryTag.textContent = `#${category}`;
+                nameRow.appendChild(categoryTag);
+            });
 
             const rel = document.createElement('span');
             rel.className = 'slm-contact-rel';
@@ -584,6 +611,7 @@ function openContactDetailPopup(contact) {
 
     const fieldDefs = [
         { label: '다른 언어 이름', value: contact.subName },
+        { label: '카테고리', value: normalizeCategoryList(contact.categories).join(', ') },
         { label: '관계', value: contact.relationToUser },
         { label: '성격/말투', value: contact.personality },
         { label: '외관 태그', value: contact.appearanceTags },
@@ -658,12 +686,14 @@ function openContactDialog(existing, defaultBinding, onSave) {
         name: createFormField(wrapper, existing?.isCharAuto ? '표시 이름 *' : (existing?.isUserAuto ? '표시 이름' : '이름 *'), 'text', existing?.displayName || existing?.name || ''),
         subName: createFormField(wrapper, '🌐 다른 언어 이름', 'text', existing?.subName || ''),
         avatar: createFormField(wrapper, '프로필 이미지', 'hidden', existing?.avatar || ''),
-        description: createFormField(wrapper, '설명', 'text', existing?.description || ''),
-        relationToUser: createFormField(wrapper, '{{user}}와의 관계 *', 'text', existing?.relationToUser || ''),
-        relationToChar: createFormField(wrapper, '{{char}}와의 관계', 'text', existing?.relationToChar || ''),
-        personality: createFormField(wrapper, '성격/말투', 'text', existing?.personality || ''),
-        appearanceTags: createFormField(wrapper, '🏷️ 외관 태그 (이미지 생성용)', 'text', existing?.appearanceTags || ''),
+        categories: createFormField(wrapper, '카테고리', 'text', normalizeCategoryList(existing?.categories).join(', ')),
+        description: createFormField(wrapper, '설명', 'textarea', existing?.description || '', { rows: 6 }),
+        relationToUser: createFormField(wrapper, '{{user}}와의 관계 *', 'textarea', existing?.relationToUser || '', { rows: 3 }),
+        relationToChar: createFormField(wrapper, '{{char}}와의 관계', 'textarea', existing?.relationToChar || '', { rows: 3 }),
+        personality: createFormField(wrapper, '성격/말투', 'textarea', existing?.personality || '', { rows: 4 }),
+        appearanceTags: createFormField(wrapper, '🏷️ 외관 태그 (이미지 생성용)', 'textarea', existing?.appearanceTags || '', { rows: 4 }),
     };
+    fields.categories.placeholder = '예: 가족, 직장, 학교';
     fields.description.maxLength = MAX_CONTACT_DESCRIPTION_LENGTH;
     fields.description.placeholder = `최대 ${MAX_CONTACT_DESCRIPTION_LENGTH.toLocaleString()}자`;
     const descriptionCounter = document.createElement('div');
@@ -962,6 +992,7 @@ function openContactDialog(existing, defaultBinding, onSave) {
             personality: fields.personality.value.trim(),
             phone: '',
             tags: existing?.tags || [],
+            categories: parseCategoryInput(fields.categories.value),
             appearanceTags: fields.appearanceTags.value.trim(),
             emoticonCategories: emoticonCategories.length === 0
                 ? null
@@ -1151,19 +1182,37 @@ async function generateContactProfileText(ctx, prompt) {
 /**
  * 폼 필드를 생성한다
  */
-function createFormField(container, label, type, value) {
+function createFormField(container, label, type, value, options = {}) {
     const lbl = document.createElement('label');
     lbl.className = 'slm-label';
     lbl.textContent = label;
 
-    const input = document.createElement('input');
-    input.className = 'slm-input';
-    input.type = type;
-    input.value = value;
+    const input = type === 'textarea'
+        ? document.createElement('textarea')
+        : document.createElement('input');
+    input.className = type === 'textarea' ? 'slm-textarea slm-autogrow-textarea' : 'slm-input';
+    if (type === 'textarea') {
+        input.rows = Math.max(3, Number(options.rows) || 3);
+        input.value = value;
+        bindAutoGrowTextarea(input);
+    } else {
+        input.type = type;
+        input.value = value;
+    }
 
     container.appendChild(lbl);
     container.appendChild(input);
     return input;
+}
+
+function bindAutoGrowTextarea(textarea) {
+    if (!(textarea instanceof HTMLTextAreaElement)) return;
+    const resize = () => {
+        textarea.style.height = 'auto';
+        textarea.style.height = `${Math.max(textarea.scrollHeight, MIN_AUTOGROW_TEXTAREA_HEIGHT)}px`;
+    };
+    textarea.addEventListener('input', resize);
+    requestAnimationFrame(resize);
 }
 
 /**

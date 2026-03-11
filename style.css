@@ -378,6 +378,13 @@ body[data-theme="dark"],
 }
 .slm-textarea:focus { outline: none; border-color: var(--slm-accent); }
 
+.slm-autogrow-textarea {
+  overflow-y: hidden;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .slm-select {
   width: 100%;
   padding: 10px 12px;
