@@ -1373,29 +1373,7 @@ function shouldSuppressMainCharacter(settings) {
 }
 
 function planGroupChatTurn() {
-    const settings = getGroupChatRuntimeSettings();
-    if (!settings.enabled) return null;
-    const ctx = getContext();
-    const latestMessage = ctx?.chat?.[ctx.chat.length - 1];
-    if (!latestMessage?.is_user) return null;
-    const latestText = normalizeGroupChatText(latestMessage.mes || '');
-    if (!latestText || latestText.startsWith('/')) return null;
-
-    const roster = buildGroupChatRosterEntries(settings);
-    const contactRoster = buildGroupChatContactRoster();
-    if (roster.length === 0 || contactRoster.length === 0) return null;
-    if (Math.random() >= (settings.responseProbability / 100)) return null;
-
-    const suppressMainCharacterReply = shouldSuppressMainCharacter(settings);
-    const responders = selectGroupChatContacts(contactRoster, settings);
-    if (responders.length === 0) return null;
-
-    return {
-        userMessageIndex: Number(ctx.chat.length - 1),
-        suppressMainCharacterReply,
-        responders,
-        roster,
-    };
+    return null;
 }
 
 let pendingGroupChatTurn = null;
@@ -1611,7 +1589,7 @@ function openSettingsPanel(onBack) {
 
         const roomPopupDesc = document.createElement('div');
         roomPopupDesc.className = 'slm-desc';
-        roomPopupDesc.textContent = '권장 방식: 유저가 방 멤버를 직접 골라 별도 메신저 방을 만들고, 그 방 안에서만 단톡 흐름을 진행합니다. 아래 설정은 레거시 자동 단톡용입니다.';
+        roomPopupDesc.textContent = '권장 방식: 유저가 방 멤버를 직접 골라 별도 메신저 방을 만들고, 그 방 안에서만 단톡 흐름을 진행합니다. 레거시 자동 단톡 응답은 제거되었습니다.';
         wrapper.appendChild(roomPopupDesc);
 
         const helperToggleRow = document.createElement('div');
@@ -1629,154 +1607,6 @@ function openSettingsPanel(onBack) {
         helperToggleLabel.append(helperToggle, document.createTextNode(' 도움말 / 안내 문구 표시 안 함'));
         helperToggleRow.appendChild(helperToggleLabel);
         wrapper.appendChild(helperToggleRow);
-
-        const groupChatToggleRow = document.createElement('div');
-        groupChatToggleRow.className = 'slm-settings-row';
-        const groupChatToggleLabel = document.createElement('label');
-        groupChatToggleLabel.className = 'slm-toggle-label';
-        const groupChatToggle = document.createElement('input');
-        groupChatToggle.type = 'checkbox';
-        groupChatToggle.checked = settings.groupChat?.enabled === true;
-        groupChatToggle.onchange = () => {
-            if (!settings.groupChat) settings.groupChat = { ...GROUP_CHAT_SETTINGS_DEFAULTS };
-            settings.groupChat.enabled = groupChatToggle.checked;
-            saveSettings();
-            showToast(`단톡 자동 응답: ${settings.groupChat.enabled ? 'ON' : 'OFF'}`, 'success', 1500);
-        };
-        groupChatToggleLabel.append(groupChatToggle, document.createTextNode(' 레거시 자동 단톡 응답 사용 (권장: 위 메신저 방 기능)'));
-        groupChatToggleRow.appendChild(groupChatToggleLabel);
-        wrapper.appendChild(groupChatToggleRow);
-
-        const groupChatCharRow = document.createElement('div');
-        groupChatCharRow.className = 'slm-settings-row';
-        const groupChatCharLabel = document.createElement('label');
-        groupChatCharLabel.className = 'slm-toggle-label';
-        const groupChatCharToggle = document.createElement('input');
-        groupChatCharToggle.type = 'checkbox';
-        groupChatCharToggle.checked = settings.groupChat?.includeMainCharacter !== false;
-        groupChatCharToggle.onchange = () => {
-            if (!settings.groupChat) settings.groupChat = { ...GROUP_CHAT_SETTINGS_DEFAULTS };
-            settings.groupChat.includeMainCharacter = groupChatCharToggle.checked;
-            saveSettings();
-        };
-        groupChatCharLabel.append(groupChatCharToggle, document.createTextNode(' 기본 {{char}}도 단톡 자동 응답 후보에 포함'));
-        groupChatCharRow.appendChild(groupChatCharLabel);
-        wrapper.appendChild(groupChatCharRow);
-
-        const groupChatProbRow = document.createElement('div');
-        groupChatProbRow.className = 'slm-input-row';
-        groupChatProbRow.style.marginTop = '8px';
-        const groupChatProbLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '첫 단톡 응답 확률:' });
-        const groupChatProbInput = Object.assign(document.createElement('input'), {
-            className: 'slm-input slm-input-sm',
-            type: 'number',
-            min: '0',
-            max: '100',
-            value: String(settings.groupChat?.responseProbability ?? GROUP_CHAT_SETTINGS_DEFAULTS.responseProbability),
-        });
-        groupChatProbInput.style.width = '70px';
-        const groupChatProbPctLbl = Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '%' });
-        const groupChatProbApplyBtn = document.createElement('button');
-        groupChatProbApplyBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
-        groupChatProbApplyBtn.textContent = '적용';
-        groupChatProbApplyBtn.onclick = () => {
-            if (!settings.groupChat) settings.groupChat = { ...GROUP_CHAT_SETTINGS_DEFAULTS };
-            const val = parseInt(groupChatProbInput.value, 10);
-            settings.groupChat.responseProbability = Math.max(0, Math.min(100, Number.isNaN(val) ? GROUP_CHAT_SETTINGS_DEFAULTS.responseProbability : val));
-            groupChatProbInput.value = String(settings.groupChat.responseProbability);
-            saveSettings();
-            showToast(`단톡 첫 응답 확률: ${settings.groupChat.responseProbability}%`, 'success', 1500);
-        };
-        groupChatProbRow.append(groupChatProbLbl, groupChatProbInput, groupChatProbPctLbl, groupChatProbApplyBtn);
-        wrapper.appendChild(groupChatProbRow);
-
-        const groupChatExtraRow = document.createElement('div');
-        groupChatExtraRow.className = 'slm-input-row';
-        groupChatExtraRow.style.marginTop = '8px';
-        const groupChatExtraLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '추가 단톡 응답 확률:' });
-        const groupChatExtraInput = Object.assign(document.createElement('input'), {
-            className: 'slm-input slm-input-sm',
-            type: 'number',
-            min: '0',
-            max: '100',
-            value: String(settings.groupChat?.extraResponseProbability ?? GROUP_CHAT_SETTINGS_DEFAULTS.extraResponseProbability),
-        });
-        groupChatExtraInput.style.width = '70px';
-        const groupChatExtraPctLbl = Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '%' });
-        const groupChatExtraApplyBtn = document.createElement('button');
-        groupChatExtraApplyBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
-        groupChatExtraApplyBtn.textContent = '적용';
-        groupChatExtraApplyBtn.onclick = () => {
-            if (!settings.groupChat) settings.groupChat = { ...GROUP_CHAT_SETTINGS_DEFAULTS };
-            const val = parseInt(groupChatExtraInput.value, 10);
-            settings.groupChat.extraResponseProbability = Math.max(0, Math.min(100, Number.isNaN(val) ? GROUP_CHAT_SETTINGS_DEFAULTS.extraResponseProbability : val));
-            groupChatExtraInput.value = String(settings.groupChat.extraResponseProbability);
-            saveSettings();
-            showToast(`단톡 추가 응답 확률: ${settings.groupChat.extraResponseProbability}%`, 'success', 1500);
-        };
-        groupChatExtraRow.append(groupChatExtraLbl, groupChatExtraInput, groupChatExtraPctLbl, groupChatExtraApplyBtn);
-        wrapper.appendChild(groupChatExtraRow);
-
-        const groupChatContactOnlyRow = document.createElement('div');
-        groupChatContactOnlyRow.className = 'slm-input-row';
-        groupChatContactOnlyRow.style.marginTop = '8px';
-        const groupChatContactOnlyLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '연락처만 응답 확률:' });
-        const groupChatContactOnlyInput = Object.assign(document.createElement('input'), {
-            className: 'slm-input slm-input-sm',
-            type: 'number',
-            min: '0',
-            max: '100',
-            value: String(settings.groupChat?.contactOnlyProbability ?? GROUP_CHAT_SETTINGS_DEFAULTS.contactOnlyProbability),
-        });
-        groupChatContactOnlyInput.style.width = '70px';
-        const groupChatContactOnlyPctLbl = Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '%' });
-        const groupChatContactOnlyApplyBtn = document.createElement('button');
-        groupChatContactOnlyApplyBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
-        groupChatContactOnlyApplyBtn.textContent = '적용';
-        groupChatContactOnlyApplyBtn.onclick = () => {
-            if (!settings.groupChat) settings.groupChat = { ...GROUP_CHAT_SETTINGS_DEFAULTS };
-            const val = parseInt(groupChatContactOnlyInput.value, 10);
-            settings.groupChat.contactOnlyProbability = Math.max(0, Math.min(100, Number.isNaN(val) ? GROUP_CHAT_SETTINGS_DEFAULTS.contactOnlyProbability : val));
-            groupChatContactOnlyInput.value = String(settings.groupChat.contactOnlyProbability);
-            saveSettings();
-            showToast(`연락처만 응답 확률: ${settings.groupChat.contactOnlyProbability}%`, 'success', 1500);
-        };
-        groupChatContactOnlyRow.append(groupChatContactOnlyLbl, groupChatContactOnlyInput, groupChatContactOnlyPctLbl, groupChatContactOnlyApplyBtn);
-        wrapper.appendChild(groupChatContactOnlyRow);
-
-        const groupChatMaxRow = document.createElement('div');
-        groupChatMaxRow.className = 'slm-input-row';
-        groupChatMaxRow.style.marginTop = '8px';
-        const groupChatMaxLbl = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '한 턴 최대 응답 수:' });
-        const groupChatMaxInput = Object.assign(document.createElement('input'), {
-            className: 'slm-input slm-input-sm',
-            type: 'number',
-            min: '1',
-            max: '3',
-            value: String(settings.groupChat?.maxResponsesPerTurn ?? GROUP_CHAT_SETTINGS_DEFAULTS.maxResponsesPerTurn),
-        });
-        groupChatMaxInput.style.width = '70px';
-        const groupChatMaxApplyBtn = document.createElement('button');
-        groupChatMaxApplyBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
-        groupChatMaxApplyBtn.textContent = '적용';
-        groupChatMaxApplyBtn.onclick = () => {
-            if (!settings.groupChat) settings.groupChat = { ...GROUP_CHAT_SETTINGS_DEFAULTS };
-            const val = parseInt(groupChatMaxInput.value, 10);
-            settings.groupChat.maxResponsesPerTurn = Math.max(1, Math.min(3, Number.isNaN(val) ? GROUP_CHAT_SETTINGS_DEFAULTS.maxResponsesPerTurn : val));
-            groupChatMaxInput.value = String(settings.groupChat.maxResponsesPerTurn);
-            saveSettings();
-            showToast(`단톡 최대 응답 수: ${settings.groupChat.maxResponsesPerTurn}`, 'success', 1500);
-        };
-        groupChatMaxRow.append(groupChatMaxLbl, groupChatMaxInput, groupChatMaxApplyBtn);
-        wrapper.appendChild(groupChatMaxRow);
-
-        const groupChatHint = document.createElement('div');
-        groupChatHint.className = 'slm-label';
-        groupChatHint.style.fontSize = '12px';
-        groupChatHint.style.opacity = '0.8';
-        groupChatHint.style.marginTop = '6px';
-        groupChatHint.textContent = '연락처만 응답 확률이 발동하면 이번 턴의 기본 {{char}} 응답은 지우고, 체크된 연락처가 무작위로 답합니다.';
-        wrapper.appendChild(groupChatHint);
 
         wrapper.appendChild(Object.assign(document.createElement('hr'), { className: 'slm-hr' }));
 
@@ -4212,7 +4042,7 @@ async function init() {
                 }
             }
             clearScheduledGroupChatTurn();
-            pendingGroupChatTurn = planGroupChatTurn();
+            pendingGroupChatTurn = null;
         });
     }
 
@@ -4222,11 +4052,6 @@ async function init() {
             trackGifticonUsageFromCharacterMessage();
             await applyCharacterEmoticonDisplayMode().catch((e) => console.error('[ST-LifeSim] 이모티콘 표시 모드 적용 오류:', e));
             await applyCharacterImageDisplayMode().catch((e) => console.error('[ST-LifeSim] 이미지 표시 모드 적용 오류:', e));
-            if (pendingGroupChatTurn) {
-                const plan = pendingGroupChatTurn;
-                pendingGroupChatTurn = null;
-                schedulePlannedGroupChatTurn(plan);
-            }
         });
     }
 

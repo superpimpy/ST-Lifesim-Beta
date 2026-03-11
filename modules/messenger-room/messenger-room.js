@@ -11,6 +11,7 @@ import { escapeHtml, generateId, showConfirm, showToast } from '../../utils/ui.j
 const MODULE_KEY = 'messenger-rooms';
 const MAIN_CHAR_MEMBER_KEY = '__main_char__';
 const USER_MEMBER_KEY = '__user__';
+const CONTACT_MEMBER_KEY_PREFIX = 'contact:';
 const ROOM_MESSAGE_LIMIT = 18;
 const ROOM_MESSAGE_STORAGE_LIMIT = 80;
 const ROOM_AUTONOMY_DELAY_MIN_MS = 2500;
@@ -18,7 +19,8 @@ const ROOM_AUTONOMY_DELAY_MAX_MS = 6500;
 const ROOM_IMAGE_TEXT_TEMPLATE_DEFAULT = '[사진: {description}]';
 const ROOM_ICON_GROUP = '👥';
 const ROOM_ICON_DIRECT = '💬';
-const ROOM_IMAGE_OFF_PROMPT = '<image_generation_rule>\nWhen the responder would realistically take and send a photo in this room, insert a <pic prompt="short English image description"> tag.\nOnly use <pic> for photos the responder could actually take with their phone.\nNo narration, mood shots, or third-person views.\n</image_generation_rule>';
+const ROOM_IMAGE_ON_PROMPT = '<image_generation_rule>\nWhen the responder would realistically take and send a photo in this room, insert a <pic prompt="concise English Danbooru-style tags"> tag.\nOnly use <pic> for photos the responder could actually take with their phone.\nNo narration, mood shots, or third-person views.\nRules:\n1) <pic prompt="..."> must already be final direct image tags.\n2) Format: scene tags | Character 1: (appearance tags)\n3) Use "Character N:" labels, not actual names, for appearance blocks.\n4) No Korean, explanations, markdown, or prose.\n</image_generation_rule>';
+const ROOM_IMAGE_OFF_PROMPT = '<image_generation_rule>\nWhen the responder would realistically take and send a photo in this room, insert a <pic prompt="short Korean photo description"> tag.\nOnly use <pic> for photos the responder could actually take with their phone.\nNo narration, mood shots, or third-person views.\n</image_generation_rule>';
 const ROOM_PIC_TAG_REGEX = /<?pic\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi;
 const ROOM_EMOTICON_ONLY_HTML_REGEX = /^<img\b[^>]*aria-label="[^"]*이모티콘[^"]*"[^>]*>$/i;
 const ROOM_EMOTICON_TOKEN_ONLY_REGEX = /^\s*\[\[\s*emoticon\s*:\s*[^\]]+\s*\]\]\s*$/i;
@@ -37,6 +39,119 @@ function normalizeRoomBinding(binding) {
     return binding === 'character' ? 'character' : 'chat';
 }
 
+function buildContactMemberKey(contact) {
+    const id = String(contact?.id || '').trim();
+    if (!id) return '';
+    const binding = normalizeRoomBinding(contact?.binding || 'chat');
+    return `${CONTACT_MEMBER_KEY_PREFIX}${binding}:${id}`;
+}
+
+function buildCandidateAliases(candidate = {}) {
+    const aliases = [
+        candidate.key,
+        candidate.legacyKey,
+        candidate.label,
+        candidate.name,
+        candidate.displayName,
+        candidate.subName,
+        candidate.isMainChar ? MAIN_CHAR_MEMBER_KEY : '',
+    ];
+    return [...new Set(aliases.map((value) => String(value || '').trim()).filter(Boolean))];
+}
+
+function getMemberCandidates() {
+    const ctx = getContext();
+    const candidates = [];
+    const seen = new Set();
+    const pushCandidate = (candidate) => {
+        const key = String(candidate?.key || '').trim();
+        const label = String(candidate?.label || '').trim();
+        if (!key || !label || seen.has(key.toLowerCase())) return;
+        seen.add(key.toLowerCase());
+        candidates.push({
+            ...candidate,
+            key,
+            label,
+            aliases: buildCandidateAliases({ ...candidate, key, label }),
+        });
+    };
+
+    const contacts = [...getContacts('character'), ...getContacts('chat')];
+    const mainCharName = String(ctx?.name2 || '').trim();
+    const mainCharContact = contacts.find((contact) => contact?.isCharAuto === true && String(contact?.name || '').trim() === mainCharName) || null;
+
+    if (mainCharContact) {
+        pushCandidate({
+            key: buildContactMemberKey(mainCharContact),
+            legacyKey: MAIN_CHAR_MEMBER_KEY,
+            name: mainCharContact.name,
+            displayName: mainCharContact.displayName,
+            subName: mainCharContact.subName,
+            label: String(mainCharContact.displayName || mainCharContact.name || mainCharName).trim(),
+            subtitle: String(mainCharContact.relationToUser || '주요 캐릭터').trim(),
+            avatar: String(mainCharContact.avatar || '').trim(),
+            avatarStyle: mainCharContact.avatarStyle || null,
+            isMainChar: true,
+            description: String(mainCharContact.description || '').trim(),
+            personality: String(mainCharContact.personality || '').trim(),
+            relationToUser: String(mainCharContact.relationToUser || '').trim(),
+        });
+    } else if (mainCharName) {
+        pushCandidate({
+            key: MAIN_CHAR_MEMBER_KEY,
+            label: mainCharName,
+            subtitle: '현재 {{char}}',
+            avatar: '',
+            avatarStyle: null,
+            isMainChar: true,
+            description: '',
+            personality: '',
+            relationToUser: '',
+        });
+    }
+
+    contacts.forEach((contact) => {
+        if (contact?.isUserAuto) return;
+        if (contact?.isCharAuto && buildContactMemberKey(contact) === buildContactMemberKey(mainCharContact)) return;
+        const label = String(contact?.displayName || contact?.name || '').trim();
+        const key = buildContactMemberKey(contact);
+        if (!label || !key) return;
+        pushCandidate({
+            key,
+            name: contact?.name,
+            displayName: contact?.displayName,
+            subName: contact?.subName,
+            label,
+            subtitle: String(contact?.relationToUser || contact?.description || '').trim(),
+            avatar: String(contact?.avatar || '').trim(),
+            avatarStyle: contact?.avatarStyle || null,
+            isMainChar: contact?.isCharAuto === true,
+            description: String(contact?.description || '').trim(),
+            personality: String(contact?.personality || '').trim(),
+            relationToUser: String(contact?.relationToUser || '').trim(),
+        });
+    });
+
+    return candidates;
+}
+
+function getCandidateMap() {
+    const map = new Map();
+    getMemberCandidates().forEach((candidate) => {
+        candidate.aliases.forEach((alias) => {
+            map.set(alias, candidate);
+            map.set(alias.toLowerCase(), candidate);
+        });
+    });
+    return map;
+}
+
+function normalizeRoomMemberKey(memberKey, candidateMap = getCandidateMap()) {
+    const normalized = String(memberKey || '').trim();
+    if (!normalized) return '';
+    return candidateMap.get(normalized)?.key || candidateMap.get(normalized.toLowerCase())?.key || normalized;
+}
+
 /**
  * Normalize messenger-room records loaded from storage.
  * @param {Array} rooms
@@ -44,10 +159,13 @@ function normalizeRoomBinding(binding) {
  */
 export function normalizeMessengerRooms(rooms = [], binding = 'chat') {
     if (!Array.isArray(rooms)) return [];
+    const candidateMap = getCandidateMap();
     return rooms
         .map((room) => {
             const members = Array.isArray(room?.members)
-                ? room.members.map((member) => String(member || '').trim()).filter(Boolean)
+                ? [...new Set(room.members
+                    .map((member) => normalizeRoomMemberKey(member, candidateMap))
+                    .filter(Boolean))]
                 : [];
             const messages = Array.isArray(room?.messages)
                 ? room.messages.map((message) => ({
@@ -177,6 +295,18 @@ function getRoomUiSettings() {
     };
 }
 
+function clampRoomPercentage(value, fallback) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(0, Math.min(100, parsed));
+}
+
+function clampRoomResponseCount(value, fallback) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(1, Math.min(3, parsed));
+}
+
 function normalizeQuotesForRoomPicTag(text) {
     return String(text || '')
         .replace(/[\u201C\u201D\u201E\u201F\uFF02]/g, '"')
@@ -249,71 +379,21 @@ function getTranslatableRoomMessageText(message) {
     return text;
 }
 
-function getMemberCandidates() {
-    const ctx = getContext();
-    const candidates = [];
-    const seen = new Set();
-    const pushCandidate = (candidate) => {
-        const key = String(candidate?.key || '').trim();
-        const label = String(candidate?.label || '').trim();
-        if (!key || !label) return;
-        const normalized = key.toLowerCase();
-        if (seen.has(normalized)) return;
-        seen.add(normalized);
-        candidates.push({ ...candidate, key, label });
-    };
-
-    const mainCharName = String(ctx?.name2 || '').trim();
-    if (mainCharName) {
-        pushCandidate({
-            key: MAIN_CHAR_MEMBER_KEY,
-            label: mainCharName,
-            subtitle: '현재 {{char}}',
-            avatar: '',
-            isMainChar: true,
-            description: '',
-            personality: '',
-            relationToUser: '',
-        });
-    }
-
-    [...getContacts('chat'), ...getContacts('character')].forEach((contact) => {
-        if (contact?.isUserAuto || contact?.isCharAuto) return;
-        const label = String(contact?.displayName || contact?.name || '').trim();
-        if (!label) return;
-        pushCandidate({
-            key: label,
-            label,
-            subtitle: String(contact?.relationToUser || contact?.description || '').trim(),
-            avatar: String(contact?.avatar || '').trim(),
-            avatarStyle: contact?.avatarStyle || null,
-            isMainChar: false,
-            description: String(contact?.description || '').trim(),
-            personality: String(contact?.personality || '').trim(),
-            relationToUser: String(contact?.relationToUser || '').trim(),
-        });
-    });
-
-    return candidates;
-}
-
-function getCandidateMap() {
-    return new Map(getMemberCandidates().map((candidate) => [candidate.key, candidate]));
-}
-
 function getMemberDisplayLabel(memberKey, candidateMap = getCandidateMap()) {
-    if (memberKey === MAIN_CHAR_MEMBER_KEY) {
+    const normalizedKey = normalizeRoomMemberKey(memberKey, candidateMap);
+    if (normalizedKey === MAIN_CHAR_MEMBER_KEY) {
         return String(getContext()?.name2 || '{{char}}').trim() || '{{char}}';
     }
-    return candidateMap.get(memberKey)?.label || String(memberKey || '').trim();
+    return candidateMap.get(normalizedKey)?.label || String(memberKey || '').trim();
 }
 
 function getAvatarForMember(memberKey, candidateMap = getCandidateMap()) {
-    return candidateMap.get(memberKey)?.avatar || '';
+    return candidateMap.get(normalizeRoomMemberKey(memberKey, candidateMap))?.avatar || '';
 }
 
 function isMainCharInRoom(room) {
-    return Array.isArray(room?.members) && room.members.includes(MAIN_CHAR_MEMBER_KEY);
+    const candidateMap = getCandidateMap();
+    return Array.isArray(room?.members) && room.members.some((memberKey) => candidateMap.get(normalizeRoomMemberKey(memberKey, candidateMap))?.isMainChar === true);
 }
 
 function getRoomTitle(room, candidateMap = getCandidateMap()) {
@@ -386,20 +466,23 @@ function clearRoomAutoReplySchedule(roomId) {
 }
 
 function getContactMemberKey(contact) {
-    return String(contact?.displayName || contact?.name || '').trim();
+    return buildContactMemberKey(contact);
 }
 
 function getRoomContactMemberKeys(room) {
+    const candidateMap = getCandidateMap();
     return (Array.isArray(room?.members) ? room.members : [])
-        .filter((memberKey) => memberKey && memberKey !== MAIN_CHAR_MEMBER_KEY && memberKey !== USER_MEMBER_KEY);
+        .map((memberKey) => normalizeRoomMemberKey(memberKey, candidateMap))
+        .filter((memberKey) => memberKey && memberKey !== USER_MEMBER_KEY);
 }
 
 function findDirectMessengerRoom(memberKey, binding = null) {
-    const normalizedKey = String(memberKey || '').trim().toLowerCase();
+    const candidateMap = getCandidateMap();
+    const normalizedKey = normalizeRoomMemberKey(memberKey, candidateMap).toLowerCase();
     if (!normalizedKey) return null;
     return loadMessengerRooms(binding).find((room) => {
         const contactMembers = getRoomContactMemberKeys(room)
-            .map((entry) => String(entry || '').trim().toLowerCase())
+            .map((entry) => normalizeRoomMemberKey(entry, candidateMap).toLowerCase())
             .filter(Boolean);
         return contactMembers.length === 1 && contactMembers[0] === normalizedKey;
     }) || null;
@@ -407,7 +490,7 @@ function findDirectMessengerRoom(memberKey, binding = null) {
 
 function getRoomRepresentativeCandidate(room, candidateMap = getCandidateMap()) {
     const contactMembers = getRoomContactMemberKeys(room)
-        .map((memberKey) => candidateMap.get(memberKey))
+        .map((memberKey) => candidateMap.get(normalizeRoomMemberKey(memberKey, candidateMap)))
         .filter(Boolean);
     if (contactMembers.length !== 1) return null;
     return contactMembers[0];
@@ -670,8 +753,8 @@ function pickRandomResponders(room) {
     if (members.length === 0) return [];
     const pool = [...members];
     const responders = [];
-    const maxResponses = Math.max(1, Math.min(3, Number(room?.settings?.maxResponses) || ROOM_DEFAULTS.maxResponses));
-    const extraProbability = Math.max(0, Math.min(100, Number(room?.settings?.extraResponseProbability) || ROOM_DEFAULTS.extraResponseProbability));
+    const maxResponses = clampRoomResponseCount(room?.settings?.maxResponses, ROOM_DEFAULTS.maxResponses);
+    const extraProbability = clampRoomPercentage(room?.settings?.extraResponseProbability, ROOM_DEFAULTS.extraResponseProbability);
 
     const first = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
     if (!first) return responders;
@@ -695,7 +778,7 @@ async function generateRoomReply(room, responderKey, candidateMap) {
     const latestUserMessage = normalizeRoomPromptText(room.messages[room.messages.length - 1]?.text || '');
     const emoticonContext = buildAiEmoticonContext(responderName);
     const rosterText = room.members.map((memberKey) => {
-        const candidate = candidateMap.get(memberKey);
+        const candidate = candidateMap.get(normalizeRoomMemberKey(memberKey, candidateMap));
         const label = getMemberDisplayLabel(memberKey, candidateMap);
         const details = [];
         if (candidate?.relationToUser) details.push(`Relation to {{user}}: ${normalizeRoomPromptText(candidate.relationToUser)}`);
@@ -704,7 +787,7 @@ async function generateRoomReply(room, responderKey, candidateMap) {
         return `- ${label}${details.length ? ` | ${details.join(' | ')}` : ''}`;
     }).join('\n');
     const otherMembers = memberLabels.filter((label) => label.toLowerCase() !== responderName.toLowerCase());
-    const responderProfile = candidateMap.get(responderKey);
+    const responderProfile = candidateMap.get(normalizeRoomMemberKey(responderKey, candidateMap));
     const prompt = [
         `You are writing exactly one iPhone-style messenger room reply as ${responderName}.`,
         'This is a private mobile group room created by {{user}}.',
@@ -732,7 +815,9 @@ async function generateRoomReply(room, responderKey, candidateMap) {
         '',
         emoticonContext,
         '',
-        imageSettings.messageImageInjectionPrompt || ROOM_IMAGE_OFF_PROMPT,
+        imageSettings.messageImageGenerationMode
+            ? (imageSettings.messageImageInjectionPrompt || ROOM_IMAGE_ON_PROMPT)
+            : ROOM_IMAGE_OFF_PROMPT,
         '',
         `Output only ${responderName}'s next room message.`,
     ].join('\n');
@@ -785,7 +870,7 @@ async function runRoomAutoReplies(roomId, onUpdate = null) {
     const room = getMessengerRoomById(roomId);
     if (!room || room.settings?.autoReplyEnabled !== true) return;
     const scheduleToken = generateId();
-    const maxResponses = Math.max(1, Math.min(3, Number(room.settings?.maxResponses) || ROOM_DEFAULTS.maxResponses));
+    const maxResponses = clampRoomResponseCount(room.settings?.maxResponses, ROOM_DEFAULTS.maxResponses);
     const scheduleAttempt = (usedResponders = []) => {
         const state = roomAutoReplyState.get(roomId);
         if (!state || state.token !== scheduleToken) return;
@@ -799,8 +884,8 @@ async function runRoomAutoReplies(roomId, onUpdate = null) {
                     return;
                 }
                 const probability = usedResponders.length === 0
-                    ? (Number(freshRoom.settings?.responseProbability) || ROOM_DEFAULTS.responseProbability)
-                    : (Number(freshRoom.settings?.extraResponseProbability) || ROOM_DEFAULTS.extraResponseProbability);
+                    ? clampRoomPercentage(freshRoom.settings?.responseProbability, ROOM_DEFAULTS.responseProbability)
+                    : clampRoomPercentage(freshRoom.settings?.extraResponseProbability, ROOM_DEFAULTS.extraResponseProbability);
                 if (Math.random() * 100 >= probability) {
                     clearRoomAutoReplySchedule(roomId);
                     return;
@@ -849,9 +934,10 @@ async function runRoomAutoReplies(roomId, onUpdate = null) {
 }
 
 function buildAvatarElement(memberKey, candidateMap) {
-    const candidate = candidateMap.get(memberKey);
-    const avatar = getAvatarForMember(memberKey, candidateMap);
-    const label = getMemberDisplayLabel(memberKey, candidateMap);
+    const normalizedKey = normalizeRoomMemberKey(memberKey, candidateMap);
+    const candidate = candidateMap.get(normalizedKey);
+    const avatar = getAvatarForMember(normalizedKey, candidateMap);
+    const label = getMemberDisplayLabel(normalizedKey, candidateMap);
     if (avatar) {
         const img = document.createElement('img');
         img.className = 'slm-room-avatar-img';
@@ -983,9 +1069,9 @@ function openRoomEmoticonPicker(roomId, onBack, onSend) {
 
 function openRoomCreatePopup(onBack, roomId = null) {
     const existingRoom = roomId ? getMessengerRoomById(roomId) : null;
+    const candidates = getMemberCandidates();
     const candidateMap = getCandidateMap();
-    const candidates = [...candidateMap.values()];
-    const selectedKeys = new Set(existingRoom?.members || []);
+    const selectedKeys = new Set((existingRoom?.members || []).map((memberKey) => normalizeRoomMemberKey(memberKey, candidateMap)).filter(Boolean));
     let selectedBinding = normalizeRoomBinding(existingRoom?.binding || getDefaultBinding());
     const wrapper = document.createElement('div');
     wrapper.className = 'slm-form slm-room-create';
@@ -1516,7 +1602,7 @@ function openMessengerRoomDetail(roomId, onBack) {
         appendUserRoomMessage({
             text: `[[emoticon:${emoticon.name}]]`,
             html: buildEmoticonMessageHtml(emoticon, userName),
-        });
+        }, { skipAutoReply: true });
     });
 
     input.addEventListener('keydown', (event) => {

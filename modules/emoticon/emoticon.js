@@ -256,7 +256,10 @@ export function replaceAiSelectedEmoticons(text, senderName = '{{char}}') {
     if (htmlMap.size === 0) return source;
 
     const resolveToken = (rawName) => {
-        const normalizedSource = normalizeEmoticonName(rawName);
+        const normalizedSource = normalizeEmoticonName(rawName)
+            .replace(/^\[\[\s*emoticon\s*:\s*([^\]]+?)\s*\]\]$/i, '$1')
+            .replace(/^<\s*emoticon\s*:\s*([^>]+?)\s*>$/i, '$1')
+            .replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, '');
         if (!isSafeEmoticonTokenName(normalizedSource)) return null;
         const numberedName = normalizedSource.replace(/^\d+\s*[-\].):]+\s*/, '').trim();
         const normalizedName = normalizeEmoticonName(numberedName || normalizedSource).toLowerCase();
@@ -273,6 +276,8 @@ export function replaceAiSelectedEmoticons(text, senderName = '{{char}}') {
         .map((line) => {
             const trimmedLine = line.trim();
             if (!trimmedLine) return line;
+            const bulletHtmlMatch = trimmedLine.match(/^[•*-]\s+(<img\b.+<\/img>|<img\b[^>]*>)$/i);
+            if (bulletHtmlMatch) return bulletHtmlMatch[1];
             const resolved = resolveToken(trimmedLine);
             if (resolved) return resolved;
             const bulletMatch = trimmedLine.match(AI_EMOTICON_BULLET_LINE_REGEX);
@@ -290,15 +295,15 @@ export function buildAiEmoticonContext(senderName = getCurrentCharName()) {
     const list = aiEmoticons
         .map((emoticon) => normalizeEmoticonName(emoticon.name))
         .filter(Boolean)
-        .map((name) => `• ${name}`)
+        .map((name) => `• [[emoticon:${name}]]`)
         .join('\n');
     return [
         '<당신이 사용할 수 있는 이모티콘 목록입니다>',
         '<Available emoticons you can use>',
         list,
         '',
-        '이모티콘을 보내고 싶다면 위 목록에서 상황에 가장 잘 맞는 이름을 정확히 하나 골라 [[emoticon:이름]] 형식으로만 출력하세요.',
-        'If you want to send one, choose the single name that best fits the mood and output only [[emoticon:NAME]].',
+        '이모티콘을 보내고 싶다면 위 목록에서 상황에 가장 잘 맞는 토큰 한 줄만 그대로 복사해 출력하세요.',
+        'If you want to send one, copy exactly one token from the list above and output only that token.',
         '이모티콘 이름 자체가 감정/행동 설명입니다. 반드시 이름의 의미를 보고 맥락에 맞는 이모티콘을 고르세요.',
         'The emoticon names themselves describe the emotion or action. Use that meaning to choose one that fits the situation.',
         '사용자가 이모티콘, emoji, sticker, reaction을 원하면 이미지 태그 <pic ...> 대신 반드시 [[emoticon:이름]] 형식을 우선 사용하세요.',
@@ -306,7 +311,7 @@ export function buildAiEmoticonContext(senderName = getCurrentCharName()) {
         '이모티콘용 HTML, 이미지 URL, markdown, 설명은 직접 출력하지 마세요.',
         'Do not output emoticon HTML, image URLs, markdown, or explanations directly.',
         '',
-        'CRITICAL: The emoticon names above are exact identifiers. Never translate, shorten, or paraphrase them. Always copy the original name exactly.',
+        'CRITICAL: Do not translate, shorten, paraphrase, or edit any part inside [[emoticon:...]]. Copy the token exactly as listed.',
     ].join('\n');
 }
 

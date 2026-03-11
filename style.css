@@ -1384,6 +1384,13 @@ body[data-theme="dark"],
   overflow-y: auto;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
+.slm-room-textarea:placeholder-shown {
+  text-align: center;
+}
+.slm-room-textarea:focus,
+.slm-room-textarea:not(:placeholder-shown) {
+  text-align: left;
+}
 .slm-room-textarea:focus {
   border-color: var(--slm-accent);
   box-shadow: 0 0 0 2px rgba(155,114,208,0.15);
@@ -1443,6 +1450,15 @@ body[data-theme="dark"],
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.slm-message-rich-content .slm-msg-generated-image,
+.slm-room-message-bubble .slm-msg-generated-image {
+  display: block;
+  width: min(100%, 240px);
+  max-width: 100%;
+  height: auto;
+  object-fit: cover;
 }
 
 .slm-room-member-row {

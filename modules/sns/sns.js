@@ -35,8 +35,8 @@ const SNS_IMAGE_DESC_MAX = 220;
 const SNS_RANDOM_LIKES_BONUS_MAX = 30;
 const DANBOORU_SPACE_TAG_RULE = 'Use English Danbooru-style tags only, separated by commas, with spaces instead of underscores.';
 const DEFAULT_SNS_PROMPTS = {
-    postChar: 'Write exactly one SNS post as {{charName}}.\n\n* Before writing, internalize these:\n- {{charName}}\'s personality, speech patterns, and worldview based on profile.\n- Extract the setting and genre from {{charName}}\'s profile itself — it could be modern, medieval fantasy, zombie apocalypse, sci-fi, or anything else. Let that world shape what feels natural to say and how to say it\n- What {{charName}} would actually care about or casually mention on a given day\n--------\n* {{charName}}\'s profile:\n{{personality}}\n--------\n* System Rules:\n- 1–4 sentences, casual and off-the-cuff, like a real personal post\n- Write in the voice and language style that fits {{charName}}\'s background and personality\n- If {{charName}}\'s personality strongly suggests they\'d use emojis, you may include them — otherwise, don\'t\n- No hashtags, no image tags, no quotation marks, no other characters\' reactions, no [caption: ...] blocks\n- Word choice, references, and tone must stay true to the detected world — never bleed in elements from the wrong setting\n- Don\'t be stiff or formal. This is a glimpse into {{charName}}\'s actual inner life, not a public announcement\n\n* System Note\n- Output only {{charName}}\'s post text. Nothing else.\n- Please comply with the output language.\n* This is a post aimed at an unspecified number of people. It is not a 1:1 session to communicate with {{user}}.',
-    postContact: 'Write exactly one SNS post as {{authorName}}.\n\n* Before writing, internalize these:\n- {{authorName}}\'s personality, speech patterns, and worldview based on profile.\n- Extract the setting and genre from {{authorName}}\'s profile itself — it could be modern, medieval fantasy, zombie apocalypse, sci-fi, or anything else. Let that world shape what feels natural to say and how to say it\n- What {{authorName}} would actually care about or casually mention on a given day\n-------\n* {{authorName}}\'s profile:\n{{personality}}\n-------\n* System Rules:\n- 1–2 sentences, casual and off-the-cuff, like a real personal post\n- Write in the voice and language style that fits {{authorName}}\'s background and personality\n- If {{authorName}}\'s personality strongly suggests they\'d use emojis, you may include them — otherwise, don\'t\n- No hashtags, no image tags, no quotation marks, no other characters\' reactions, no [caption: ...] blocks\n- Word choice, references, and tone must stay true to the detected world — never bleed in elements from the wrong setting\n- Don\'t be stiff or formal. This is a glimpse into {{authorName}}\'s actual inner life, not a public announcement\n\n* System Note\n- Output only {{authorName}}\'s post text. Nothing else.\n- Please comply with the output language.',
+    postChar: 'Write exactly one SNS post as {{charName}}.\n\n* Before writing, internalize these:\n- {{charName}}\'s personality, speech patterns, and worldview based on profile.\n- Extract the setting and genre from {{charName}}\'s profile itself — it could be modern, medieval fantasy, zombie apocalypse, sci-fi, or anything else. Let that world shape what feels natural to say and how to say it\n- What {{charName}} would actually care about or casually mention on a given day\n--------\n* {{charName}}\'s profile:\n{{personality}}\n--------\n* System Rules:\n- 1–2 short SNS lines only, casual and off-the-cuff, like a real personal feed update\n- Write in the voice and language style that fits {{charName}}\'s background and personality\n- This is NOT a novel, diary monologue, narration, or scene description. Avoid literary prose and exposition.\n- Sound like something {{charName}} would actually type into a social app right now\n- If {{charName}}\'s personality strongly suggests they\'d use emojis, you may include them — otherwise, don\'t\n- No hashtags, no image tags, no quotation marks, no other characters\' reactions, no [caption: ...] blocks\n- Word choice, references, and tone must stay true to the detected world — never bleed in elements from the wrong setting\n\n* System Note\n- Output only {{charName}}\'s post text. Nothing else.\n- Please comply with the output language.\n* This is a post aimed at an unspecified number of people. It is not a 1:1 session to communicate with {{user}}.',
+    postContact: 'Write exactly one SNS post as {{authorName}}.\n\n* Before writing, internalize these:\n- {{authorName}}\'s personality, speech patterns, and worldview based on profile.\n- Extract the setting and genre from {{authorName}}\'s profile itself — it could be modern, medieval fantasy, zombie apocalypse, sci-fi, or anything else. Let that world shape what feels natural to say and how to say it\n- What {{authorName}} would actually care about or casually mention on a given day\n-------\n* {{authorName}}\'s profile:\n{{personality}}\n-------\n* System Rules:\n- 1–2 short SNS lines only, casual and off-the-cuff, like a real personal feed update\n- Write in the voice and language style that fits {{authorName}}\'s background and personality\n- This is NOT a novel, diary monologue, narration, or scene description. Avoid literary prose and exposition.\n- Sound like something {{authorName}} would actually type into a social app right now\n- If {{authorName}}\'s personality strongly suggests they\'d use emojis, you may include them — otherwise, don\'t\n- No hashtags, no image tags, no quotation marks, no other characters\' reactions, no [caption: ...] blocks\n- Word choice, references, and tone must stay true to the detected world — never bleed in elements from the wrong setting\n\n* System Note\n- Output only {{authorName}}\'s post text. Nothing else.\n- Please comply with the output language.',
     imageDescription: 'For {{authorName}}\'s SNS post "{{postContent}}", write exactly one short sentence describing the attached image. Mention only visible content. Do not use hashtags, quotes, parentheses, or any "caption:" prefix.',
     reply: 'Write exactly one SNS reply for this thread.\nPost author: {{postAuthorName}} ({{postAuthorHandle}})\nPost: "{{postContent}}"\nTarget comment author: {{commentAuthorName}} ({{commentAuthorHandle}})\nTarget comment: "{{commentText}}"\nReply author: {{replyAuthorName}} ({{replyAuthorHandle}})\nRules: one sentence only from {{replyAuthorName}}\'s perspective; use only fixed @handles if needed; use natural language fitting {{replyAuthorName}}\'s background; no explanations, quotes, or hashtags. Personality hint: {{replyPersonality}}. It should be written vividly, fitting the characteristics of each character.',
     extraComment: 'Write exactly one additional SNS comment for this post.\nPost author: {{postAuthorName}} ({{postAuthorHandle}})\nPost: "{{postContent}}"\nComment author: {{extraAuthorName}} ({{extraAuthorHandle}})\nRules: one short sentence from {{extraAuthorName}}\'s perspective; use only fixed @handles if needed; use natural language fitting {{extraAuthorName}}\'s background; no explanations, quotes, or hashtags. Personality hint: {{extraPersonality}}. It should be written vividly, fitting the characteristics of each character.',
@@ -255,6 +255,7 @@ function buildSnsDirectImagePromptRequest(sourcePrompt, authorName) {
         '[Output rule]',
         `Return exactly one final direct image prompt for the author.`,
         'Output ONLY one line of English Danbooru-style tags for direct image generation.',
+        'Do NOT write prose, captions, narration, or sentence-style descriptions.',
         'Format: scene tags | Character 1: (appearance tags)',
         'Use pipe "|" to separate scene tags from character appearance blocks.',
         'Use "Character N:" labels, NOT actual character names.',
@@ -281,6 +282,7 @@ async function createSnsImagePrompt(ctx, sourcePrompt, authorName, contacts = []
         ctx,
         buildSnsDirectImagePromptRequest(sourcePrompt, authorName),
         `${authorName || 'sns'}-image`,
+        'snsImage',
     );
     const directPrompt = buildDirectImagePrompt(generatedPrompt, promptOptions);
     if (directPrompt.finalPrompt) return directPrompt;
@@ -1312,6 +1314,19 @@ function createTranslateButton(text, parent, findExisting, translationClass, com
     return btn;
 }
 
+function preserveSpecialTokens(text, transform) {
+    const source = String(text || '');
+    if (!source.trim()) return '';
+    const placeholders = [];
+    const protectedText = source.replace(/\[\[\s*emoticon\s*:\s*[^\]]+\s*\]\]|<\s*emoticon\s*:\s*[^>]+\s*>/gi, (match) => {
+        const placeholder = `__SLM_TOKEN_${placeholders.length}__`;
+        placeholders.push(match);
+        return placeholder;
+    });
+    const transformed = typeof transform === 'function' ? String(transform(protectedText) || '') : protectedText;
+    return placeholders.reduce((result, token, index) => result.replaceAll(`__SLM_TOKEN_${index}__`, token), transformed);
+}
+
 export async function translateTextToKorean(text) {
     const sourceText = String(text || '').trim();
     if (!sourceText) return '';
@@ -1319,10 +1334,11 @@ export async function translateTextToKorean(text) {
     if (!ctx || (typeof ctx.generateRaw !== 'function' && typeof ctx.generateQuietPrompt !== 'function')) return '';
     const promptSettings = getSnsPromptSettings();
     const customPrompt = applyPromptTemplate(
-        promptSettings.koreanTranslationPrompt || 'Translate the following SNS text into natural Korean. Output Korean text only.\n{{text}}',
-        { text: sourceText },
+        promptSettings.koreanTranslationPrompt || 'Translate the following SNS text into natural Korean. Output Korean text only.\nPreserve [[emoticon:...]] or <emoticon:...> tokens exactly as written.\n{{text}}',
+        { text: preserveSpecialTokens(sourceText, (protectedText) => protectedText) },
     );
-    return generateSnsText(ctx, customPrompt, 'sns-translation', 'snsTranslation');
+    const translated = await generateSnsText(ctx, customPrompt, 'sns-translation', 'snsTranslation');
+    return preserveSpecialTokens(translated, (protectedText) => protectedText);
 }
 
 /**
