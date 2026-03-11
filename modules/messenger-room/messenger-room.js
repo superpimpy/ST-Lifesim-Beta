@@ -2091,14 +2091,16 @@ export function appendExternalRoomMessage(roomId, { authorName, text, html = '' 
     const room = getMessengerRoomById(roomId);
     if (!room) return null;
     const candidateMap = getCandidateMap();
+    const trimmedAuthor = String(authorName || '').trim();
+    const lowerAuthor = trimmedAuthor.toLowerCase();
     const memberKey = room.members.find((key) => {
         const label = getMemberDisplayLabel(key, candidateMap);
-        return label.toLowerCase() === String(authorName || '').toLowerCase();
-    }) || String(authorName || '').trim();
+        return label.toLowerCase() === lowerAuthor;
+    }) || trimmedAuthor;
     const nextRoom = appendRoomMessage(room, {
         id: generateId(),
         authorKey: memberKey,
-        authorName: String(authorName || '').trim(),
+        authorName: trimmedAuthor,
         text: String(text || '').trim(),
         html: String(html || '').trim(),
         timestamp: Date.now(),
@@ -2124,6 +2126,7 @@ export function buildRoomTranscriptText(roomId, limit = 8) {
         const speaker = msg.authorKey === USER_MEMBER_KEY
             ? (userName || '{{user}}')
             : (msg.authorName || getMemberDisplayLabel(msg.authorKey, candidateMap));
+        // 마크업/템플릿 구문을 제거하여 프롬프트 오염을 방지한다
         const text = String(msg?.text || '').replace(/[<>{}\[\]]+/g, ' ').replace(/\n/g, ' ').trim();
         return `[group-room] ${speaker}: ${text}`;
     }).join('\n');
@@ -2143,5 +2146,6 @@ export function openMessengerRoomsPopup(onBack, initialRoomId = null) {
         content,
         className: 'slm-room-list-panel',
         onBack,
+        onClose: () => { _activeRoomListRenderer = null; },
     });
 }

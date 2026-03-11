@@ -756,6 +756,7 @@ export function openSnsPopup(onBack) {
         content,
         className: 'slm-sns-panel',
         onBack,
+        onClose: () => { _activeFeedRenderer = null; },
     });
 }
 

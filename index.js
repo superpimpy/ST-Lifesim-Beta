@@ -1396,7 +1396,11 @@ function schedulePlannedGroupChatTurn(plan) {
 }
 
 async function executePlannedGroupChatTurn(plan) {
-    if (!plan?.responders?.length || !plan.roomId) return;
+    if (!plan?.responders?.length) return;
+    if (!plan.roomId) {
+        console.warn('[ST-LifeSim] executePlannedGroupChatTurn: plan.roomId가 없어 실행할 수 없습니다.');
+        return;
+    }
     const ctx = getContext();
     if (!ctx) return;
 
