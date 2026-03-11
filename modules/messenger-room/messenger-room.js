@@ -1324,27 +1324,32 @@ function buildRoomListContent(onBack, initialRoomId = null) {
             const card = document.createElement('button');
             card.type = 'button';
             card.className = `slm-room-card${initialRoomId && room.id === initialRoomId ? ' active' : ''}`;
-            const title = document.createElement('div');
-            title.className = 'slm-room-card-title';
-            title.textContent = getRoomTitle(room, candidateMap);
-            const categoryText = document.createElement('div');
-            categoryText.className = 'slm-desc';
-            categoryText.textContent = normalizeCategoryList(room.categories).length > 0
-                ? `카테고리: ${normalizeCategoryList(room.categories).join(', ')}`
-                : '';
+
+            // 왼쪽 아이콘 (그룹 아바타)
+            const icon = document.createElement('div');
+            icon.className = 'slm-room-card-icon';
+            const memberCount = room.members?.length || 0;
+            icon.textContent = memberCount > 2 ? '👥' : '💬';
+
+            // 오른쪽 본문 영역
+            const body = document.createElement('div');
+            body.className = 'slm-room-card-body';
+
+            const titleRow = document.createElement('div');
+            titleRow.className = 'slm-room-card-title';
+            const titleText = document.createElement('span');
+            titleText.textContent = getRoomTitle(room, candidateMap);
+            const time = document.createElement('span');
+            time.className = 'slm-room-card-time';
+            time.textContent = formatRelativeTime(room.updatedAt);
+            titleRow.append(titleText, time);
+
             const subtitle = document.createElement('div');
             subtitle.className = 'slm-room-card-subtitle';
             subtitle.textContent = room.messages[room.messages.length - 1]?.text || '아직 메시지가 없습니다.';
-            const meta = document.createElement('div');
-            meta.className = 'slm-room-card-meta';
-            const members = document.createElement('span');
-            members.textContent = room.members.map((memberKey) => getMemberDisplayLabel(memberKey, candidateMap)).join(', ');
-            const time = document.createElement('span');
-            time.textContent = formatRelativeTime(room.updatedAt);
-            meta.append(members, time);
-            card.append(title);
-            if (categoryText.textContent) card.appendChild(categoryText);
-            card.append(subtitle, meta);
+
+            body.append(titleRow, subtitle);
+            card.append(icon, body);
             card.onclick = () => openMessengerRoomDetail(room.id, onBack);
             list.appendChild(card);
         });
