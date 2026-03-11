@@ -1073,13 +1073,12 @@ async function generateRoomReply(room, responderKey, candidateMap) {
         `Output only ${responderName}'s next room message.`,
     ].join('\n');
 
-    let rawReply = await slashGenQuiet(prompt);
+    let rawReply = '';
+    if (typeof ctx.generateQuietPrompt === 'function') {
+        rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: responderName });
+    }
     if (!rawReply) {
-        if (typeof ctx.generateQuietPrompt === 'function') {
-            rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: responderName });
-        } else if (typeof ctx.generateRaw === 'function') {
-            rawReply = await ctx.generateRaw({ prompt, quietToLoud: false, trimNames: true });
-        }
+        rawReply = await slashGenQuiet(prompt);
     }
     const sanitizedReply = sanitizeRoomReply(rawReply, responderName, memberLabels);
     if (!sanitizedReply) return '';
@@ -1109,13 +1108,12 @@ async function generateOutsiderObservation(room, candidateMap) {
         'Output only the indirect observation line.',
     ].join('\n');
 
-    let rawReply = await slashGenQuiet(prompt);
+    let rawReply = '';
+    if (typeof ctx.generateQuietPrompt === 'function') {
+        rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: charName });
+    }
     if (!rawReply) {
-        if (typeof ctx.generateQuietPrompt === 'function') {
-            rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: charName });
-        } else if (typeof ctx.generateRaw === 'function') {
-            rawReply = await ctx.generateRaw({ prompt, quietToLoud: false, trimNames: true });
-        }
+        rawReply = await slashGenQuiet(prompt);
     }
     return sanitizeRoomReply(rawReply, charName, [charName]);
 }
