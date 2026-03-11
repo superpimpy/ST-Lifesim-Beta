@@ -412,6 +412,41 @@ body[data-theme="dark"],
 }
 .slm-input-row .slm-input { flex: 1; min-width: 0; }
 
+.slm-sns-avatar-crop {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 8px;
+}
+
+.slm-sns-avatar-crop-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.slm-sns-avatar-crop-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.slm-sns-avatar-crop-label {
+  min-width: 64px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.slm-sns-avatar-crop-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  height: 24px;
+  border: none;
+  background: transparent;
+  accent-color: var(--slm-accent);
+}
+
 .slm-radio-row {
   display: flex;
   align-items: center;

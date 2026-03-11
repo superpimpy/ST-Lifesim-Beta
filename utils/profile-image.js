@@ -49,18 +49,71 @@ export function applyProfileImageStyle(frameEl, imageEl, rawStyle, defaults = {}
 }
 
 export function readImageFileAsDataUrl(file) {
+    if (!file) return Promise.resolve('');
+    if (!String(file.type || '').startsWith('image/')) {
+        return Promise.reject(new Error('이미지 파일만 업로드할 수 있습니다.'));
+    }
+    return compressImageFileToDataUrl(file).catch(() => readFileAsDataUrl(file));
+}
+
+function readFileAsDataUrl(file) {
     return new Promise((resolve, reject) => {
-        if (!file) {
-            resolve('');
-            return;
-        }
-        if (!String(file.type || '').startsWith('image/')) {
-            reject(new Error('이미지 파일만 업로드할 수 있습니다.'));
-            return;
-        }
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ''));
         reader.onerror = () => reject(new Error('이미지 파일을 읽지 못했습니다.'));
         reader.readAsDataURL(file);
+    });
+}
+
+/**
+ * 로컬 업로드 이미지를 저장용 data URL로 압축/리사이즈한다.
+ * 애니메이션 GIF/SVG는 원본을 유지하고, 일반 이미지 파일은 최대 512px 정사각 박스 안으로 축소한 뒤
+ * WebP(quality 0.82)로 재인코딩하여 localStorage에 저장되는 문자열 길이를 줄인다.
+ * @param {File} file
+ * @returns {Promise<string>}
+ */
+function compressImageFileToDataUrl(file) {
+    const mimeType = String(file.type || '').toLowerCase();
+    const shouldKeepOriginal = mimeType === 'image/gif' || mimeType === 'image/svg+xml';
+    if (shouldKeepOriginal) return readFileAsDataUrl(file);
+
+    const outputType = 'image/webp';
+    const maxDimension = 512;
+    const quality = 0.82;
+
+    return new Promise((resolve, reject) => {
+        const objectUrl = URL.createObjectURL(file);
+        const image = new Image();
+        const cleanup = () => URL.revokeObjectURL(objectUrl);
+
+        image.onload = () => {
+            try {
+                const longestSide = Math.max(image.naturalWidth || image.width || 0, image.naturalHeight || image.height || 0);
+                const scale = longestSide > maxDimension ? (maxDimension / longestSide) : 1;
+                const width = Math.max(1, Math.round((image.naturalWidth || image.width || 1) * scale));
+                const height = Math.max(1, Math.round((image.naturalHeight || image.height || 1) * scale));
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    cleanup();
+                    reject(new Error('이미지 캔버스를 초기화하지 못했습니다.'));
+                    return;
+                }
+                ctx.drawImage(image, 0, 0, width, height);
+                const dataUrl = canvas.toDataURL(outputType, quality);
+                cleanup();
+                resolve(dataUrl);
+            } catch (error) {
+                cleanup();
+                reject(error);
+            }
+        };
+        image.onerror = () => {
+            cleanup();
+            reject(new Error('이미지 파일을 읽지 못했습니다.'));
+        };
+        image.src = objectUrl;
     });
 }

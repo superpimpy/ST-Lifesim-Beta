@@ -4,6 +4,7 @@ import { createPopup, closePopup } from '../../utils/popup.js';
 import { getAppearanceTagsByName, getContacts } from '../contacts/contacts.js';
 import { buildAiEmoticonContext, replaceAiSelectedEmoticons } from '../emoticon/emoticon.js';
 import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
+import { applyProfileImageStyle } from '../../utils/profile-image.js';
 import { escapeHtml, generateId, showConfirm, showToast } from '../../utils/ui.js';
 
 const MODULE_KEY = 'messenger-rooms';
@@ -203,6 +204,7 @@ function getMemberCandidates() {
             label,
             subtitle: String(contact?.relationToUser || contact?.description || '').trim(),
             avatar: String(contact?.avatar || '').trim(),
+            avatarStyle: contact?.avatarStyle || null,
             isMainChar: false,
             description: String(contact?.description || '').trim(),
             personality: String(contact?.personality || '').trim(),
@@ -613,6 +615,7 @@ async function runRoomAutoReplies(roomId) {
 }
 
 function buildAvatarElement(memberKey, candidateMap) {
+    const candidate = candidateMap.get(memberKey);
     const avatar = getAvatarForMember(memberKey, candidateMap);
     const label = getMemberDisplayLabel(memberKey, candidateMap);
     if (avatar) {
@@ -620,6 +623,12 @@ function buildAvatarElement(memberKey, candidateMap) {
         img.className = 'slm-room-avatar-img';
         img.src = avatar;
         img.alt = label;
+        applyProfileImageStyle(
+            null,
+            img,
+            candidate?.avatarStyle,
+            { width: 32, height: 32, scale: 100, positionX: 50, positionY: 50 },
+        );
         return img;
     }
     const fallback = document.createElement('div');

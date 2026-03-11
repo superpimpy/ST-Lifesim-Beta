@@ -2014,28 +2014,46 @@ function openAvatarSettingsDialog(onUpdate) {
     const contactList = document.createElement('div');
     contactList.className = 'slm-form';
     wrapper.appendChild(contactList);
+    const openProfileNames = new Set();
 
     function renderContactList() {
+        if (contactList.childElementCount > 0) {
+            openProfileNames.clear();
+            contactList.querySelectorAll('.slm-sns-profile-item[open]').forEach((item) => {
+                const profileName = String(item.getAttribute('data-profile-name') || '').trim();
+                if (profileName) openProfileNames.add(profileName);
+            });
+        }
         contactList.innerHTML = '';
         const presets = loadImagePresets();
 
         allProfiles.forEach(c => {
             const item = document.createElement('details');
             item.className = 'slm-sns-profile-item';
+            item.setAttribute('data-profile-name', c.name);
+            item.open = openProfileNames.has(c.name);
+            item.addEventListener('toggle', () => {
+                if (item.open) openProfileNames.add(c.name);
+                else openProfileNames.delete(c.name);
+            });
             const summary = document.createElement('summary');
             summary.className = 'slm-sns-profile-summary';
             const avatarSpan = document.createElement('span');
             avatarSpan.className = 'slm-sns-profile-avatar';
-            applyProfileImageStyle(avatarSpan, null, getAvatarStyle(c.name, avatarStyles, { width: 24, height: 24, scale: 100, positionX: 50, positionY: 50 }), { width: 24, height: 24, scale: 100, positionX: 50, positionY: 50 });
-            if (avatars[c.name]) {
-                const img = document.createElement('img');
-                img.src = avatars[c.name];
-                img.alt = c.name;
-                applyProfileImageStyle(avatarSpan, img, getAvatarStyle(c.name, avatarStyles, { width: 24, height: 24, scale: 100, positionX: 50, positionY: 50 }), { width: 24, height: 24, scale: 100, positionX: 50, positionY: 50 });
-                avatarSpan.appendChild(img);
-            } else {
+            const renderSummaryAvatar = () => {
+                avatarSpan.innerHTML = '';
+                applyProfileImageStyle(avatarSpan, null, getAvatarStyle(c.name, avatarStyles, { width: 24, height: 24, scale: 100, positionX: 50, positionY: 50 }), { width: 24, height: 24, scale: 100, positionX: 50, positionY: 50 });
+                if (avatars[c.name]) {
+                    const img = document.createElement('img');
+                    img.src = avatars[c.name];
+                    img.alt = c.name;
+                    applyProfileImageStyle(avatarSpan, img, getAvatarStyle(c.name, avatarStyles, { width: 24, height: 24, scale: 100, positionX: 50, positionY: 50 }), { width: 24, height: 24, scale: 100, positionX: 50, positionY: 50 });
+                    avatarSpan.appendChild(img);
+                    return;
+                }
                 avatarSpan.textContent = ((c.name || '?')[0] || '?').toUpperCase();
-            }
+            };
+            renderSummaryAvatar();
             const nameSpan = document.createElement('span');
             nameSpan.textContent = c.name;
             summary.append(avatarSpan, nameSpan);
@@ -2063,6 +2081,8 @@ function openAvatarSettingsDialog(onUpdate) {
                 avatars[c.name] = avatarInput.value.trim();
                 saveAvatars(avatars);
                 onUpdate();
+                renderSummaryAvatar();
+                renderAvatarPreview();
                 renderContactList();
             };
             const avatarUploadInput = document.createElement('input');
@@ -2083,6 +2103,8 @@ function openAvatarSettingsDialog(onUpdate) {
                     avatarInput.value = avatars[c.name];
                     saveAvatars(avatars);
                     onUpdate();
+                    renderSummaryAvatar();
+                    renderAvatarPreview();
                     renderContactList();
                 } catch (error) {
                     showToast(error.message || '이미지 업로드 실패', 'error');
@@ -2100,13 +2122,15 @@ function openAvatarSettingsDialog(onUpdate) {
                 avatarInput.value = '';
                 saveAvatars(avatars);
                 onUpdate();
+                renderSummaryAvatar();
+                renderAvatarPreview();
                 renderContactList();
             };
             const avatarButtonRow = document.createElement('div');
             avatarButtonRow.className = 'slm-input-row';
             avatarButtonRow.style.margin = '6px 0 8px';
             avatarButtonRow.append(avatarUploadBtn, avatarClearBtn, avatarUploadInput);
-            const initialAvatarStyle = getAvatarStyle(c.name, avatarStyles, { width: 32, height: 32, scale: 100, positionX: 50, positionY: 50 });
+            const initialAvatarStyle = getAvatarStyle(c.name, avatarStyles, { width: 56, height: 56, scale: 100, positionX: 50, positionY: 50 });
             const avatarScaleInput = Object.assign(document.createElement('input'), {
                 className: 'slm-input',
                 type: 'range',
@@ -2142,17 +2166,17 @@ function openAvatarSettingsDialog(onUpdate) {
                 scale: avatarScaleInput.value,
                 positionX: avatarPositionXInput.value,
                 positionY: avatarPositionYInput.value,
-            }, { width: 32, height: 32, scale: 100, positionX: 50, positionY: 50 });
+            }, { width: 56, height: 56, scale: 100, positionX: 50, positionY: 50 });
             const renderAvatarPreview = () => {
                 avatarPreview.innerHTML = '';
                 const style = getDraftAvatarStyle();
-                applyProfileImageStyle(avatarPreview, null, style, { width: 32, height: 32, scale: 100, positionX: 50, positionY: 50 });
+                applyProfileImageStyle(avatarPreview, null, style, { width: 56, height: 56, scale: 100, positionX: 50, positionY: 50 });
                 const src = avatarInput.value.trim();
                 if (src) {
                     const img = document.createElement('img');
                     img.src = src;
                     img.alt = c.name;
-                    applyProfileImageStyle(avatarPreview, img, style, { width: 32, height: 32, scale: 100, positionX: 50, positionY: 50 });
+                    applyProfileImageStyle(avatarPreview, img, style, { width: 56, height: 56, scale: 100, positionX: 50, positionY: 50 });
                     img.onerror = () => {
                         avatarPreview.innerHTML = '';
                         avatarPreview.textContent = ((c.name || '?')[0] || '?').toUpperCase();
@@ -2167,28 +2191,42 @@ function openAvatarSettingsDialog(onUpdate) {
                 saveAvatarStyles(avatarStyles);
                 renderAvatarPreview();
                 onUpdate();
-                renderContactList();
+                renderSummaryAvatar();
             };
             [avatarScaleInput, avatarPositionXInput, avatarPositionYInput].forEach((input) => {
                 input.addEventListener('input', renderAvatarPreview);
                 input.addEventListener('change', saveDraftAvatarStyle);
+                ['pointerdown', 'mousedown', 'touchstart', 'click'].forEach((eventName) => {
+                    input.addEventListener(eventName, (event) => event.stopPropagation());
+                });
             });
             avatarInput.addEventListener('input', renderAvatarPreview);
             const avatarCropRow = document.createElement('div');
-            avatarCropRow.className = 'slm-input-row';
-            avatarCropRow.style.margin = '6px 0 8px';
-            avatarCropRow.style.alignItems = 'center';
-            avatarCropRow.style.flexWrap = 'wrap';
-            avatarCropRow.append(
+            avatarCropRow.className = 'slm-sns-avatar-crop';
+            const avatarPreviewRow = document.createElement('div');
+            avatarPreviewRow.className = 'slm-input-row';
+            avatarPreviewRow.style.alignItems = 'center';
+            avatarPreviewRow.append(
                 Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '미리보기' }),
                 avatarPreview,
-                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '확대' }),
-                avatarScaleInput,
-                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '좌우 이동' }),
-                avatarPositionXInput,
-                Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '상하 이동' }),
-                avatarPositionYInput,
             );
+            const avatarSliderList = document.createElement('div');
+            avatarSliderList.className = 'slm-sns-avatar-crop-controls';
+            [
+                ['확대', avatarScaleInput],
+                ['좌우 이동', avatarPositionXInput],
+                ['상하 이동', avatarPositionYInput],
+            ].forEach(([labelText, input]) => {
+                const sliderRow = document.createElement('label');
+                sliderRow.className = 'slm-sns-avatar-crop-row';
+                const label = document.createElement('span');
+                label.className = 'slm-label slm-sns-avatar-crop-label';
+                label.textContent = labelText;
+                input.classList.add('slm-sns-avatar-crop-slider');
+                sliderRow.append(label, input);
+                avatarSliderList.appendChild(sliderRow);
+            });
+            avatarCropRow.append(avatarPreviewRow, avatarSliderList);
             renderAvatarPreview();
 
             const presetSelect = document.createElement('select');
