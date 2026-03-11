@@ -31,17 +31,19 @@ async function run(command) {
 
 async function generateQuietText(prompt, quietName = null) {
     const ctx = getContext();
-    const quietPrompt = String(prompt || '').trim();
+    if (prompt == null) return '';
+    const quietPrompt = String(prompt).trim();
     if (!ctx || !quietPrompt) return '';
 
     const normalizedQuietName = String(quietName || '').trim();
 
     if (typeof ctx.generateQuietPrompt === 'function') {
         try {
-            const result = await ctx.generateQuietPrompt({
-                quietPrompt,
-                ...(normalizedQuietName ? { quietName: normalizedQuietName } : {}),
-            });
+            const quietOptions = { quietPrompt };
+            if (normalizedQuietName) {
+                quietOptions.quietName = normalizedQuietName;
+            }
+            const result = await ctx.generateQuietPrompt(quietOptions);
             const text = String(result || '').trim();
             if (text) return text;
         } catch (error) {
