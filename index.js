@@ -19,7 +19,7 @@ import { injectContext, clearContext, registerContextBuilder } from './utils/con
 import { createPopup, createTabs, closePopup } from './utils/popup.js';
 import { showToast, showConfirm, escapeHtml } from './utils/ui.js';
 import { exportAllData, importAllData, clearAllData } from './utils/storage.js';
-import { renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEventGeneratorUI, renderVoiceMemoUI, triggerQuickSend, triggerReadReceipt, triggerNoContact, triggerUserImageGenerationAndSend, triggerVoiceMemoInsertion, triggerDeletedMessage } from './modules/quick-tools/quick-tools.js';
+import { renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEventGeneratorUI, renderVoiceMemoUI, triggerQuickSend, triggerReadReceipt, triggerNoContact, triggerUserImageGenerationAndSendInBackground, triggerVoiceMemoInsertion, triggerDeletedMessage } from './modules/quick-tools/quick-tools.js';
 import { startFirstMsgTimer, renderFirstMsgSettingsUI } from './modules/firstmsg/firstmsg.js';
 import { buildAiEmoticonContext, initEmoticon, openEmoticonPopup, replaceAiSelectedEmoticons } from './modules/emoticon/emoticon.js';
 import { initContacts, openContactsPopup, getContacts, getAppearanceTagsByName, buildAppearanceTagVariableMap, resolveAppearanceTagVariables } from './modules/contacts/contacts.js';
@@ -603,7 +603,7 @@ function openUserImagePromptPopup() {
 
     cancelBtn.onclick = () => close();
 
-    genBtn.onclick = async () => {
+    genBtn.onclick = () => {
         const prompt = input.value.trim();
         if (!prompt) {
             showToast('이미지 설명을 입력해주세요.', 'warn');
@@ -611,19 +611,8 @@ function openUserImagePromptPopup() {
         }
         genBtn.disabled = true;
         genBtn.textContent = '⏳ 생성 중...';
-        try {
-            const ok = await triggerUserImageGenerationAndSend(prompt);
-            if (ok) {
-                close();
-            } else {
-                showToast('이미지 생성에 실패했습니다.', 'error', 2000);
-            }
-        } catch (e) {
-            showToast('이미지 생성 실패: ' + e.message, 'error');
-        } finally {
-            genBtn.disabled = false;
-            genBtn.textContent = '🎨 이미지 생성';
-        }
+        close();
+        void triggerUserImageGenerationAndSendInBackground(prompt);
     };
 
     // Enter 키로 생성 (Shift+Enter는 줄바꿈)

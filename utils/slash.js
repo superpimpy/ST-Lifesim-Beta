@@ -65,7 +65,7 @@ async function generateQuietText(prompt, quietName = null) {
         }
     }
 
-    const result = await run(`/gen quiet=true ${quietPrompt}`);
+    const result = await run(`/gen lock=off quiet=true ${quietPrompt}`);
     return String(result?.pipe ?? result ?? '').trim();
 }
 
@@ -158,10 +158,10 @@ export async function slashGen(prompt, name = null) {
             return;
         }
         // 최종 폴백: /gen quiet=true ... | /sendas name="..." 형태로 실행
-        await run(`/gen quiet=true ${prompt} | /sendas name="${name}"`);
+        await run(`/gen lock=off quiet=true ${prompt} | /sendas name="${name}"`);
     } else {
         // /gen quiet=true만 단독 사용 (기본 {{char}} 응답)
-        await run(`/gen quiet=true ${prompt}`);
+        await run(`/gen lock=off quiet=true ${prompt}`);
     }
 }
 
