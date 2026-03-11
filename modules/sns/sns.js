@@ -16,6 +16,7 @@ import { createPopup } from '../../utils/popup.js';
 import { getContacts, getAppearanceTagsByName } from '../contacts/contacts.js';
 import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
 import { applyProfileImageStyle, normalizeProfileImageStyle, readImageFileAsDataUrl } from '../../utils/profile-image.js';
+import { slashGenQuiet } from '../../utils/slash.js';
 import { isHtmlTextResponse } from '../../utils/text-response.js';
 
 const MODULE_KEY = 'sns-feed';
@@ -1422,6 +1423,8 @@ function findCommentNodeById(nodes, id) {
 
 async function generateSnsText(ctx, quietPrompt, quietName, routeKey = 'sns') {
     if (!ctx) return '';
+    const slashResult = await slashGenQuiet(quietPrompt);
+    if (slashResult) return slashResult.trim();
     const promptSettings = getSnsPromptSettings();
     if (promptSettings.externalApiUrl) {
         const controller = new AbortController();

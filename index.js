@@ -30,7 +30,7 @@ import { initCalendar, openCalendarPopup } from './modules/calendar/calendar.js'
 import { initGifticon, openGifticonPopup, trackGifticonUsageFromCharacterMessage } from './modules/gifticon/gifticon.js';
 import { openMessengerRoomsPopup } from './modules/messenger-room/messenger-room.js';
 import { buildDirectImagePrompt } from './utils/image-tag-generator.js';
-import { slashSendAs } from './utils/slash.js';
+import { slashGenQuiet, slashSendAs } from './utils/slash.js';
 
 // 설정 키
 const SETTINGS_KEY = 'st-lifesim';
@@ -1331,11 +1331,13 @@ async function generateGroupChatReply(responder, roster) {
         `Output only ${responderName}'s next message.`,
     ].filter(Boolean).join('\n');
 
-    let rawReply = '';
-    if (typeof ctx.generateQuietPrompt === 'function') {
-        rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: responder.displayName });
-    } else if (typeof ctx.generateRaw === 'function') {
-        rawReply = await ctx.generateRaw({ prompt, quietToLoud: false, trimNames: true });
+    let rawReply = await slashGenQuiet(prompt);
+    if (!rawReply) {
+        if (typeof ctx.generateQuietPrompt === 'function') {
+            rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: responder.displayName });
+        } else if (typeof ctx.generateRaw === 'function') {
+            rawReply = await ctx.generateRaw({ prompt, quietToLoud: false, trimNames: true });
+        }
     }
     const sanitizedReply = sanitizeGroupChatReply(rawReply, responder.displayName, roster);
     if (!sanitizedReply) return '';

@@ -18,10 +18,10 @@ async function run(command) {
     try {
         if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
             // SillyTavern의 executeSlashCommandsWithOptions 함수를 사용한다
-            await ctx.executeSlashCommandsWithOptions(command, { showOutput: false });
+            return await ctx.executeSlashCommandsWithOptions(command, { showOutput: false });
         } else if (typeof ctx.executeSlashCommands === 'function') {
             // 구버전 폴백
-            await ctx.executeSlashCommands(command);
+            return await ctx.executeSlashCommands(command);
         }
     } catch (e) {
         console.error('[ST-LifeSim] 슬래시 커맨드 실행 오류:', command, e);
@@ -112,12 +112,22 @@ export async function slashEcho(text) {
  */
 export async function slashGen(prompt, name = null) {
     if (name) {
-        // /gen ... | /sendas name="..." 형태로 실행
-        await run(`/gen ${prompt} | /sendas name="${name}"`);
+        // /gen quiet=true ... | /sendas name="..." 형태로 실행
+        await run(`/gen quiet=true ${prompt} | /sendas name="${name}"`);
     } else {
-        // /gen만 단독 사용 (기본 {{char}} 응답)
-        await run(`/gen ${prompt}`);
+        // /gen quiet=true만 단독 사용 (기본 {{char}} 응답)
+        await run(`/gen quiet=true ${prompt}`);
     }
+}
+
+/**
+ * AI 텍스트를 채팅창 노출 없이 슬래시 커맨드 경로로 생성하고 결과 텍스트를 반환한다.
+ * @param {string} prompt
+ * @returns {Promise<string>}
+ */
+export async function slashGenQuiet(prompt) {
+    const result = await run(`/gen quiet=true ${prompt}`);
+    return String(result?.pipe || result || '').trim();
 }
 
 /**

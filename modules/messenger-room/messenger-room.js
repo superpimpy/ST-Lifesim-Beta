@@ -3,6 +3,7 @@ import { getDefaultBinding, getExtensionSettings, loadData, saveData } from '../
 import { injectContext, registerContextBuilder } from '../../utils/context-inject.js';
 import { createPopup, closePopup } from '../../utils/popup.js';
 import { getAllContacts, getAppearanceTagsByName, getContacts } from '../contacts/contacts.js';
+import { slashGenQuiet } from '../../utils/slash.js';
 import { buildAiEmoticonContext, replaceAiSelectedEmoticons, buildEmoticonMessageHtml, buildEmoticonPickerContent } from '../emoticon/emoticon.js';
 import { translateTextToKorean } from '../sns/sns.js';
 import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
@@ -1072,11 +1073,13 @@ async function generateRoomReply(room, responderKey, candidateMap) {
         `Output only ${responderName}'s next room message.`,
     ].join('\n');
 
-    let rawReply = '';
-    if (typeof ctx.generateQuietPrompt === 'function') {
-        rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: responderName });
-    } else if (typeof ctx.generateRaw === 'function') {
-        rawReply = await ctx.generateRaw({ prompt, quietToLoud: false, trimNames: true });
+    let rawReply = await slashGenQuiet(prompt);
+    if (!rawReply) {
+        if (typeof ctx.generateQuietPrompt === 'function') {
+            rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: responderName });
+        } else if (typeof ctx.generateRaw === 'function') {
+            rawReply = await ctx.generateRaw({ prompt, quietToLoud: false, trimNames: true });
+        }
     }
     const sanitizedReply = sanitizeRoomReply(rawReply, responderName, memberLabels);
     if (!sanitizedReply) return '';
@@ -1106,11 +1109,13 @@ async function generateOutsiderObservation(room, candidateMap) {
         'Output only the indirect observation line.',
     ].join('\n');
 
-    let rawReply = '';
-    if (typeof ctx.generateQuietPrompt === 'function') {
-        rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: charName });
-    } else if (typeof ctx.generateRaw === 'function') {
-        rawReply = await ctx.generateRaw({ prompt, quietToLoud: false, trimNames: true });
+    let rawReply = await slashGenQuiet(prompt);
+    if (!rawReply) {
+        if (typeof ctx.generateQuietPrompt === 'function') {
+            rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: charName });
+        } else if (typeof ctx.generateRaw === 'function') {
+            rawReply = await ctx.generateRaw({ prompt, quietToLoud: false, trimNames: true });
+        }
     }
     return sanitizeRoomReply(rawReply, charName, [charName]);
 }
