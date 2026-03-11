@@ -72,6 +72,8 @@ const MODEL_KEY_BY_SOURCE = {
 // 댓글 직후 즉시 생성하지 않고, 유저 메시지 이벤트에서 확률적으로 하나씩 처리하는 큐다.
 const PENDING_COMMENT_REACTIONS = [];
 let pendingReactionInFlight = false;
+/** SNS 팝업이 열려 있을 때 실시간 갱신용 렌더러 참조 */
+let _activeFeedRenderer = null;
 
 // SNS 포스트 카드 접힘 상태 (session 유지, localStorage 기반)
 const SNS_CARDS_COLLAPSED_LS_KEY = 'slm:sns-cards-collapsed';
@@ -319,6 +321,7 @@ async function applyGeneratedImageToPost(postId, { promptSource, authorName, fal
     }
     post.imagePrompt = promptResult.finalPrompt;
     saveFeed(feed);
+    _activeFeedRenderer?.();
     onUpdate?.();
     return !!generatedUrl;
 }
@@ -718,6 +721,7 @@ export async function triggerNpcPosting() {
             includeInContext: true,
         });
         saveFeed(feed);
+        _activeFeedRenderer?.();
 
         if (promptSettings.snsImageMode && resolvedImagePrompt) {
             void applyGeneratedImageToPost(postId, {
@@ -872,6 +876,7 @@ function buildSnsContent() {
     wrapper.appendChild(feedList);
 
     renderFeed();
+    _activeFeedRenderer = () => { if (feedList.isConnected) renderFeed(); };
     return wrapper;
 }
 
@@ -1616,6 +1621,7 @@ async function runDeferredCommentGeneration({ postId, commentId, text, userName,
 
         if (extraContactComment) p.comments.push(extraContactComment);
         saveFeed(feed);
+        _activeFeedRenderer?.();
         onUpdate();
     } catch (genErr) {
         console.error('[ST-LifeSim] 댓글 답글 생성 오류:', genErr);
