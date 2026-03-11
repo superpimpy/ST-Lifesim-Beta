@@ -38,6 +38,7 @@ function getEmoticonRadius() {
 }
 
 const MODULE_KEY = 'emoticons';
+const DEFAULT_EMOTICON_CATEGORY = '기본';
 const CATEGORY_AI_KEY = 'emoticon-category-ai';
 const CHAR_CATEGORY_AI_KEY = 'emoticon-char-category-ai';
 const CATEGORY_VISIBILITY_KEY = 'emoticon-category-visibility';
@@ -64,13 +65,18 @@ const AI_EMOTICON_BULLET_LINE_REGEX = /^[•*-]\s+(.+)$/;
 function loadEmoticons() {
     const globalEmoticons = loadData(MODULE_KEY, null, GLOBAL_BINDING);
     if (Array.isArray(globalEmoticons)) {
-        return globalEmoticons;
+        const normalized = globalEmoticons.map(normalizeEmoticonRecord).filter(Boolean);
+        if (JSON.stringify(globalEmoticons) !== JSON.stringify(normalized)) {
+            saveData(MODULE_KEY, normalized, GLOBAL_BINDING);
+        }
+        return normalized;
     }
     const legacy = loadData(MODULE_KEY, [], getDefaultBinding());
+    const normalizedLegacy = legacy.map(normalizeEmoticonRecord).filter(Boolean);
     if (legacy.length > 0) {
-        saveData(MODULE_KEY, legacy, GLOBAL_BINDING);
+        saveData(MODULE_KEY, normalizedLegacy, GLOBAL_BINDING);
     }
-    return legacy;
+    return normalizedLegacy;
 }
 
 /**
@@ -78,7 +84,7 @@ function loadEmoticons() {
  * @param {Emoticon[]} emoticons
  */
 function saveEmoticons(emoticons) {
-    saveData(MODULE_KEY, emoticons, GLOBAL_BINDING);
+    saveData(MODULE_KEY, emoticons.map(normalizeEmoticonRecord).filter(Boolean), GLOBAL_BINDING);
 }
 
 function loadCategoryAiMap() {
@@ -150,8 +156,7 @@ function resolveAllowedCategoriesForSender(senderName) {
 }
 
 function isAiUsableByPolicy(emoticon, allowedCategories) {
-    const category = String(emoticon?.category || '').trim();
-    if (!category) return false;
+    const category = String(emoticon?.category || '').trim() || DEFAULT_EMOTICON_CATEGORY;
     if (allowedCategories === null) return true;
     return allowedCategories.includes(category);
 }
@@ -258,9 +263,26 @@ export function buildAiEmoticonContext(senderName = getCurrentCharName()) {
         '',
         '이모티콘을 보내고 싶다면 위 목록에서 정확히 하나를 골라 [[emoticon:이름]] 형식으로만 출력하세요.',
         'If you want to send one, choose exactly one name from the list and output only [[emoticon:NAME]].',
+        '사용자가 이모티콘, emoji, sticker, reaction을 원하면 이미지 태그 <pic ...> 대신 반드시 [[emoticon:이름]] 형식을 우선 사용하세요.',
+        'When the user asks for an emoticon, emoji, sticker, or reaction, prefer [[emoticon:NAME]] and do not switch to <pic ...> image tags.',
         '이모티콘용 HTML, 이미지 URL, markdown, 설명은 직접 출력하지 마세요.',
         'Do not output emoticon HTML, image URLs, markdown, or explanations directly.',
     ].join('\n');
+}
+
+function normalizeEmoticonRecord(emoticon) {
+    if (!emoticon || typeof emoticon !== 'object') return null;
+    const name = normalizeEmoticonName(emoticon.name);
+    const url = String(emoticon.url || '').trim();
+    if (!name || !url) return null;
+    return {
+        ...emoticon,
+        id: String(emoticon.id || '').trim() || generateId(),
+        name,
+        url,
+        category: String(emoticon.category || '').trim() || DEFAULT_EMOTICON_CATEGORY,
+        favorite: emoticon.favorite === true,
+    };
 }
 
 /**
