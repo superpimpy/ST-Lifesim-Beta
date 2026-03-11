@@ -281,6 +281,8 @@ export function buildAiEmoticonContext(senderName = getCurrentCharName()) {
         'When the user asks for an emoticon, emoji, sticker, or reaction, prefer [[emoticon:NAME]] and do not switch to <pic ...> image tags.',
         '이모티콘용 HTML, 이미지 URL, markdown, 설명은 직접 출력하지 마세요.',
         'Do not output emoticon HTML, image URLs, markdown, or explanations directly.',
+        '',
+        'CRITICAL: The emoticon names listed above are absolute identifiers. They MUST NOT be translated, rephrased, or converted into another language under any circumstances. Always use the exact original name as shown in the list.',
     ].join('\n');
 }
 

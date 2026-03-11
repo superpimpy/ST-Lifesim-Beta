@@ -976,6 +976,33 @@ body[data-theme="dark"],
   line-height: 1.55;
 }
 
+/* ──── 방 목록 탭 바 (1:1 / 그룹 필터) ──── */
+.slm-room-tab-bar {
+  display: flex;
+  gap: 0;
+  background: var(--slm-bg-secondary);
+  border-radius: 10px;
+  padding: 2px;
+  margin-bottom: 8px;
+}
+.slm-room-tab {
+  flex: 1;
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  color: var(--slm-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.slm-room-tab.active {
+  background: var(--slm-accent);
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(155,114,208,0.25);
+}
+
 /* ──── 방 카드 목록 (iMessage 대화 목록 스타일) ──── */
 .slm-room-cards,
 .slm-room-message-list,
@@ -1237,6 +1264,8 @@ body[data-theme="dark"],
   width: auto;
   max-width: fit-content;
   padding: 6px;
+  background: transparent;
+  box-shadow: none;
 }
 
 .slm-room-message-segments {
@@ -1263,7 +1292,8 @@ body[data-theme="dark"],
 }
 
 .slm-room-message.user .slm-room-message-bubble.emoticon-only {
-  background: rgba(155,114,208,0.12);
+  background: transparent;
+  box-shadow: none;
 }
 
 .slm-room-message.user .slm-room-message-segment {

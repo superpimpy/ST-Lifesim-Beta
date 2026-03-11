@@ -8,7 +8,7 @@
  *  - 태그 생성 단계가 반드시 선행
  *  - 태그는 영어 Danbooru 형식
  *  - 모든 이미지 생성 경로(메신저/SNS/유저)가 동일한 파이프라인을 사용
- *  - 최종 프롬프트 형식: weight::scene tags::, [name1: appearance1], [name2: appearance2], ...
+ *  - 최종 프롬프트 형식: scene tags | Character 1: (appearance1) | Character 2: (appearance2)
  */
 
 import { getContext } from './st-context.js';
@@ -80,65 +80,60 @@ const TAG_CONVERSION_PROMPT = [
  */
 function buildCharacterAwarePrompt(characters, appearanceVarMap, additionalPrompt = '') {
     const charList = characters.length > 0
-        ? characters.map(c => `  - ${c.name}`).join('\n')
+        ? characters.map((c, i) => `  - Character ${i + 1}: ${c.name}`).join('\n')
         : '  (none)';
 
-    // Provide character appearance tags so the AI can select and include them
+    // Provide character appearance tags using numbered labels
     const charAppearanceRef = characters
         .filter(c => c.appearanceTags)
-        .map(c => `  - ${c.name}: ${c.appearanceTags}`)
+        .map((c, i) => `  - Character ${i + 1}: ${c.appearanceTags}`)
         .join('\n');
     const appearanceRefBlock = charAppearanceRef
         ? `\nCharacter appearance tags:\n${charAppearanceRef}\n`
         : '';
 
     const basePrompt = [
-        'You are a Danbooru-style tag generator for image creation.',
+        'You are a Danbooru-style tag generator.',
         '',
-        'Given an image description, a list of known characters, and their appearance tags,',
-        'you must decide which characters should appear in the image based on context,',
-        'then output scene/situation tags followed by the selected characters\' appearance tags.',
+        'Given an image description, characters, and their appearance tags,',
+        'decide which characters appear, then output scene tags and appearance tags.',
         '',
-        'OUTPUT FORMAT (you MUST follow this exactly):',
-        '1) First, output a reasoning block wrapped in <img-gen>...</img-gen> tags.',
-        '   Inside this block, explain:',
-        '   - Which characters\' appearance tags are available',
-        '   - Based on the context/description, which characters need to appear',
-        '   - Why those characters were selected',
-        '2) After the closing </img-gen> tag, on a NEW line, output the final prompt:',
-        '   scene tags, [Name1: appearance tags], [Name2: appearance tags]',
+        'OUTPUT FORMAT:',
+        '1) Reasoning block in <img-gen>...</img-gen> tags (which characters to include and why).',
+        '2) After </img-gen>, on a NEW line, the final prompt in this EXACT format:',
+        '   scene tags | Character 1: (appearance tags) | Character 2: (appearance tags)',
+        '   Use pipe "|" to separate scene tags from each character block.',
+        '   Use "Character N:" labels, NOT actual character names.',
         '',
         'RULES:',
-        '1) Scene tags must be comma-separated Danbooru-style English tags.',
-        '2) Replace underscores with spaces in all tags.',
-        '3) DO NOT fabricate or guess character appearance details — use ONLY the provided appearance tags.',
-        '4) DO NOT output any {{appearanceTag:...}} variables or references.',
-        '5) DO include character count tags: 1girl, 1boy, 2girls, etc.',
-        '6) Include scene/environment tags: cafe, outdoor, indoor, classroom, etc.',
-        '7) Include pose/action tags: selfie, standing, sitting, looking at viewer, etc.',
-        '8) Include mood/lighting/framing tags: warm lighting, upper body, close-up, etc.',
-        '9) Keep the scene tags focused on action, setting, framing, lighting, camera angle, and composition.',
-        '10) Do not include core appearance descriptions (hair, eyes, clothing, body traits, etc.) in scene tags. Use ONLY the provided character appearance tags for that.',
-        '11) Do not include character poses or facial expressions in scene tags. Specify poses, expressions, and similar attributes within the corresponding character\'s appearance tags instead.',
-        '12) The entire output MUST be in English. No Korean or other languages.',
-        '13) Even if the description is vague, infer a plausible visual scene.',
-        '14) Always include at least one framing tag and one setting tag.',
-        '15) Character appearance tags in the final prompt MUST be wrapped in square brackets with the format [Name: appearance tags].',
-        '16) Only include characters that are relevant to the described scene.',
-        '17) If you include a character, do not omit their core appearance tags such as hair, eyes, signature outfit/clothing, or other defining visual traits from the character\'s provided appearance data.',
+        '1) Scene tags: comma-separated English Danbooru tags. Replace underscores with spaces.',
+        '2) Use ONLY provided appearance tags. Do NOT fabricate or guess details.',
+        '3) Do NOT output {{appearanceTag:...}} variables.',
+        '4) Include character count tags: 1girl, 1boy, 2girls, etc.',
+        '5) Include setting tags: cafe, indoor, outdoor, classroom, etc.',
+        '6) Include framing/lighting: upper body, close-up, warm lighting, etc.',
+        '7) Scene tags = action, setting, framing, lighting, composition ONLY.',
+        '8) Do NOT put appearance details (hair, eyes, clothes) in scene tags.',
+        '9) Put poses and expressions inside the character appearance block, not scene tags.',
+        '10) Output must be English only. No Korean or other languages.',
+        '11) Infer a plausible scene even from vague descriptions.',
+        '12) Include at least one framing tag and one setting tag.',
+        '13) Only include characters relevant to the scene.',
+        '14) Do not omit core appearance (hair, eyes, outfit) for included characters.',
+        '15) For interactions between characters, tag the one performing the action as source#[action tag] and the one receiving it as target#[action tag].',
+        '    Example: source#kiss, target#kiss',
+        '16) Outfit tags may be freely adjusted to fit the current situation and context.',
         '',
         'EXAMPLE:',
         '* Input: "Alice and Bob go to cafe"',
-        '* Known characters: Alice, Bob',
-        '* Appearance: Alice: long hair, blue eyes / Bob: short hair, brown eyes',
+        '* Characters: Character 1 (Alice), Character 2 (Bob)',
+        '* Appearance: Character 1: long hair, blue eyes / Character 2: short hair, brown eyes',
         '',
         '<img-gen>',
-        'The appearance tags currently provided correspond to (Alice, Bob).',
-        'Based on the description, both Alice and Bob are going to a cafe together.',
-        'Therefore, both characters must appear in this image.',
+        'Character 1 (Alice) and Character 2 (Bob) both appear. Cafe scene.',
         '</img-gen>',
         '',
-        '1girl, 1boy, cafe, sitting, table, indoor, warm lighting, upper body, [Alice: long hair, blue eyes], [Bob: short hair, brown eyes]',
+        '1girl, 1boy, cafe, sitting, table, indoor, warm lighting, upper body | Character 1: (long hair, blue eyes) | Character 2: (short hair, brown eyes)',
         '',
         'Known characters:',
         charList,
@@ -332,10 +327,10 @@ export async function generateDanbooruTags(rawPrompt, options) {
 /**
  * Build the final Image API prompt by combining Danbooru tags with appearance tags.
  * Korean text is never included.
- * Format: weight::(scene tags)::, [name1: appearance1], [name2: appearance2], ...
+ * Format: scene tags | Character 1: (appearance1) | Character 2: (appearance2)
  *
  * @param {string} danbooruTags - Generated English Danbooru tags
- * @param {string|string[]} appearanceTags - Character appearance groups (already formatted as "name: tags")
+ * @param {string|string[]} appearanceTags - Character appearance groups (already formatted as "Character N: tags")
  * @param {Object} [options]
  * @param {number} [options.tagWeight] - Weight multiplier for scene tags (e.g. 5 → "5::(scene tags)::")
  * @returns {string} Final prompt for Image API
@@ -348,8 +343,17 @@ export function buildImageApiPrompt(danbooruTags, appearanceTags, options) {
         ? appearanceTags.map(safeAppearanceGroup).filter(Boolean)
         : [safeAppearanceGroup(appearanceTags)].filter(Boolean);
 
-    // Wrap each appearance group in square brackets with "name: tags" format
-    const wrappedAppearance = appearanceGroups.map(a => `[${a}]`);
+    // Format each appearance group as "Character N: (tags)"
+    const wrappedAppearance = appearanceGroups.map(a => {
+        // Already in "Character N: tags" format from buildMatchedAppearanceGroups
+        const colonIdx = a.indexOf(':');
+        if (colonIdx > 0) {
+            const label = a.substring(0, colonIdx).trim();
+            const tags = a.substring(colonIdx + 1).trim();
+            return `${label}: (${tags})`;
+        }
+        return a;
+    });
 
     // Apply weight to scene tags if tagWeight > 0
     const wrappedScene = cleanDanbooru
@@ -357,24 +361,24 @@ export function buildImageApiPrompt(danbooruTags, appearanceTags, options) {
         : '';
 
     if (!wrappedScene && wrappedAppearance.length === 0) return '';
-    if (!wrappedScene) return wrappedAppearance.join(', ');
+    if (!wrappedScene) return wrappedAppearance.join(' | ');
     if (wrappedAppearance.length === 0) return wrappedScene;
 
-    return `${wrappedScene}, ${wrappedAppearance.join(', ')}`;
+    return `${wrappedScene} | ${wrappedAppearance.join(' | ')}`;
 }
 
 function buildMatchedAppearanceGroups(matched = []) {
     if (!Array.isArray(matched) || matched.length === 0) return [];
     const seen = new Set();
     return matched
-        .map((entry) => {
+        .map((entry, idx) => {
             const name = String(entry?.name || '').trim();
             const tags = String(entry?.appearanceTags || '').trim();
             if (!name || !tags) return '';
             const normalized = name.toLowerCase();
             if (seen.has(normalized)) return '';
             seen.add(normalized);
-            return safeAppearanceGroup(`${name}: ${tags}`);
+            return safeAppearanceGroup(`Character ${idx + 1}: ${tags}`);
         })
         .filter(Boolean);
 }
@@ -487,22 +491,27 @@ export function buildDirectImagePrompt(rawPrompt, options = {}) {
             .replace(/[\r\n]+/g, ', ')
             .trim(),
     );
+    // Match both bracket format [Name: tags] and parenthetical format Character N: (tags)
     const appearanceBlockRegex = /\[[^\]]+:[^\]]+\]/g;
+    const pipeCharBlockRegex = /Character\s+\d+:\s*\([^)]+\)/gi;
     const promptAppearanceBlocks = directPrompt.match(appearanceBlockRegex) || [];
+    const promptPipeBlocks = directPrompt.match(pipeCharBlockRegex) || [];
+    const allPromptBlocks = [
+        ...promptAppearanceBlocks.map(b => b.slice(1, -1).trim()),
+        ...promptPipeBlocks.map(b => b.replace(/\(([^)]+)\)/, '$1').trim()),
+    ].filter(Boolean);
     const sceneOnly = directPrompt
         .replace(appearanceBlockRegex, '')
+        .replace(pipeCharBlockRegex, '')
         .replace(/\|/g, ',')
         .split(',')
-        .map(s => s.trim().replace(/^[`"'“”‘’]+|[`"'“”‘’]+$/g, '').replace(/[.!?]+$/g, ''))
+        .map(s => s.trim().replace(/^[`"\u2018\u2019\u201c\u201d]+|[`"\u2018\u2019\u201c\u201d]+$/g, '').replace(/[.!?]+$/g, ''))
         .filter(Boolean)
         .join(', ');
     const matchedAppearanceGroups = buildMatchedAppearanceGroups(matched);
     const appearanceGroups = matchedAppearanceGroups.length > 0
         ? matchedAppearanceGroups
-        : mergeAppearanceGroupsWithMatched(
-            promptAppearanceBlocks.map(b => b.slice(1, -1).trim()).filter(Boolean),
-            matched,
-        );
+        : mergeAppearanceGroupsWithMatched(allPromptBlocks, matched);
     const filteredSceneTags = stripAppearanceTagsFromScene(sceneOnly, appearanceGroups);
     const finalPrompt = buildImageApiPrompt(filteredSceneTags, appearanceGroups, { tagWeight });
     if (!finalPrompt && appearanceGroups.length === 0) return emptyResult;
@@ -517,7 +526,7 @@ export function buildDirectImagePrompt(rawPrompt, options = {}) {
  *  1. Load all contacts (names, descriptions, appearance tags)
  *  2. Match characters mentioned in the input prompt (name/displayName/subName)
  *  3. Generate scene tags + character selection via AI (with <img-gen> reasoning)
- *  4. Combine: weight::scene tags::, [name1: appearance1], [name2: appearance2]
+ *  4. Combine: scene tags | Character 1: (appearance1) | Character 2: (appearance2)
  *
  * The AI decides which characters should appear based on context.
  * Only the content after </img-gen> is sent to the image generation API.

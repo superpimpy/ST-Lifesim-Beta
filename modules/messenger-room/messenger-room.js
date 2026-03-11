@@ -18,7 +18,7 @@ const ROOM_AUTONOMY_DELAY_MAX_MS = 6500;
 const ROOM_IMAGE_TEXT_TEMPLATE_DEFAULT = '[사진: {description}]';
 const ROOM_ICON_GROUP = '👥';
 const ROOM_ICON_DIRECT = '💬';
-const ROOM_IMAGE_OFF_PROMPT = '<image_generation_rule>\nWhen the selected messenger-room responder would naturally TAKE A PHOTO with their phone and SEND IT in this room, insert a <pic prompt="image description in Korean for the photo situation"> tag at that point.\nOnly use <pic> for a photo the responder could realistically take and deliberately send.\nDo not generate scene narration, mood illustrations, or impossible third-person shots.\n</image_generation_rule>';
+const ROOM_IMAGE_OFF_PROMPT = '<image_generation_rule>\nWhen the responder would realistically take and send a photo in this room, insert a <pic prompt="short English image description"> tag.\nOnly use <pic> for photos the responder could actually take with their phone.\nNo narration, mood shots, or third-person views.\n</image_generation_rule>';
 const ROOM_PIC_TAG_REGEX = /<?pic\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi;
 const ROOM_EMOTICON_ONLY_HTML_REGEX = /^<img\b[^>]*aria-label="[^"]*이모티콘[^"]*"[^>]*>$/i;
 const ROOM_EMOTICON_TOKEN_ONLY_REGEX = /^\s*\[\[\s*emoticon\s*:\s*[^\]]+\s*\]\]\s*$/i;
@@ -1159,22 +1159,27 @@ function openMessengerRoomDetail(roomId, onBack) {
     footer.append(emoticonBtn, input, quickSendBtn, sendBtn);
 
     const updateComposerState = () => {
-        const hasText = !!normalizeRoomPromptText(input.value);
-        sendBtn.disabled = !hasText;
-        quickSendBtn.disabled = !hasText;
+        // Send button is always enabled to allow triggering AI responses even with empty input
+        sendBtn.disabled = false;
+        quickSendBtn.disabled = false;
     };
 
     const submitRoomMessage = (options = {}) => {
         const text = normalizeRoomPromptText(input.value);
-        if (!text) {
-            updateComposerState();
-            return;
-        }
         input.value = '';
         sendBtn.disabled = true;
         quickSendBtn.disabled = true;
         input.disabled = true;
-        appendUserRoomMessage({ text }, options);
+        if (text) {
+            appendUserRoomMessage({ text }, options);
+        } else {
+            // Empty message: trigger AI auto-replies without appending a user message
+            if (options.skipAutoReply !== true) {
+                void runRoomAutoReplies(roomId, () => {
+                    if (messageList.isConnected) renderMessages();
+                });
+            }
+        }
         input.disabled = false;
         updateComposerState();
         input.focus();
@@ -1341,6 +1346,32 @@ function buildRoomListContent(onBack, initialRoomId = null) {
         wrapper.appendChild(hero);
     }
 
+    // Sub-tabs for filtering 1:1 / Group / All
+    let activeTab = 'all';
+    const tabBar = document.createElement('div');
+    tabBar.className = 'slm-room-tab-bar';
+    const tabs = [
+        { key: 'all', label: '전체' },
+        { key: 'direct', label: '💬 1:1' },
+        { key: 'group', label: '👥 그룹' },
+    ];
+    const tabButtons = {};
+    tabs.forEach(({ key, label }) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `slm-room-tab${key === activeTab ? ' active' : ''}`;
+        btn.textContent = label;
+        btn.onclick = () => {
+            activeTab = key;
+            Object.values(tabButtons).forEach((b) => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderRooms();
+        };
+        tabButtons[key] = btn;
+        tabBar.appendChild(btn);
+    });
+    wrapper.appendChild(tabBar);
+
     const search = document.createElement('input');
     search.className = 'slm-input';
     search.type = 'search';
@@ -1429,6 +1460,10 @@ function buildRoomListContent(onBack, initialRoomId = null) {
         const query = String(search.value || '').trim().toLowerCase();
         const candidateMap = getCandidateMap();
         const rooms = loadMessengerRooms().filter((room) => {
+            // Tab filter: 1:1 (direct) vs group
+            const memberCount = room.members?.length || 0;
+            if (activeTab === 'direct' && memberCount > 2) return false;
+            if (activeTab === 'group' && memberCount <= 2) return false;
             if (!query) return true;
             const haystack = [
                 room.name,
@@ -1465,10 +1500,7 @@ function buildRoomListContent(onBack, initialRoomId = null) {
             titleRow.className = 'slm-room-card-title';
             const titleText = document.createElement('span');
             titleText.textContent = getRoomTitle(room, candidateMap);
-            const time = document.createElement('span');
-            time.className = 'slm-room-card-time';
-            time.textContent = formatRelativeTime(room.updatedAt);
-            titleRow.append(titleText, time);
+            titleRow.append(titleText);
 
             const subtitle = document.createElement('div');
             subtitle.className = 'slm-room-card-subtitle';

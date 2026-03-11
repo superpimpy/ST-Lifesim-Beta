@@ -227,22 +227,23 @@ function getProfileSummary(authorName) {
 }
 
 function buildSnsImageInputPrompt(customTemplate, authorName, postContent) {
+    // Only include scene/situation context for the image prompt.
+    // Appearance tags are handled separately by buildDirectImagePrompt via includeNames + getAppearanceTagsByName.
     if (!customTemplate) return `${authorName}'s social media photo post: "${postContent}"`;
     const authorProfile = getProfileSummary(authorName);
-    const authorAppearanceTags = String(getAppearanceTagsByName(authorName) || '').trim();
     return customTemplate
         .replace(/\{\{authorName\}\}/g, authorName)
         .replace(/\{\{charName\}\}/g, authorName)
         .replace(/\{\{personality\}\}/g, authorProfile)
-        .replace(/\{\{appearance\}\}/g, authorAppearanceTags)
-        .replace(/\{\{appearanceTags\}\}/g, authorAppearanceTags)
+        .replace(/\{\{appearance\}\}/g, '')
+        .replace(/\{\{appearanceTags\}\}/g, '')
         .replace(/\{\{context\}\}/g, postContent)
         .replace(/\{\{postContent\}\}/g, postContent)
         .replace(/\{authorName\}/g, authorName)
         .replace(/\{charName\}/g, authorName)
         .replace(/\{personality\}/g, authorProfile)
-        .replace(/\{appearance\}/g, authorAppearanceTags)
-        .replace(/\{appearanceTags\}/g, authorAppearanceTags)
+        .replace(/\{appearance\}/g, '')
+        .replace(/\{appearanceTags\}/g, '')
         .replace(/\{context\}/g, postContent)
         .replace(/\{postContent\}/g, postContent);
 }
@@ -252,14 +253,17 @@ function buildSnsDirectImagePromptRequest(sourcePrompt, authorName) {
         String(sourcePrompt || '').trim(),
         '',
         '[Output rule]',
-        `Return exactly one final direct image prompt for ${authorName || 'the author'}.`,
+        `Return exactly one final direct image prompt for the author.`,
         'Output ONLY one line of English Danbooru-style tags for direct image generation.',
+        'Format: scene tags | Character 1: (appearance tags)',
+        'Use pipe "|" to separate scene tags from character appearance blocks.',
+        'Use "Character N:" labels, NOT actual character names.',
         DANBOORU_SPACE_TAG_RULE,
         'Do not output explanations, markdown, XML tags, captions, or Korean.',
-        'Keep the main tag list focused on action, setting, framing, composition, lighting, and camera tags.',
-        'Do not put core appearance details in the main tag list when [Name: appearance tags] blocks are available.',
-        'If character appearance tags are needed, include them directly as [Name: appearance tags].',
-        'Keep the named author in-frame unless the prompt clearly describes a subject-only object or scenery post.',
+        'Scene tags = action, setting, framing, composition, lighting, camera ONLY.',
+        'Do not put core appearance details in scene tags when character appearance blocks are available.',
+        'For interactions, use source#[action] and target#[action] tags.',
+        'Outfit tags may be freely adjusted to fit the situation.',
         'Always produce a fresh prompt for a new image.',
     ].join('\n');
 }
