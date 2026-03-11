@@ -1078,6 +1078,12 @@ body[data-theme="dark"],
   box-shadow: 0 2px 8px rgba(155,114,208,0.3);
 }
 
+.slm-room-card-icon-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .slm-room-card-body {
   flex: 1;
   min-width: 0;
@@ -1240,6 +1246,11 @@ body[data-theme="dark"],
 
 /* ★ iMessage 스타일 채팅 버블 ★ */
 .slm-room-message-bubble {
+  display: inline-block;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 9px 13px;
   border-radius: 18px 18px 18px 4px; /* 수신: 왼쪽 하단 꺾임 */
   background: var(--slm-bubble-other-bg);
@@ -1285,6 +1296,7 @@ body[data-theme="dark"],
 
 /* 사용자 메시지 버블 — iMessage 파란색 */
 .slm-room-message.user .slm-room-message-bubble {
+  align-self: flex-end;
   background: var(--slm-bubble-user-bg);
   color: var(--slm-bubble-user-text);
   border-radius: 18px 18px 4px 18px; /* 발신: 오른쪽 하단 꺾임 */
@@ -1324,6 +1336,17 @@ body[data-theme="dark"],
   justify-content: flex-end;
   gap: 4px;
   margin-top: 3px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.slm-room-message:hover .slm-room-message-actions,
+.slm-room-message:focus-within .slm-room-message-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .slm-room-message-actions .slm-btn {

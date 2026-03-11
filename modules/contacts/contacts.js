@@ -1238,21 +1238,25 @@ export function getAppearanceTagsByName(name) {
         .filter(Boolean);
     const requestedName = String(name).trim();
     const requestedLower = requestedName.toLowerCase();
-    const allContacts = [...loadContacts('character'), ...loadContacts('chat')];
-    const contact = allContacts.find((c) => {
+    const allContacts = [...loadContacts('chat'), ...loadContacts('character')];
+    const matchingContacts = allContacts.filter((c) => {
         const candidates = normalizeCandidates([c?.name, c?.displayName, c?.subName]);
         return candidates.some(candidate => candidate.toLowerCase() === requestedLower);
     });
-    const fromContact = String(contact?.appearanceTags || '').trim();
+    const contactWithTags = matchingContacts.find((contact) => String(contact?.appearanceTags || '').trim());
+    const contact = contactWithTags || matchingContacts[0] || null;
+    const fromContact = String(contactWithTags?.appearanceTags || '').trim();
     if (fromContact) return fromContact;
     // 연락처에 외관 태그가 없으면 characterAppearanceTags 설정에서 확인
     const ext = getExtensionSettings()?.['st-lifesim'];
     const settingsTags = ext?.characterAppearanceTags || {};
     const lookupCandidates = normalizeCandidates([
         requestedName,
-        contact?.name,
-        contact?.displayName,
-        contact?.subName,
+        ...matchingContacts.flatMap((matchedContact) => normalizeCandidates([
+            matchedContact?.name,
+            matchedContact?.displayName,
+            matchedContact?.subName,
+        ])),
     ]);
     for (const candidate of lookupCandidates) {
         const directMatch = String(settingsTags?.[candidate] || '').trim();

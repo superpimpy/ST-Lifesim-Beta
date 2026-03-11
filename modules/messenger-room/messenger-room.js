@@ -1,11 +1,11 @@
 import { getContext } from '../../utils/st-context.js';
-import { getExtensionSettings, loadData, saveData } from '../../utils/storage.js';
+import { getDefaultBinding, getExtensionSettings, loadData, saveData } from '../../utils/storage.js';
 import { createPopup, closePopup } from '../../utils/popup.js';
 import { getAppearanceTagsByName, getContacts } from '../contacts/contacts.js';
 import { buildAiEmoticonContext, replaceAiSelectedEmoticons, getStoredEmoticons, buildEmoticonMessageHtml } from '../emoticon/emoticon.js';
 import { translateTextToKorean } from '../sns/sns.js';
 import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
-import { applyProfileImageStyle } from '../../utils/profile-image.js';
+import { applyProfileImageStyle, normalizeProfileImageStyle, readImageFileAsDataUrl } from '../../utils/profile-image.js';
 import { escapeHtml, generateId, showConfirm, showToast } from '../../utils/ui.js';
 
 const MODULE_KEY = 'messenger-rooms';
@@ -28,14 +28,21 @@ const ROOM_DEFAULTS = {
     extraResponseProbability: 35,
     maxResponses: 2,
 };
+const ROOM_BINDINGS = ['chat', 'character'];
+const ROOM_AVATAR_DEFAULTS = { width: 48, height: 48, scale: 100, positionX: 50, positionY: 50 };
+const ROOM_AVATAR_PREVIEW_DEFAULTS = { width: 72, height: 72, scale: 100, positionX: 50, positionY: 50 };
 const roomAutoReplyState = new Map();
+
+function normalizeRoomBinding(binding) {
+    return binding === 'character' ? 'character' : 'chat';
+}
 
 /**
  * Normalize messenger-room records loaded from storage.
  * @param {Array} rooms
  * @returns {Array}
  */
-export function normalizeMessengerRooms(rooms = []) {
+export function normalizeMessengerRooms(rooms = [], binding = 'chat') {
     if (!Array.isArray(rooms)) return [];
     return rooms
         .map((room) => {
@@ -61,6 +68,9 @@ export function normalizeMessengerRooms(rooms = []) {
                 name,
                 categories: normalizeCategoryList(room?.categories),
                 members,
+                binding: normalizeRoomBinding(room?.binding || binding),
+                avatar: String(room?.avatar || '').trim(),
+                avatarStyle: normalizeProfileImageStyle(room?.avatarStyle, ROOM_AVATAR_DEFAULTS),
                 createdAt,
                 updatedAt,
                 messages,
@@ -99,30 +109,43 @@ export function buildMessengerRoomName(labels = []) {
     return `${safeLabels.slice(0, 2).join(', ')} 외 ${safeLabels.length - 2}명`;
 }
 
-function loadMessengerRooms() {
-    const stored = loadData(MODULE_KEY, { rooms: [] }, 'chat');
-    return normalizeMessengerRooms(stored?.rooms || []);
+function loadMessengerRooms(binding = null) {
+    if (binding && ROOM_BINDINGS.includes(binding)) {
+        const stored = loadData(MODULE_KEY, { rooms: [] }, binding);
+        return normalizeMessengerRooms(stored?.rooms || [], binding);
+    }
+    const merged = new Map();
+    ROOM_BINDINGS.forEach((scope) => {
+        loadMessengerRooms(scope).forEach((room) => {
+            const existing = merged.get(room.id);
+            if (!existing || Number(room.updatedAt || 0) >= Number(existing.updatedAt || 0)) {
+                merged.set(room.id, room);
+            }
+        });
+    });
+    return normalizeMessengerRooms([...merged.values()]);
 }
 
-function saveMessengerRooms(rooms) {
-    saveData(MODULE_KEY, { rooms: normalizeMessengerRooms(rooms) }, 'chat');
+function saveMessengerRooms(rooms, binding = 'chat') {
+    return saveData(MODULE_KEY, { rooms: normalizeMessengerRooms(rooms, binding) }, binding);
 }
 
 function upsertMessengerRoom(nextRoom) {
-    const rooms = loadMessengerRooms();
-    const index = rooms.findIndex((room) => room.id === nextRoom.id);
-    if (index >= 0) {
-        rooms[index] = nextRoom;
-    } else {
-        rooms.push(nextRoom);
-    }
-    saveMessengerRooms(rooms);
-    return nextRoom;
+    const room = normalizeMessengerRooms([nextRoom], nextRoom?.binding || 'chat')[0];
+    if (!room) return null;
+    ROOM_BINDINGS.forEach((binding) => {
+        const rooms = loadMessengerRooms(binding).filter((entry) => entry.id !== room.id);
+        if (binding === room.binding) rooms.push(room);
+        saveMessengerRooms(rooms, binding);
+    });
+    return room;
 }
 
 function deleteMessengerRoom(roomId) {
-    const nextRooms = loadMessengerRooms().filter((room) => room.id !== roomId);
-    saveMessengerRooms(nextRooms);
+    ROOM_BINDINGS.forEach((binding) => {
+        const nextRooms = loadMessengerRooms(binding).filter((room) => room.id !== roomId);
+        saveMessengerRooms(nextRooms, binding);
+    });
 }
 
 function getMessengerRoomById(roomId) {
@@ -254,8 +277,8 @@ function getMemberCandidates() {
         });
     }
 
-    [...getContacts('character'), ...getContacts('chat')].forEach((contact) => {
-        if (contact?.isUserAuto) return;
+    [...getContacts('chat'), ...getContacts('character')].forEach((contact) => {
+        if (contact?.isUserAuto || contact?.isCharAuto) return;
         const label = String(contact?.displayName || contact?.name || '').trim();
         if (!label) return;
         pushCandidate({
@@ -366,13 +389,74 @@ function getContactMemberKey(contact) {
     return String(contact?.displayName || contact?.name || '').trim();
 }
 
-function findDirectMessengerRoom(memberKey) {
+function getRoomContactMemberKeys(room) {
+    return (Array.isArray(room?.members) ? room.members : [])
+        .filter((memberKey) => memberKey && memberKey !== MAIN_CHAR_MEMBER_KEY && memberKey !== USER_MEMBER_KEY);
+}
+
+function findDirectMessengerRoom(memberKey, binding = null) {
     const normalizedKey = String(memberKey || '').trim().toLowerCase();
     if (!normalizedKey) return null;
-    return loadMessengerRooms().find((room) => {
-        const members = Array.isArray(room?.members) ? room.members : [];
-        return members.length === 1 && String(members[0] || '').trim().toLowerCase() === normalizedKey;
+    return loadMessengerRooms(binding).find((room) => {
+        const contactMembers = getRoomContactMemberKeys(room)
+            .map((entry) => String(entry || '').trim().toLowerCase())
+            .filter(Boolean);
+        return contactMembers.length === 1 && contactMembers[0] === normalizedKey;
     }) || null;
+}
+
+function getRoomRepresentativeCandidate(room, candidateMap = getCandidateMap()) {
+    const contactMembers = getRoomContactMemberKeys(room)
+        .map((memberKey) => candidateMap.get(memberKey))
+        .filter(Boolean);
+    if (contactMembers.length !== 1) return null;
+    return contactMembers[0];
+}
+
+function isGroupMessengerRoom(room) {
+    return getRoomContactMemberKeys(room).length > 1;
+}
+
+function getRoomAvatarSource(room, candidateMap = getCandidateMap()) {
+    const directCandidate = getRoomRepresentativeCandidate(room, candidateMap);
+    if (directCandidate?.avatar) {
+        return {
+            avatar: directCandidate.avatar,
+            avatarStyle: directCandidate.avatarStyle || null,
+            label: directCandidate.label,
+        };
+    }
+    const roomAvatar = String(room?.avatar || '').trim();
+    if (roomAvatar) {
+        return {
+            avatar: roomAvatar,
+            avatarStyle: room?.avatarStyle || null,
+            label: getRoomTitle(room, candidateMap),
+        };
+    }
+    return null;
+}
+
+function buildRoomCardIcon(room, candidateMap = getCandidateMap()) {
+    const icon = document.createElement('div');
+    icon.className = 'slm-room-card-icon';
+    const avatarSource = getRoomAvatarSource(room, candidateMap);
+    if (avatarSource?.avatar) {
+        const img = document.createElement('img');
+        img.className = 'slm-room-card-icon-image';
+        img.src = avatarSource.avatar;
+        img.alt = avatarSource.label || getRoomTitle(room, candidateMap);
+        applyProfileImageStyle(
+            icon,
+            img,
+            avatarSource.avatarStyle,
+            ROOM_AVATAR_DEFAULTS,
+        );
+        icon.appendChild(img);
+        return icon;
+    }
+    icon.textContent = isGroupMessengerRoom(room) ? ROOM_ICON_GROUP : ROOM_ICON_DIRECT;
+    return icon;
 }
 
 export function openDirectMessengerWithContact(contact, onBack) {
@@ -390,12 +474,14 @@ export function openDirectMessengerWithContact(contact, onBack) {
         showToast('현재 메신저 멤버 후보에 없는 연락처입니다.', 'warn');
         return null;
     }
-    const existingRoom = findDirectMessengerRoom(memberKey);
+    const roomBinding = normalizeRoomBinding(contact?.binding || getDefaultBinding());
+    const existingRoom = findDirectMessengerRoom(memberKey, roomBinding);
     const room = existingRoom || normalizeMessengerRooms([{
         id: generateId(),
         name: `${getMemberDisplayLabel(memberKey, candidateMap)} 개인톡`,
         categories: normalizeCategoryList(contact?.categories),
         members: [memberKey],
+        binding: roomBinding,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         messages: [],
@@ -933,6 +1019,7 @@ function openRoomCreatePopup(onBack, roomId = null) {
     const candidateMap = getCandidateMap();
     const candidates = [...candidateMap.values()];
     const selectedKeys = new Set(existingRoom?.members || []);
+    let selectedBinding = normalizeRoomBinding(existingRoom?.binding || getDefaultBinding());
     const wrapper = document.createElement('div');
     wrapper.className = 'slm-form slm-room-create';
 
@@ -956,6 +1043,151 @@ function openRoomCreatePopup(onBack, roomId = null) {
     categoryInput.value = normalizeCategoryList(existingRoom?.categories).join(', ');
     wrapper.appendChild(categoryInput);
 
+    const bindingLabel = document.createElement('label');
+    bindingLabel.className = 'slm-label';
+    bindingLabel.textContent = '저장 범위';
+    const bindingSelect = document.createElement('select');
+    bindingSelect.className = 'slm-select';
+    bindingSelect.innerHTML = `
+        <option value="chat"${selectedBinding === 'chat' ? ' selected' : ''}>이 채팅에만 저장</option>
+        <option value="character"${selectedBinding === 'character' ? ' selected' : ''}>채팅을 새로 파도 유지</option>
+    `;
+    bindingSelect.onchange = () => {
+        selectedBinding = normalizeRoomBinding(bindingSelect.value);
+    };
+    wrapper.append(bindingLabel, bindingSelect);
+
+    const avatarInput = document.createElement('input');
+    avatarInput.className = 'slm-input';
+    avatarInput.type = 'text';
+    avatarInput.placeholder = '그룹 대표사진 데이터';
+    avatarInput.value = String(existingRoom?.avatar || '').trim();
+    avatarInput.style.display = 'none';
+    wrapper.appendChild(avatarInput);
+
+    const initialAvatarStyle = normalizeProfileImageStyle(existingRoom?.avatarStyle, ROOM_AVATAR_PREVIEW_DEFAULTS);
+    const avatarActionLabel = Object.assign(document.createElement('label'), { className: 'slm-label', textContent: '그룹 대표사진 (선택)' });
+    const avatarActionRow = document.createElement('div');
+    avatarActionRow.className = 'slm-input-row';
+    avatarActionRow.style.marginTop = '2px';
+    const avatarUploadInput = document.createElement('input');
+    avatarUploadInput.type = 'file';
+    avatarUploadInput.accept = 'image/*';
+    avatarUploadInput.style.display = 'none';
+    const avatarUploadBtn = document.createElement('button');
+    avatarUploadBtn.type = 'button';
+    avatarUploadBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
+    avatarUploadBtn.textContent = '📁 로컬 이미지 업로드';
+    const avatarClearBtn = document.createElement('button');
+    avatarClearBtn.type = 'button';
+    avatarClearBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+    avatarClearBtn.textContent = '🧹 대표사진 비우기';
+    avatarActionRow.append(avatarUploadBtn, avatarClearBtn, avatarUploadInput);
+    const avatarNote = document.createElement('div');
+    avatarNote.className = 'slm-desc';
+    const avatarPreview = document.createElement('div');
+    avatarPreview.className = 'slm-contact-detail-avatar';
+    avatarPreview.style.marginBottom = '8px';
+    const avatarCropRow = document.createElement('div');
+    avatarCropRow.className = 'slm-input-row';
+    avatarCropRow.style.marginBottom = '8px';
+    avatarCropRow.style.alignItems = 'center';
+    avatarCropRow.style.flexWrap = 'wrap';
+    const avatarScaleInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input',
+        type: 'range',
+        min: '100',
+        max: '400',
+        step: '1',
+        value: String(initialAvatarStyle.scale),
+    });
+    avatarScaleInput.style.width = '140px';
+    const avatarPositionXInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input',
+        type: 'range',
+        min: '0',
+        max: '100',
+        step: '1',
+        value: String(initialAvatarStyle.positionX),
+    });
+    avatarPositionXInput.style.width = '140px';
+    const avatarPositionYInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input',
+        type: 'range',
+        min: '0',
+        max: '100',
+        step: '1',
+        value: String(initialAvatarStyle.positionY),
+    });
+    avatarPositionYInput.style.width = '140px';
+    avatarCropRow.append(
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '확대' }),
+        avatarScaleInput,
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '좌우 이동' }),
+        avatarPositionXInput,
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '상하 이동' }),
+        avatarPositionYInput,
+    );
+    wrapper.append(avatarActionLabel, avatarActionRow, avatarNote, avatarPreview, avatarCropRow);
+
+    const getDraftAvatarStyle = () => normalizeProfileImageStyle({
+        scale: avatarScaleInput.value,
+        positionX: avatarPositionXInput.value,
+        positionY: avatarPositionYInput.value,
+    }, ROOM_AVATAR_PREVIEW_DEFAULTS);
+
+    const updateAvatarControls = () => {
+        const isDirectRoom = !isGroupMessengerRoom({ members: [...selectedKeys] }) && getRoomContactMemberKeys({ members: [...selectedKeys] }).length === 1;
+        avatarUploadBtn.disabled = isDirectRoom;
+        avatarClearBtn.disabled = isDirectRoom;
+        avatarScaleInput.disabled = isDirectRoom;
+        avatarPositionXInput.disabled = isDirectRoom;
+        avatarPositionYInput.disabled = isDirectRoom;
+        avatarNote.textContent = isDirectRoom
+            ? 'NPC 1:1 방은 해당 연락처의 대표사진과 크롭 설정을 그대로 사용합니다.'
+            : '그룹 메신저 방은 로컬 이미지를 대표사진으로 등록할 수 있습니다.';
+    };
+
+    const renderAvatarPreview = () => {
+        avatarPreview.innerHTML = '';
+        const previewRoom = { members: [...selectedKeys], avatar: avatarInput.value.trim(), avatarStyle: getDraftAvatarStyle() };
+        const avatarSource = getRoomAvatarSource(previewRoom, candidateMap);
+        if (avatarSource?.avatar) {
+            const img = document.createElement('img');
+            img.src = avatarSource.avatar;
+            img.alt = avatarSource.label || 'room avatar preview';
+            applyProfileImageStyle(avatarPreview, img, avatarSource.avatarStyle, ROOM_AVATAR_PREVIEW_DEFAULTS);
+            avatarPreview.appendChild(img);
+        } else {
+            const fallback = isGroupMessengerRoom(previewRoom) ? ROOM_ICON_GROUP : ROOM_ICON_DIRECT;
+            applyProfileImageStyle(avatarPreview, null, getDraftAvatarStyle(), ROOM_AVATAR_PREVIEW_DEFAULTS);
+            avatarPreview.textContent = fallback;
+        }
+        updateAvatarControls();
+    };
+
+    avatarUploadBtn.onclick = () => avatarUploadInput.click();
+    avatarClearBtn.onclick = () => {
+        avatarInput.value = '';
+        avatarUploadInput.value = '';
+        renderAvatarPreview();
+    };
+    avatarUploadInput.onchange = async (event) => {
+        const file = event.target?.files?.[0];
+        if (!file) return;
+        try {
+            avatarInput.value = await readImageFileAsDataUrl(file);
+            renderAvatarPreview();
+        } catch (error) {
+            showToast(error.message || '이미지 업로드 실패', 'error');
+        } finally {
+            avatarUploadInput.value = '';
+        }
+    };
+    avatarScaleInput.addEventListener('input', renderAvatarPreview);
+    avatarPositionXInput.addEventListener('input', renderAvatarPreview);
+    avatarPositionYInput.addEventListener('input', renderAvatarPreview);
+
     const list = document.createElement('div');
     list.className = 'slm-room-member-list';
     wrapper.appendChild(list);
@@ -971,6 +1203,7 @@ function openRoomCreatePopup(onBack, roomId = null) {
             checkbox.onchange = () => {
                 if (checkbox.checked) selectedKeys.add(candidate.key);
                 else selectedKeys.delete(candidate.key);
+                renderAvatarPreview();
             };
             const avatarWrap = document.createElement('div');
             avatarWrap.className = 'slm-room-member-avatar';
@@ -989,6 +1222,7 @@ function openRoomCreatePopup(onBack, roomId = null) {
         });
     };
     renderList();
+    renderAvatarPreview();
 
     const footer = document.createElement('div');
     footer.className = 'slm-panel-footer';
@@ -1024,6 +1258,9 @@ function openRoomCreatePopup(onBack, roomId = null) {
             name: String(nameInput.value || '').trim() || buildMessengerRoomName(labels),
             categories: parseCategoryInput(categoryInput.value),
             members,
+            binding: selectedBinding,
+            avatar: avatarInput.value.trim(),
+            avatarStyle: getDraftAvatarStyle(),
             createdAt: existingRoom?.createdAt || Date.now(),
             updatedAt: Date.now(),
             messages: existingRoom?.messages || [],
@@ -1403,8 +1640,16 @@ function buildRoomListContent(onBack, initialRoomId = null) {
     quickDmBtn.className = 'slm-btn slm-btn-secondary';
     quickDmBtn.textContent = '👤 NPC 1:1 시작';
     quickDmBtn.onclick = () => {
-        const npcContacts = [...getContacts('chat'), ...getContacts('character')]
-            .filter((contact) => !contact?.isUserAuto && !contact?.isCharAuto);
+        const npcContacts = [];
+        const seen = new Set();
+        [...getContacts('chat'), ...getContacts('character')]
+            .filter((contact) => !contact?.isUserAuto && !contact?.isCharAuto)
+            .forEach((contact) => {
+                const key = getContactMemberKey(contact).toLowerCase();
+                if (!key || seen.has(key)) return;
+                seen.add(key);
+                npcContacts.push(contact);
+            });
         if (npcContacts.length === 0) {
             showToast('1:1 메신저를 시작할 NPC 연락처가 없습니다.', 'warn');
             return;
@@ -1460,10 +1705,8 @@ function buildRoomListContent(onBack, initialRoomId = null) {
         const query = String(search.value || '').trim().toLowerCase();
         const candidateMap = getCandidateMap();
         const rooms = loadMessengerRooms().filter((room) => {
-            // Tab filter: 1:1 (direct) vs group
-            const memberCount = room.members?.length || 0;
-            if (activeTab === 'direct' && memberCount > 2) return false;
-            if (activeTab === 'group' && memberCount <= 2) return false;
+            if (activeTab === 'direct' && isGroupMessengerRoom(room)) return false;
+            if (activeTab === 'group' && !isGroupMessengerRoom(room)) return false;
             if (!query) return true;
             const haystack = [
                 room.name,
@@ -1486,11 +1729,7 @@ function buildRoomListContent(onBack, initialRoomId = null) {
             card.type = 'button';
             card.className = `slm-room-card${initialRoomId && room.id === initialRoomId ? ' active' : ''}`;
 
-            // 왼쪽 아이콘 (그룹 아바타)
-            const icon = document.createElement('div');
-            icon.className = 'slm-room-card-icon';
-            const memberCount = room.members?.length || 0;
-            icon.textContent = memberCount > 2 ? ROOM_ICON_GROUP : ROOM_ICON_DIRECT;
+            const icon = buildRoomCardIcon(room, candidateMap);
 
             // 오른쪽 본문 영역
             const body = document.createElement('div');

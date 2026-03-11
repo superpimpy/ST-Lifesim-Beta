@@ -177,6 +177,16 @@ function getAiUsableEmoticons(senderName = getCurrentCharName()) {
     return emoticons.filter((emoticon) => isAiUsableByPolicy(emoticon, allowedCategories));
 }
 
+function getAiEmoticonChoices(senderName = getCurrentCharName()) {
+    const seen = new Set();
+    return getAiUsableEmoticons(senderName).filter((emoticon) => {
+        const key = normalizeEmoticonName(emoticon?.name).toLowerCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
 export function getAllEmoticonCategories() {
     return [...new Set(loadEmoticons().map((emoticon) => String(emoticon?.category || '').trim()).filter(Boolean))];
 }
@@ -209,10 +219,13 @@ function isSafeEmoticonTokenName(value) {
 
 function resolveAiEmoticonHtmlMap(senderName) {
     const htmlMap = new Map();
-    getAiUsableEmoticons(senderName).forEach((emoticon) => {
+    getAiEmoticonChoices(senderName).forEach((emoticon, index) => {
         const normalizedName = normalizeEmoticonName(emoticon.name).toLowerCase();
-        if (!normalizedName || htmlMap.has(normalizedName)) return;
-        htmlMap.set(normalizedName, buildEmoticonHtml(emoticon, senderName));
+        const html = buildEmoticonHtml(emoticon, senderName);
+        if (!normalizedName || !html) return;
+        htmlMap.set(normalizedName, html);
+        const numericKey = String(index + 1);
+        if (!htmlMap.has(numericKey)) htmlMap.set(numericKey, html);
     });
     return htmlMap;
 }
@@ -238,7 +251,10 @@ export function replaceAiSelectedEmoticons(text, senderName = '{{char}}') {
         const normalizedSource = normalizeEmoticonName(rawName);
         if (!isSafeEmoticonTokenName(normalizedSource)) return null;
         const normalizedName = normalizedSource.toLowerCase();
-        return htmlMap.get(normalizedName) || null;
+        const numberedMatch = normalizedSource.match(/^(\d+)\s*[\].)\-:]?\s*.+$/);
+        return htmlMap.get(normalizedName)
+            || (numberedMatch ? htmlMap.get(numberedMatch[1]) : null)
+            || null;
     };
 
     let replaced = source.replace(AI_EMOTICON_TOKEN_REGEX, (match, bracketName, angleName) => {
@@ -263,26 +279,26 @@ export function replaceAiSelectedEmoticons(text, senderName = '{{char}}') {
 }
 
 export function buildAiEmoticonContext(senderName = getCurrentCharName()) {
-    const aiEmoticons = getAiUsableEmoticons(senderName);
+    const aiEmoticons = getAiEmoticonChoices(senderName);
     if (aiEmoticons.length === 0) return '';
-    const list = [...new Set(aiEmoticons
+    const list = aiEmoticons
         .map((emoticon) => normalizeEmoticonName(emoticon.name))
-        .filter(Boolean))]
-        .map((name) => `• ${name}`)
+        .filter(Boolean)
+        .map((name, index) => `• ${index + 1}. ${name}`)
         .join('\n');
     return [
         '<당신이 사용할 수 있는 이모티콘 목록입니다>',
         '<Available emoticons you can use>',
         list,
         '',
-        '이모티콘을 보내고 싶다면 위 목록에서 정확히 하나를 골라 [[emoticon:이름]] 형식으로만 출력하세요.',
-        'If you want to send one, choose exactly one name from the list and output only [[emoticon:NAME]].',
-        '사용자가 이모티콘, emoji, sticker, reaction을 원하면 이미지 태그 <pic ...> 대신 반드시 [[emoticon:이름]] 형식을 우선 사용하세요.',
-        'When the user asks for an emoticon, emoji, sticker, or reaction, prefer [[emoticon:NAME]] and do not switch to <pic ...> image tags.',
+        '이모티콘을 보내고 싶다면 위 목록의 번호를 그대로 사용해 [[emoticon:번호]] 형식으로만 출력하세요.',
+        'If you want to send one, use the exact number from the list and output only [[emoticon:NUMBER]].',
+        '사용자가 이모티콘, emoji, sticker, reaction을 원하면 이미지 태그 <pic ...> 대신 반드시 [[emoticon:번호]] 형식을 우선 사용하세요.',
+        'When the user asks for an emoticon, emoji, sticker, or reaction, prefer [[emoticon:NUMBER]] and do not switch to <pic ...> image tags.',
         '이모티콘용 HTML, 이미지 URL, markdown, 설명은 직접 출력하지 마세요.',
         'Do not output emoticon HTML, image URLs, markdown, or explanations directly.',
         '',
-        'CRITICAL: The emoticon names listed above are absolute identifiers. They MUST NOT be translated, rephrased, or converted into another language under any circumstances. Always use the exact original name as shown in the list.',
+        'CRITICAL: Never translate or rephrase any emoticon identifier. The safest output is the numeric token only, because the numbers must stay unchanged.',
     ].join('\n');
 }
 
