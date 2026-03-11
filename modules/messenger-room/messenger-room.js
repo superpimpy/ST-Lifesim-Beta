@@ -131,7 +131,9 @@ function normalizeRoomPromptText(text) {
         .replace(/\r/g, '')
         .replace(/[<>{}\[\]]+/g, ' ')
         .replace(/\n{3,}/g, '\n\n')
-        .replace(/\s+/g, ' ')
+        .split('\n')
+        .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
+        .join('\n')
         .trim();
 }
 
@@ -140,6 +142,13 @@ function normalizeRoomGeneratedReplyText(text) {
         .replace(/\r/g, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
+}
+
+function getRoomUiSettings() {
+    const ext = getExtensionSettings()?.['st-lifesim'] || {};
+    return {
+        hideHelperText: ext.hideHelperText === true,
+    };
 }
 
 function normalizeQuotesForRoomPicTag(text) {
@@ -180,6 +189,17 @@ function sanitizeRoomReply(text, responderName, memberLabels = []) {
         cleaned = cleaned.slice(0, earliestForeignSpeakerIndex).trim();
     }
     return cleaned.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
+}
+
+function buildRoomMessageHtml(text, senderName) {
+    const source = String(text || '');
+    const escaped = escapeHtml(source);
+    if (!escaped) return '';
+    const lines = escaped.split('\n');
+    const html = lines.length > 1
+        ? `<div class="slm-room-message-lines">${lines.map((line) => `<span>${line || '&nbsp;'}</span>`).join('')}</div>`
+        : escaped;
+    return replaceAiSelectedEmoticons(html, senderName);
 }
 
 function getMemberCandidates() {
@@ -283,7 +303,9 @@ function replaceRoomMessage(roomId, messageId, updater) {
     if (!room) return null;
     const nextMessages = room.messages.map((message) => {
         if (message.id !== messageId) return message;
-        const updated = typeof updater === 'function' ? updater(message) : message;
+        const updated = typeof updater === 'function'
+            ? updater(message)
+            : (updater && typeof updater === 'object' ? updater : null);
         return {
             ...message,
             ...(updated && typeof updated === 'object' ? updated : {}),
@@ -517,13 +539,15 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
             });
         }
     }
-    let html = replaceAiSelectedEmoticons(escapeHtml(processedText).replace(/\n/g, '<br>'), senderName);
+    let html = buildRoomMessageHtml(processedText, senderName);
     imagePlaceholders.forEach((imageHtml, placeholder) => {
         html = html.replace(new RegExp(placeholder, 'g'), imageHtml);
     });
     const plainText = processedText
         .replace(/__ROOM_IMG_\d+__/g, ' [사진] ')
-        .replace(/\s+/g, ' ')
+        .split('\n')
+        .map((line) => line.replace(/\s+/g, ' ').trim())
+        .join('\n')
         .trim();
     return {
         text: plainText || normalizeRoomPromptText(rawText),
@@ -734,9 +758,13 @@ function renderRoomMessageBubbleContent(message, bubble) {
     if (!bubble) return;
     if (message?.html) {
         bubble.innerHTML = message.html;
+        bubble.classList.toggle('multiline', /slm-room-message-lines/.test(String(message.html || '')));
         return;
     }
-    bubble.textContent = String(message?.text || '');
+    const senderName = String(message?.authorName || getContext()?.name1 || '{{user}}').trim() || '{{user}}';
+    const html = buildRoomMessageHtml(String(message?.text || ''), senderName);
+    bubble.innerHTML = html;
+    bubble.classList.toggle('multiline', /slm-room-message-lines/.test(html));
 }
 
 function openRoomMessageEditPopup(roomId, messageId, onBack, onSaved) {
@@ -830,7 +858,9 @@ function openRoomEmoticonPicker(roomId, onBack, onSend) {
                 btn.type = 'button';
                 btn.className = 'slm-btn slm-btn-ghost slm-room-emoticon-btn';
                 const html = buildEmoticonMessageHtml(emoticon, String(getContext()?.name1 || '{{user}}').trim() || '{{user}}');
-                btn.innerHTML = `${html}<span>${escapeHtml(emoticon.name)}</span>`;
+                btn.innerHTML = html;
+                btn.title = emoticon.name;
+                btn.setAttribute('aria-label', emoticon.name);
                 btn.onclick = () => {
                     close();
                     onSend?.(emoticon);
@@ -873,10 +903,12 @@ function openRoomCreatePopup(onBack, roomId = null) {
     const wrapper = document.createElement('div');
     wrapper.className = 'slm-form slm-room-create';
 
-    const hint = document.createElement('div');
-    hint.className = 'slm-desc';
-    hint.textContent = '멤버를 고르면 그 방 안에서만 단톡이 활성화됩니다. {{char}}를 빼면, 바깥에서 본 분위기 정도만 간접적으로 말할 수 있습니다.';
-    wrapper.appendChild(hint);
+    if (!getRoomUiSettings().hideHelperText) {
+        const hint = document.createElement('div');
+        hint.className = 'slm-desc';
+        hint.textContent = '멤버를 고르면 그 방 안에서만 단톡이 활성화됩니다. {{char}}를 빼면, 바깥에서 본 분위기 정도만 간접적으로 말할 수 있습니다.';
+        wrapper.appendChild(hint);
+    }
 
     const nameInput = document.createElement('input');
     nameInput.className = 'slm-input';
@@ -988,34 +1020,36 @@ function openMessengerRoomDetail(roomId, onBack) {
     const wrapper = document.createElement('div');
     wrapper.className = 'slm-room-view';
 
-    const headerMeta = document.createElement('div');
-    headerMeta.className = 'slm-room-meta-card';
-    const members = document.createElement('div');
-    members.className = 'slm-room-member-chips';
-    room.members.forEach((memberKey) => {
-        const chip = document.createElement('span');
-        chip.className = 'slm-room-chip';
-        chip.textContent = getMemberDisplayLabel(memberKey, candidateMap);
-        members.appendChild(chip);
-    });
-    const metaText = document.createElement('div');
-    metaText.className = 'slm-desc';
-    metaText.textContent = isMainCharInRoom(room)
-        ? '이 방에는 {{char}}가 포함되어 있어 직접 참가자처럼 답할 수 있습니다.'
-        : '{{char}}는 이 방 멤버가 아니므로, 정확한 대화 내용 대신 바깥에서 본 분위기만 간접적으로 말할 수 있습니다.';
-    headerMeta.append(members, metaText);
-    if (normalizeCategoryList(room.categories).length > 0) {
-        const categoryChips = document.createElement('div');
-        categoryChips.className = 'slm-room-member-chips';
-        normalizeCategoryList(room.categories).forEach((category) => {
+    if (!getRoomUiSettings().hideHelperText) {
+        const headerMeta = document.createElement('div');
+        headerMeta.className = 'slm-room-meta-card';
+        const members = document.createElement('div');
+        members.className = 'slm-room-member-chips';
+        room.members.forEach((memberKey) => {
             const chip = document.createElement('span');
             chip.className = 'slm-room-chip';
-            chip.textContent = `#${category}`;
-            categoryChips.appendChild(chip);
+            chip.textContent = getMemberDisplayLabel(memberKey, candidateMap);
+            members.appendChild(chip);
         });
-        headerMeta.appendChild(categoryChips);
+        const metaText = document.createElement('div');
+        metaText.className = 'slm-desc';
+        metaText.textContent = isMainCharInRoom(room)
+            ? '이 방에는 {{char}}가 포함되어 있어 직접 참가자처럼 답할 수 있습니다.'
+            : '{{char}}는 이 방 멤버가 아니므로, 정확한 대화 내용 대신 바깥에서 본 분위기만 간접적으로 말할 수 있습니다.';
+        headerMeta.append(members, metaText);
+        if (normalizeCategoryList(room.categories).length > 0) {
+            const categoryChips = document.createElement('div');
+            categoryChips.className = 'slm-room-member-chips';
+            normalizeCategoryList(room.categories).forEach((category) => {
+                const chip = document.createElement('span');
+                chip.className = 'slm-room-chip';
+                chip.textContent = `#${category}`;
+                categoryChips.appendChild(chip);
+            });
+            headerMeta.appendChild(categoryChips);
+        }
+        wrapper.appendChild(headerMeta);
     }
-    wrapper.appendChild(headerMeta);
 
     const actions = document.createElement('div');
     actions.className = 'slm-btn-row';
@@ -1082,10 +1116,14 @@ function openMessengerRoomDetail(roomId, onBack) {
     input.className = 'slm-textarea slm-room-textarea';
     input.rows = 2;
     input.placeholder = '메시지를 입력하세요...';
+    const quickSendBtn = document.createElement('button');
+    quickSendBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm slm-room-quick-send';
+    quickSendBtn.textContent = '퀵';
+    quickSendBtn.title = '응답 요청 없이 전송';
     const sendBtn = document.createElement('button');
     sendBtn.className = 'slm-btn slm-btn-primary';
     sendBtn.textContent = '전송';
-    footer.append(emoticonBtn, input, sendBtn);
+    footer.append(emoticonBtn, input, quickSendBtn, sendBtn);
 
     function renderMessages() {
         const freshRoom = getMessengerRoomById(roomId);
@@ -1120,31 +1158,26 @@ function openMessengerRoomDetail(roomId, onBack) {
             const bubble = document.createElement('div');
             bubble.className = 'slm-room-message-bubble';
             renderRoomMessageBubbleContent(message, bubble);
-            const time = document.createElement('div');
-            time.className = 'slm-room-message-time';
-            time.textContent = formatRelativeTime(message.timestamp);
-            bubbleWrap.append(author, bubble, time);
-            if (!isUser) {
-                const actions = document.createElement('div');
-                actions.className = 'slm-room-message-actions';
-                const messageEditBtn = document.createElement('button');
-                messageEditBtn.type = 'button';
-                messageEditBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
-                messageEditBtn.textContent = '편집';
-                messageEditBtn.onclick = () => openRoomMessageEditPopup(roomId, message.id, () => openMessengerRoomDetail(roomId, onBack), renderMessages);
-                const messageDeleteBtn = document.createElement('button');
-                messageDeleteBtn.type = 'button';
-                messageDeleteBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
-                messageDeleteBtn.textContent = '삭제';
-                messageDeleteBtn.onclick = async () => {
-                    const confirmed = await showConfirm('이 메시지를 삭제할까요?', '삭제', '취소');
-                    if (!confirmed) return;
-                    removeRoomMessage(roomId, message.id);
-                    renderMessages();
-                };
-                actions.append(messageEditBtn, messageDeleteBtn);
-                bubbleWrap.appendChild(actions);
-            }
+            bubbleWrap.append(author, bubble);
+            const actions = document.createElement('div');
+            actions.className = 'slm-room-message-actions';
+            const messageEditBtn = document.createElement('button');
+            messageEditBtn.type = 'button';
+            messageEditBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+            messageEditBtn.textContent = '편집';
+            messageEditBtn.onclick = () => openRoomMessageEditPopup(roomId, message.id, () => openMessengerRoomDetail(roomId, onBack), renderMessages);
+            const messageDeleteBtn = document.createElement('button');
+            messageDeleteBtn.type = 'button';
+            messageDeleteBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+            messageDeleteBtn.textContent = '삭제';
+            messageDeleteBtn.onclick = async () => {
+                const confirmed = await showConfirm('이 메시지를 삭제할까요?', '삭제', '취소');
+                if (!confirmed) return;
+                removeRoomMessage(roomId, message.id);
+                renderMessages();
+            };
+            actions.append(messageEditBtn, messageDeleteBtn);
+            bubbleWrap.appendChild(actions);
             if (isUser) row.append(bubbleWrap, avatar);
             else row.append(avatar, bubbleWrap);
             messageList.appendChild(row);
@@ -1152,7 +1185,7 @@ function openMessengerRoomDetail(roomId, onBack) {
         messageList.scrollTop = messageList.scrollHeight;
     }
 
-    const appendUserRoomMessage = (payload) => {
+    const appendUserRoomMessage = (payload, options = {}) => {
         const freshRoom = getMessengerRoomById(roomId);
         if (!freshRoom) return null;
         const nextRoom = appendRoomMessage(freshRoom, {
@@ -1165,9 +1198,11 @@ function openMessengerRoomDetail(roomId, onBack) {
             type: 'message',
         });
         renderMessages();
-        void runRoomAutoReplies(roomId, () => {
-            if (messageList.isConnected) renderMessages();
-        });
+        if (options.skipAutoReply !== true) {
+            void runRoomAutoReplies(roomId, () => {
+                if (messageList.isConnected) renderMessages();
+            });
+        }
         return nextRoom;
     };
 
@@ -1179,6 +1214,19 @@ function openMessengerRoomDetail(roomId, onBack) {
         input.disabled = true;
         appendUserRoomMessage({ text });
         sendBtn.disabled = false;
+        input.disabled = false;
+        input.focus();
+        renderMessages();
+    };
+
+    quickSendBtn.onclick = () => {
+        const text = normalizeRoomPromptText(input.value);
+        if (!text) return;
+        input.value = '';
+        quickSendBtn.disabled = true;
+        input.disabled = true;
+        appendUserRoomMessage({ text }, { skipAutoReply: true });
+        quickSendBtn.disabled = false;
         input.disabled = false;
         input.focus();
         renderMessages();
@@ -1215,10 +1263,12 @@ function buildRoomListContent(onBack, initialRoomId = null) {
     const wrapper = document.createElement('div');
     wrapper.className = 'slm-room-list';
 
-    const hero = document.createElement('div');
-    hero.className = 'slm-room-hero';
-    hero.textContent = '아이폰 메신저처럼 별도 방을 만들고, 그 방 멤버 안에서만 단톡이 흐르도록 분리했습니다.';
-    wrapper.appendChild(hero);
+    if (!getRoomUiSettings().hideHelperText) {
+        const hero = document.createElement('div');
+        hero.className = 'slm-room-hero';
+        hero.textContent = '아이폰 메신저처럼 별도 방을 만들고, 그 방 멤버 안에서만 단톡이 흐르도록 분리했습니다.';
+        wrapper.appendChild(hero);
+    }
 
     const search = document.createElement('input');
     search.className = 'slm-input';
@@ -1259,9 +1309,6 @@ function buildRoomListContent(onBack, initialRoomId = null) {
         }
         const dialog = document.createElement('div');
         dialog.className = 'slm-form';
-        const hint = document.createElement('div');
-        hint.className = 'slm-desc';
-        hint.textContent = '연락처에 등록된 NPC와 개인 메신저 방을 바로 엽니다.';
         const select = document.createElement('select');
         select.className = 'slm-select';
         npcContacts.forEach((contact) => {
@@ -1270,7 +1317,13 @@ function buildRoomListContent(onBack, initialRoomId = null) {
             option.textContent = getContactMemberKey(contact);
             select.appendChild(option);
         });
-        dialog.append(hint, select);
+        if (!getRoomUiSettings().hideHelperText) {
+            const hint = document.createElement('div');
+            hint.className = 'slm-desc';
+            hint.textContent = '연락처에 등록된 NPC와 개인 메신저 방을 바로 엽니다.';
+            dialog.append(hint);
+        }
+        dialog.append(select);
         const dialogFooter = document.createElement('div');
         dialogFooter.className = 'slm-panel-footer';
         const cancelBtn = document.createElement('button');

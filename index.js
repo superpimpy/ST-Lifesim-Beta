@@ -168,6 +168,7 @@ const DEFAULT_SETTINGS = {
         intervalSec: 10,
         probability: 8,
     },
+    hideHelperText: false,
     groupChat: { ...GROUP_CHAT_SETTINGS_DEFAULTS },
     snsPostingProbability: 10, // % (0~100)
     proactiveCallProbability: 0, // % (0~100)
@@ -311,6 +312,9 @@ function getSettings() {
     }
     if (ext[SETTINGS_KEY].firstMsg == null) {
         ext[SETTINGS_KEY].firstMsg = { ...DEFAULT_SETTINGS.firstMsg };
+    }
+    if (typeof ext[SETTINGS_KEY].hideHelperText !== 'boolean') {
+        ext[SETTINGS_KEY].hideHelperText = DEFAULT_SETTINGS.hideHelperText;
     }
     if (!ext[SETTINGS_KEY].groupChat || typeof ext[SETTINGS_KEY].groupChat !== 'object') {
         ext[SETTINGS_KEY].groupChat = { ...GROUP_CHAT_SETTINGS_DEFAULTS };
@@ -1609,6 +1613,22 @@ function openSettingsPanel(onBack) {
         roomPopupDesc.className = 'slm-desc';
         roomPopupDesc.textContent = '권장 방식: 유저가 방 멤버를 직접 골라 별도 메신저 방을 만들고, 그 방 안에서만 단톡 흐름을 진행합니다. 아래 설정은 레거시 자동 단톡용입니다.';
         wrapper.appendChild(roomPopupDesc);
+
+        const helperToggleRow = document.createElement('div');
+        helperToggleRow.className = 'slm-settings-row';
+        const helperToggleLabel = document.createElement('label');
+        helperToggleLabel.className = 'slm-toggle-label';
+        const helperToggle = document.createElement('input');
+        helperToggle.type = 'checkbox';
+        helperToggle.checked = settings.hideHelperText === true;
+        helperToggle.onchange = () => {
+            settings.hideHelperText = helperToggle.checked;
+            saveSettings();
+            showToast(`도움말/안내: ${settings.hideHelperText ? '표시 안 함' : '표시'}`, 'success', 1500);
+        };
+        helperToggleLabel.append(helperToggle, document.createTextNode(' 도움말 / 안내 문구 표시 안 함'));
+        helperToggleRow.appendChild(helperToggleLabel);
+        wrapper.appendChild(helperToggleRow);
 
         const groupChatToggleRow = document.createElement('div');
         groupChatToggleRow.className = 'slm-settings-row';
@@ -3752,11 +3772,7 @@ function waitForDelay(ms) {
 }
 
 function wrapRichMessageHtml(html) {
-    const source = String(html || '');
-    if (!source.trim()) return source;
-    if (/^<div class="slm-message-rich-content">/i.test(source.trim())) return source;
-    if (!/(?:<img\b|<br\b|slm-msg-generated-image|aria-label=)/i.test(source)) return source;
-    return `<div class="slm-message-rich-content">${source}</div>`;
+    return String(html || '');
 }
 
 async function updateRenderedMessageHtml(msgIdx, html, logLabel = '메시지') {

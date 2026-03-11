@@ -37,6 +37,10 @@ function getEmoticonRadius() {
     return ext?.['st-lifesim']?.emoticonRadius ?? 10;
 }
 
+function shouldHideHelperText() {
+    return getExtensionSettings()?.['st-lifesim']?.hideHelperText === true;
+}
+
 const MODULE_KEY = 'emoticons';
 const DEFAULT_EMOTICON_CATEGORY = '기본';
 const CATEGORY_AI_KEY = 'emoticon-category-ai';
@@ -362,11 +366,13 @@ function buildEmoticonContent() {
     };
     wrapper.appendChild(searchInput);
 
-    const currentCharName = getCurrentCharName();
-    const helperCard = document.createElement('div');
-    helperCard.className = 'slm-phone-hint-card slm-emoticon-hint';
-    helperCard.textContent = EMOTICON_HINT_TEXT_TEMPLATE.replace('{charName}', currentCharName || '현재 캐릭터');
-    wrapper.appendChild(helperCard);
+    if (!shouldHideHelperText()) {
+        const currentCharName = getCurrentCharName();
+        const helperCard = document.createElement('div');
+        helperCard.className = 'slm-phone-hint-card slm-emoticon-hint';
+        helperCard.textContent = EMOTICON_HINT_TEXT_TEMPLATE.replace('{charName}', currentCharName || '현재 캐릭터');
+        wrapper.appendChild(helperCard);
+    }
 
     // 카테고리 탭바
     const tabBar = document.createElement('div');
@@ -621,10 +627,6 @@ function buildEmoticonContent() {
             img.className = 'slm-emoticon-img';
             img.onerror = () => { img.style.display = 'none'; };
 
-            const caption = document.createElement('span');
-            caption.className = 'slm-emoticon-caption';
-            caption.textContent = e.name;
-
             const lockIcon = document.createElement('span');
             lockIcon.className = 'slm-emoticon-lock';
             lockIcon.textContent = aiUsable ? '' : '🔒';
@@ -656,7 +658,6 @@ function buildEmoticonContent() {
             };
 
             cell.appendChild(img);
-            cell.appendChild(caption);
             cell.appendChild(lockIcon);
 
             const editBtn = document.createElement('button');

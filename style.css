@@ -419,7 +419,8 @@ body[data-theme="dark"],
 }
 
 .slm-autogrow-textarea {
-  overflow-y: hidden;
+  max-height: 260px;
+  overflow-y: auto;
   overflow-x: hidden;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1195,11 +1196,39 @@ body[data-theme="dark"],
   box-shadow: 0 1px 2px rgba(0,0,0,0.06);
 }
 
+.slm-room-message-bubble.multiline {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.slm-room-message-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.slm-room-message-lines > *:not(div):not(br):not(hr):not(details) {
+  display: block;
+  padding: 9px 13px;
+  border-radius: 18px 18px 18px 4px;
+  background: var(--slm-bubble-other-bg);
+  color: var(--slm-bubble-other-text);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+
 /* 사용자 메시지 버블 — iMessage 파란색 */
 .slm-room-message.user .slm-room-message-bubble {
   background: var(--slm-bubble-user-bg);
   color: var(--slm-bubble-user-text);
   border-radius: 18px 18px 4px 18px; /* 발신: 오른쪽 하단 꺾임 */
+  box-shadow: 0 1px 4px rgba(155,114,208,0.3);
+}
+
+.slm-room-message.user .slm-room-message-lines > *:not(div):not(br):not(hr):not(details) {
+  border-radius: 18px 18px 4px 18px;
+  background: var(--slm-bubble-user-bg);
+  color: var(--slm-bubble-user-text);
   box-shadow: 0 1px 4px rgba(155,114,208,0.3);
 }
 
@@ -1251,6 +1280,7 @@ body[data-theme="dark"],
   border: 1px solid var(--slm-border);
   background: var(--slm-bg-secondary);
   resize: none;
+  overflow-y: auto;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .slm-room-textarea:focus {
@@ -1267,6 +1297,14 @@ body[data-theme="dark"],
   font-size: 18px;
   flex-shrink: 0;
   border: 1px solid var(--slm-border);
+}
+
+.slm-room-composer .slm-room-quick-send {
+  width: auto;
+  min-width: 44px;
+  padding: 0 10px;
+  border-radius: 18px;
+  font-size: 12px;
 }
 
 /* 전송 버튼 (원형, 파란색) */
@@ -1291,8 +1329,7 @@ body[data-theme="dark"],
 .slm-room-emoticon-btn {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  justify-content: center;
   min-height: 56px;
 }
 
