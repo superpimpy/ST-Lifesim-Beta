@@ -15,7 +15,7 @@ import { slashSend, slashSendAs, slashGen } from '../../utils/slash.js';
 import { loadData, saveData, getDefaultBinding, getExtensionSettings } from '../../utils/storage.js';
 import { showToast, escapeHtml, generateId, showConfirm } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
-import { getContacts } from '../contacts/contacts.js';
+import { getAllContacts } from '../contacts/contacts.js';
 
 const MODULE_KEY = 'call-logs';
 const COLLAPSED_KEY = 'call-log-collapsed';
@@ -622,7 +622,7 @@ async function showIncomingCallDialog(charName) {
 
     acceptBtn.onclick = async () => {
         cleanup();
-        const matchedContact = getContacts('chat').find(c => c.name === charName) || null;
+        const matchedContact = getAllContacts().find(c => c.name === charName) || null;
         await startCall(charName, matchedContact, 'incoming');
         const recentDialogue = buildRecentDialogueLines(5);
         await slashGen(
@@ -654,7 +654,7 @@ async function showIncomingCallDialog(charName) {
 }
 
 function getDisplayNameForContact(name) {
-    const contact = [...getContacts('chat'), ...getContacts('character')].find(c => c?.name === name);
+    const contact = getAllContacts().find(c => c?.name === name);
     return contact?.displayName || name;
 }
 
@@ -943,7 +943,7 @@ async function initiateCallWithAiDecision(charName) {
     const ctx = getContext();
     const activeChar = ctx?.name2 || '{{char}}';
     const isMainChar = charName === activeChar;
-    const matchedContact = getContacts('chat').find(c => c.name === charName);
+    const matchedContact = getAllContacts().find(c => c.name === charName);
 
     // 발신 중 메시지 삽입
     try {
@@ -1071,11 +1071,11 @@ function buildCallLogsContent() {
         opt.selected = true;
         dialSelect.appendChild(opt);
     }
-    getContacts('chat').forEach(c => {
+    getAllContacts().forEach(c => {
         if (c.name !== charName0) {
             const opt = document.createElement('option');
             opt.value = c.name;
-            opt.textContent = c.name;
+            opt.textContent = c.displayName || c.name;
             dialSelect.appendChild(opt);
         }
     });

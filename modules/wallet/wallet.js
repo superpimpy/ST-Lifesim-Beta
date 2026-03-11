@@ -12,7 +12,7 @@ import { loadData, saveData } from '../../utils/storage.js';
 import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, escapeHtml, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
-import { getContacts } from '../contacts/contacts.js';
+import { getAllContacts } from '../contacts/contacts.js';
 import { getContext } from '../../utils/st-context.js';
 import { slashSend } from '../../utils/slash.js';
 
@@ -240,7 +240,7 @@ function buildWalletContent() {
     senderSelect.className = 'slm-select';
     const userName = getContext()?.name1 || 'user';
     senderSelect.innerHTML = `<option value="${userName}">${userName}</option><option value="">직접 입력...</option>`;
-    getContacts('chat').forEach(c => {
+    getAllContacts().forEach(c => {
         const opt = document.createElement('option');
         opt.value = c.name;
         opt.textContent = getContactDisplayName(c);
@@ -265,7 +265,7 @@ function buildWalletContent() {
 
     function populateContacts() {
         recipientSelect.innerHTML = '<option value="">직접 입력...</option>';
-        const contacts = getContacts('chat');
+        const contacts = getAllContacts();
         contacts.forEach(c => {
             const opt = document.createElement('option');
             opt.value = c.name;

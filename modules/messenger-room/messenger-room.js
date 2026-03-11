@@ -2,7 +2,7 @@ import { getContext } from '../../utils/st-context.js';
 import { getDefaultBinding, getExtensionSettings, loadData, saveData } from '../../utils/storage.js';
 import { injectContext, registerContextBuilder } from '../../utils/context-inject.js';
 import { createPopup, closePopup } from '../../utils/popup.js';
-import { getAppearanceTagsByName, getContacts } from '../contacts/contacts.js';
+import { getAllContacts, getAppearanceTagsByName, getContacts } from '../contacts/contacts.js';
 import { buildAiEmoticonContext, replaceAiSelectedEmoticons, buildEmoticonMessageHtml, buildEmoticonPickerContent } from '../emoticon/emoticon.js';
 import { translateTextToKorean } from '../sns/sns.js';
 import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
@@ -652,6 +652,193 @@ export function openDirectMessengerWithContact(contact, onBack) {
     return room;
 }
 
+function openRoomSettingsPopup(roomId, options = {}) {
+    const room = getMessengerRoomById(roomId);
+    if (!room) {
+        showToast('메신저 방을 찾을 수 없습니다.', 'warn');
+        return;
+    }
+    const roomSettings = normalizeRoomSettings(room.settings);
+    const isGroupRoom = isGroupMessengerRoom(room);
+    const wrapper = document.createElement('div');
+    wrapper.className = 'slm-form';
+
+    const intro = document.createElement('div');
+    intro.className = 'slm-room-meta-card';
+    intro.innerHTML = `
+        <div class="slm-label">이 방 설정</div>
+        <div class="slm-desc">이 방의 컨텍스트 반영과 자동대화 빈도를 한눈에 조정합니다.</div>
+    `;
+    wrapper.appendChild(intro);
+
+    const contextCard = document.createElement('div');
+    contextCard.className = 'slm-room-meta-card';
+    const contextTitle = document.createElement('div');
+    contextTitle.className = 'slm-label';
+    contextTitle.textContent = '컨텍스트 반영';
+    const contextToggle = document.createElement('label');
+    contextToggle.className = 'slm-toggle-label';
+    const contextCheck = document.createElement('input');
+    contextCheck.type = 'checkbox';
+    contextCheck.checked = roomSettings.contextEnabled === true;
+    contextToggle.append(contextCheck, document.createTextNode(' 메인 대화 컨텍스트에 이 방 포함'));
+    const contextDesc = document.createElement('div');
+    contextDesc.className = 'slm-desc';
+    contextDesc.textContent = isMainCharInRoom(room)
+        ? '{{char}}가 이 방 멤버이므로, 켜 두면 메인 대화에서도 이 방 관련 내용을 자연스럽게 참조할 수 있습니다.'
+        : '{{char}}가 이 방 멤버가 아니면, 켜 두더라도 정확한 로그 대신 분위기나 정황만 간접 반영합니다.';
+    contextCard.append(contextTitle, contextToggle, contextDesc);
+    wrapper.appendChild(contextCard);
+
+    const replyCard = document.createElement('div');
+    replyCard.className = 'slm-room-meta-card';
+    const replyTitle = document.createElement('div');
+    replyTitle.className = 'slm-label';
+    replyTitle.textContent = '유저 입력 후 자동대화';
+    const autoReplyToggle = document.createElement('label');
+    autoReplyToggle.className = 'slm-toggle-label';
+    const autoReplyCheck = document.createElement('input');
+    autoReplyCheck.type = 'checkbox';
+    autoReplyCheck.checked = roomSettings.autoReplyEnabled !== false;
+    autoReplyToggle.append(autoReplyCheck, document.createTextNode(' 유저 메시지 뒤 AI 응답 자동 생성'));
+    const replyDesc = document.createElement('div');
+    replyDesc.className = 'slm-desc';
+    replyDesc.textContent = '첫 응답 확률, 추가 응답 확률, 최대 연속 응답 수를 읽기 쉽게 한곳에 모았습니다.';
+    const replyGrid = document.createElement('div');
+    replyGrid.className = 'slm-input-row';
+    replyGrid.style.alignItems = 'center';
+    replyGrid.style.flexWrap = 'wrap';
+    const responseProbabilityInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input slm-input-sm',
+        type: 'number',
+        min: '0',
+        max: '100',
+        value: String(roomSettings.responseProbability),
+    });
+    responseProbabilityInput.style.width = '74px';
+    const extraResponseProbabilityInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input slm-input-sm',
+        type: 'number',
+        min: '0',
+        max: '100',
+        value: String(roomSettings.extraResponseProbability),
+    });
+    extraResponseProbabilityInput.style.width = '74px';
+    const maxResponsesInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input slm-input-sm',
+        type: 'number',
+        min: '1',
+        max: '3',
+        value: String(roomSettings.maxResponses),
+    });
+    maxResponsesInput.style.width = '68px';
+    replyGrid.append(
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '첫 응답(%)' }),
+        responseProbabilityInput,
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '추가 응답(%)' }),
+        extraResponseProbabilityInput,
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '최대 응답' }),
+        maxResponsesInput,
+    );
+    replyCard.append(replyTitle, autoReplyToggle, replyDesc, replyGrid);
+    wrapper.appendChild(replyCard);
+
+    const autonomyCard = document.createElement('div');
+    autonomyCard.className = 'slm-room-meta-card';
+    const autonomyTitle = document.createElement('div');
+    autonomyTitle.className = 'slm-label';
+    autonomyTitle.textContent = '방 자체 자동대화';
+    const autonomyToggle = document.createElement('label');
+    autonomyToggle.className = 'slm-toggle-label';
+    const autonomyCheck = document.createElement('input');
+    autonomyCheck.type = 'checkbox';
+    autonomyCheck.checked = roomSettings.autonomyEnabled === true;
+    autonomyToggle.append(autonomyCheck, document.createTextNode(isGroupRoom ? ' 자유대화 자동 발생' : ' 선톡 자동 발생'));
+    const autonomyDesc = document.createElement('div');
+    autonomyDesc.className = 'slm-desc';
+    autonomyDesc.textContent = isGroupRoom
+        ? '유저가 가만히 있어도 이 그룹방이 일정 시간마다 스스로 굴러갑니다.'
+        : '유저가 먼저 입력하지 않아도 이 1:1 방에서 먼저 말을 걸 수 있습니다.';
+    const autonomyGrid = document.createElement('div');
+    autonomyGrid.className = 'slm-input-row';
+    autonomyGrid.style.alignItems = 'center';
+    autonomyGrid.style.flexWrap = 'wrap';
+    const autonomyIntervalInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input slm-input-sm',
+        type: 'number',
+        min: '5',
+        max: '3600',
+        value: String(roomSettings.autonomyIntervalSec),
+    });
+    autonomyIntervalInput.style.width = '88px';
+    const autonomyProbabilityInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input slm-input-sm',
+        type: 'number',
+        min: '0',
+        max: '100',
+        value: String(roomSettings.autonomyProbability),
+    });
+    autonomyProbabilityInput.style.width = '74px';
+    autonomyGrid.append(
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '간격(초)' }),
+        autonomyIntervalInput,
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '발생 확률(%)' }),
+        autonomyProbabilityInput,
+    );
+    autonomyCard.append(autonomyTitle, autonomyToggle, autonomyDesc, autonomyGrid);
+    wrapper.appendChild(autonomyCard);
+
+    const footer = document.createElement('div');
+    footer.className = 'slm-panel-footer';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'slm-btn slm-btn-secondary';
+    cancelBtn.textContent = '취소';
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'slm-btn slm-btn-primary';
+    saveBtn.textContent = '저장';
+    footer.append(cancelBtn, saveBtn);
+
+    const { close } = createPopup({
+        id: `messenger-room-settings-${roomId}`,
+        title: '⚙️ 방 설정',
+        content: wrapper,
+        footer,
+        className: 'slm-sub-panel',
+    });
+    cancelBtn.onclick = () => close();
+    saveBtn.onclick = () => {
+        const freshRoom = getMessengerRoomById(roomId);
+        if (!freshRoom) {
+            showToast('메신저 방을 찾을 수 없습니다.', 'warn');
+            return;
+        }
+        const nextRoom = upsertMessengerRoom({
+            ...freshRoom,
+            settings: {
+                ...normalizeRoomSettings(freshRoom.settings),
+                contextEnabled: contextCheck.checked,
+                autoReplyEnabled: autoReplyCheck.checked,
+                responseProbability: clampRoomPercentage(responseProbabilityInput.value, ROOM_DEFAULTS.responseProbability),
+                extraResponseProbability: clampRoomPercentage(extraResponseProbabilityInput.value, ROOM_DEFAULTS.extraResponseProbability),
+                maxResponses: clampRoomResponseCount(maxResponsesInput.value, ROOM_DEFAULTS.maxResponses),
+                autonomyEnabled: autonomyCheck.checked,
+                autonomyIntervalSec: Math.max(5, Math.min(3600, Number.parseInt(autonomyIntervalInput.value, 10) || ROOM_DEFAULTS.autonomyIntervalSec)),
+                autonomyProbability: clampRoomPercentage(autonomyProbabilityInput.value, ROOM_DEFAULTS.autonomyProbability),
+            },
+        });
+        if (!nextRoom) {
+            showToast('방 설정 저장 실패', 'error');
+            return;
+        }
+        ensureRoomAutonomySchedule(roomId, options.onUpdate);
+        options.onSave?.(nextRoom);
+        showToast('방 설정 저장', 'success', 1200);
+        close();
+    };
+}
+
 function buildRoomTranscript(room, candidateMap) {
     const messages = Array.isArray(room?.messages) ? room.messages.slice(-ROOM_MESSAGE_LIMIT) : [];
     return messages.map((message) => {
@@ -693,8 +880,6 @@ function getRoomImageSettings() {
         messageImageGenerationMode: ext.messageImageGenerationMode === true,
         messageImageTextTemplate: String(ext.messageImageTextTemplate || ROOM_IMAGE_TEXT_TEMPLATE_DEFAULT),
         messageImageInjectionPrompt: String(ext.messageImageInjectionPrompt || '').trim(),
-        snsExternalApiUrl: String(ext.snsExternalApiUrl || '').trim(),
-        snsExternalApiTimeoutMs: Math.max(1000, Math.min(60000, Number(ext.snsExternalApiTimeoutMs) || 12000)),
         tagWeight: Number(ext.tagWeight) || 0,
     };
 }
@@ -732,39 +917,6 @@ async function generateRoomMessageImageViaApi(imagePrompt) {
     if (!imagePrompt || !imagePrompt.trim()) return '';
     const ctx = getContext();
     if (!ctx) return '';
-    const settings = getRoomImageSettings();
-    if (settings.snsExternalApiUrl && typeof fetch === 'function') {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), settings.snsExternalApiTimeoutMs);
-        try {
-            const headers = { 'Content-Type': 'application/json' };
-            if (typeof ctx.getRequestHeaders === 'function') Object.assign(headers, ctx.getRequestHeaders());
-            const response = await fetch(settings.snsExternalApiUrl, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ prompt: imagePrompt, module: 'st-lifesim-room-image' }),
-                signal: controller.signal,
-            });
-            if (response.ok) {
-                const rawText = await response.text();
-                let result = String(rawText || '').trim();
-                try {
-                    const parsed = JSON.parse(rawText || 'null');
-                    if (typeof parsed === 'string') result = parsed.trim();
-                    else if (typeof parsed?.url === 'string') result = parsed.url.trim();
-                    else if (typeof parsed?.imageUrl === 'string') result = parsed.imageUrl.trim();
-                    else if (typeof parsed?.text === 'string') result = parsed.text.trim();
-                } catch { /* keep plain text response */ }
-                if (result && (result.startsWith('http') || result.startsWith('/') || result.startsWith('data:'))) {
-                    return result;
-                }
-            }
-        } catch (error) {
-            console.warn('[ST-LifeSim] 메신저 방 이미지 외부 API 호출 실패:', error);
-        } finally {
-            clearTimeout(timer);
-        }
-    }
     if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
         const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true ${imagePrompt}`, { showOutput: false });
         const resultStr = String(result?.pipe || result || '').trim();
@@ -777,7 +929,7 @@ async function generateRoomMessageImageViaApi(imagePrompt) {
 
 async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
     const settings = getRoomImageSettings();
-    const allContactsList = [...getContacts('character'), ...getContacts('chat')];
+    const allContactsList = getAllContacts();
     const normalizedSource = normalizeQuotesForRoomPicTag(String(rawText || ''));
     let processedText = normalizedSource;
     const imagePlaceholders = new Map();
@@ -1441,8 +1593,6 @@ function openMessengerRoomDetail(roomId, onBack) {
         return;
     }
     const candidateMap = getCandidateMap();
-    const roomSettings = normalizeRoomSettings(room.settings);
-    const isGroupRoom = isGroupMessengerRoom(room);
     const wrapper = document.createElement('div');
     wrapper.className = 'slm-room-view';
 
@@ -1476,65 +1626,6 @@ function openMessengerRoomDetail(roomId, onBack) {
         }
         wrapper.appendChild(headerMeta);
     }
-
-    const settingsCard = document.createElement('div');
-    settingsCard.className = 'slm-room-meta-card';
-    const contextToggle = document.createElement('label');
-    contextToggle.className = 'slm-toggle-label';
-    const contextCheck = document.createElement('input');
-    contextCheck.type = 'checkbox';
-    contextCheck.checked = roomSettings.contextEnabled === true;
-    contextToggle.append(contextCheck, document.createTextNode(' 메인 대화 컨텍스트에 이 방 포함'));
-    const contextDesc = document.createElement('div');
-    contextDesc.className = 'slm-desc';
-    contextDesc.textContent = isMainCharInRoom(room)
-        ? '{{char}}가 이 방에 속해 있으므로, 포함 시 {{user}}와의 대화에서도 이 방 관련 내용을 직접 언급할 수 있습니다.'
-        : '{{char}}가 이 방 멤버가 아니므로, 포함 시에도 정확한 로그를 아는 척하지 않고 간접적인 분위기/정황만 언급하도록 처리됩니다.';
-    const autonomyRow = document.createElement('div');
-    autonomyRow.className = 'slm-input-row';
-    autonomyRow.style.alignItems = 'center';
-    autonomyRow.style.flexWrap = 'wrap';
-    const autonomyToggle = document.createElement('label');
-    autonomyToggle.className = 'slm-toggle-label';
-    const autonomyCheck = document.createElement('input');
-    autonomyCheck.type = 'checkbox';
-    autonomyCheck.checked = roomSettings.autonomyEnabled === true;
-    autonomyToggle.append(autonomyCheck, document.createTextNode(isGroupRoom ? ' 자유대화 자동 발생' : ' 선톡 자동 발생'));
-    const autonomyIntervalInput = Object.assign(document.createElement('input'), {
-        className: 'slm-input slm-input-sm',
-        type: 'number',
-        min: '5',
-        max: '3600',
-        value: String(roomSettings.autonomyIntervalSec),
-    });
-    autonomyIntervalInput.style.width = '88px';
-    const autonomyProbabilityInput = Object.assign(document.createElement('input'), {
-        className: 'slm-input slm-input-sm',
-        type: 'number',
-        min: '0',
-        max: '100',
-        value: String(roomSettings.autonomyProbability),
-    });
-    autonomyProbabilityInput.style.width = '74px';
-    const settingsSaveBtn = document.createElement('button');
-    settingsSaveBtn.type = 'button';
-    settingsSaveBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
-    settingsSaveBtn.textContent = '방 설정 저장';
-    autonomyRow.append(
-        autonomyToggle,
-        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '간격(초)' }),
-        autonomyIntervalInput,
-        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '확률(%)' }),
-        autonomyProbabilityInput,
-        settingsSaveBtn,
-    );
-    const autonomyDesc = document.createElement('div');
-    autonomyDesc.className = 'slm-desc';
-    autonomyDesc.textContent = isGroupRoom
-        ? '자유대화를 켜면 유저가 답장하지 않아도 이 그룹방이 일정 확률로 스스로 굴러갑니다.'
-        : '선톡을 켜면 유저가 먼저 입력하지 않아도 이 1:1 방에서 일정 확률로 먼저 말을 걸 수 있습니다.';
-    settingsCard.append(contextToggle, contextDesc, autonomyRow, autonomyDesc);
-    wrapper.appendChild(settingsCard);
 
     const actions = document.createElement('div');
     actions.className = 'slm-btn-row';
@@ -1614,34 +1705,6 @@ function openMessengerRoomDetail(roomId, onBack) {
         // Send button is always enabled to allow triggering AI responses even with empty input
         sendBtn.disabled = false;
         quickSendBtn.disabled = false;
-    };
-
-    settingsSaveBtn.onclick = () => {
-        const freshRoom = getMessengerRoomById(roomId);
-        if (!freshRoom) {
-            showToast('메신저 방을 찾을 수 없습니다.', 'warn');
-            return;
-        }
-        const nextRoom = upsertMessengerRoom({
-            ...freshRoom,
-            settings: {
-                ...normalizeRoomSettings(freshRoom.settings),
-                contextEnabled: contextCheck.checked,
-                autonomyEnabled: autonomyCheck.checked,
-                autonomyIntervalSec: Math.max(5, Math.min(3600, Number.parseInt(autonomyIntervalInput.value, 10) || ROOM_DEFAULTS.autonomyIntervalSec)),
-                autonomyProbability: clampRoomPercentage(autonomyProbabilityInput.value, ROOM_DEFAULTS.autonomyProbability),
-            },
-        });
-        if (!nextRoom) {
-            showToast('방 설정 저장 실패', 'error');
-            return;
-        }
-        autonomyIntervalInput.value = String(nextRoom.settings.autonomyIntervalSec);
-        autonomyProbabilityInput.value = String(nextRoom.settings.autonomyProbability);
-        ensureRoomAutonomySchedule(roomId, () => {
-            if (messageList.isConnected) renderMessages();
-        });
-        showToast('방 설정 저장', 'success', 1200);
     };
 
     const submitRoomMessage = (options = {}) => {
@@ -1808,6 +1871,16 @@ function openMessengerRoomDetail(roomId, onBack) {
     });
     updateComposerState();
     closePopup('messenger-rooms');
+    const settingsBtn = document.createElement('button');
+    settingsBtn.type = 'button';
+    settingsBtn.className = 'slm-panel-header-action';
+    settingsBtn.textContent = '⚙';
+    settingsBtn.setAttribute('aria-label', '방 설정 열기');
+    settingsBtn.onclick = () => openRoomSettingsPopup(roomId, {
+        onUpdate: () => {
+            if (messageList.isConnected) renderMessages();
+        },
+    });
     createPopup({
         id: `messenger-room-${roomId}`,
         title: getRoomTitle(room, candidateMap),
@@ -1815,6 +1888,7 @@ function openMessengerRoomDetail(roomId, onBack) {
         footer,
         className: 'slm-room-detail-panel',
         onBack: () => openMessengerRoomsPopup(onBack, roomId),
+        headerActions: settingsBtn,
     });
 }
 
@@ -1888,7 +1962,7 @@ function buildRoomListContent(onBack, initialRoomId = null) {
     quickDmBtn.onclick = () => {
         const npcContacts = [];
         const seen = new Set();
-        [...getContacts('chat'), ...getContacts('character')]
+        getAllContacts()
             .filter((contact) => !contact?.isUserAuto && !contact?.isCharAuto)
             .forEach((contact) => {
                 const key = getContactMemberKey(contact).toLowerCase();
@@ -1907,7 +1981,7 @@ function buildRoomListContent(onBack, initialRoomId = null) {
         npcContacts.forEach((contact) => {
             const option = document.createElement('option');
             option.value = getContactMemberKey(contact);
-            option.textContent = getContactMemberKey(contact);
+            option.textContent = String(contact?.displayName || contact?.name || getContactMemberKey(contact)).trim();
             select.appendChild(option);
         });
         if (!getRoomUiSettings().hideHelperText) {

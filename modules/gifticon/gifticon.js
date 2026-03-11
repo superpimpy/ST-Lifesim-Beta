@@ -12,7 +12,7 @@ import { loadData, saveData, getDefaultBinding, getExtensionSettings } from '../
 import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, escapeHtml, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
-import { getContacts } from '../contacts/contacts.js';
+import { getAllContacts } from '../contacts/contacts.js';
 
 const MODULE_KEY = 'gifticons';
 const GIFTICON_TX_MARKER_PREFIX = 'stls-gifticon:';
@@ -287,7 +287,7 @@ function renderSendForm() {
         opt.textContent = charName;
         recipSelect.appendChild(opt);
     }
-    getContacts('chat').forEach(c => {
+    getAllContacts().forEach(c => {
         if (c.name !== charName) {
             const opt = document.createElement('option');
             opt.value = c.name;

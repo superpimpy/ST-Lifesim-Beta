@@ -19,9 +19,10 @@ const openPopups = new Map();
  * @param {HTMLElement} [options.footer] - 팝업 하단에 표시할 엘리먼트 (선택)
  * @param {Function} [options.onClose] - 닫힐 때 콜백
  * @param {Function} [options.onBack] - 돌아가기 버튼 콜백 (있으면 돌아가기 버튼 표시)
+ * @param {HTMLElement|HTMLElement[]} [options.headerActions] - 닫기 버튼 왼쪽에 표시할 헤더 액션 버튼
  * @returns {{ overlay: HTMLElement, panel: HTMLElement, body: HTMLElement, close: Function }}
  */
-export function createPopup({ id, title, content, className = '', footer, onClose, onBack }) {
+export function createPopup({ id, title, content, className = '', footer, onClose, onBack, headerActions = null }) {
     // 이미 열린 팝업이 있으면 닫는다
     closePopup(id);
 
@@ -63,14 +64,22 @@ export function createPopup({ id, title, content, className = '', footer, onClos
     titleText.textContent = title;
     titleLeft.appendChild(titleText);
 
+    const titleRight = document.createElement('div');
+    titleRight.className = 'slm-panel-title-actions';
+    const actionList = Array.isArray(headerActions) ? headerActions : [headerActions];
+    actionList.filter((action) => action instanceof HTMLElement).forEach((action) => {
+        titleRight.appendChild(action);
+    });
+
     const closeBtn = document.createElement('button');
     closeBtn.className = 'slm-panel-close';
     closeBtn.innerHTML = '&times;';
     closeBtn.setAttribute('aria-label', '닫기');
     closeBtn.onclick = () => close();
+    titleRight.appendChild(closeBtn);
 
     titleBar.appendChild(titleLeft);
-    titleBar.appendChild(closeBtn);
+    titleBar.appendChild(titleRight);
 
     // 내용 영역
     const body = document.createElement('div');

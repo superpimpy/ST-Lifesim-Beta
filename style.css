@@ -304,6 +304,32 @@ body[data-theme="dark"],
 .slm-panel-close:hover { background: var(--slm-bg-tertiary); transform: scale(1.08); }
 .slm-panel-close:active { transform: scale(0.92); }
 
+.slm-panel-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.slm-panel-header-action {
+  background: var(--slm-bg-secondary);
+  border: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--slm-text-secondary) !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, transform 0.1s;
+  flex-shrink: 0;
+}
+.slm-panel-header-action:hover { background: var(--slm-bg-tertiary); transform: scale(1.08); }
+.slm-panel-header-action:active { transform: scale(0.92); }
+
 .slm-panel-body {
   overflow-y: auto;
   flex: 1;
