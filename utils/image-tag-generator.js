@@ -14,6 +14,7 @@
 import { getContext } from './st-context.js';
 import { getExtensionSettings } from './storage.js';
 import { isHtmlTextResponse } from './text-response.js';
+import { slashGenQuiet } from './slash.js';
 
 // Korean character detection regex (Hangul syllables, Jamo, compatibility Jamo)
 const KOREAN_REGEX = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/;
@@ -271,6 +272,10 @@ export async function generateDanbooruTags(rawPrompt, options) {
             } finally {
                 clearTimeout(timer);
             }
+        }
+
+        if (!result) {
+            result = await slashGenQuiet(fullPrompt);
         }
 
         if (!result && typeof context.generateRaw === 'function') {

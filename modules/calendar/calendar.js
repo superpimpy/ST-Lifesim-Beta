@@ -13,6 +13,7 @@ import { registerContextBuilder } from '../../utils/context-inject.js';
 import { showToast, escapeHtml, generateId } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
 import { getAllContacts } from '../contacts/contacts.js';
+import { slashGenQuiet } from '../../utils/slash.js';
 
 const MODULE_KEY = 'calendar';
 let lastAutoScheduleSignature = '';
@@ -135,7 +136,10 @@ or
 Current day: ${cal.today}
 Character message: "${text}"`;
 
-    const raw = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: ctx.name2 || '{{char}}' }) || '';
+    const raw = (await slashGenQuiet(prompt))
+        || (typeof ctx.generateQuietPrompt === 'function'
+            ? (await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: ctx.name2 || '{{char}}' }) || '')
+            : '');
     if (!raw) {
         console.warn('[ST-LifeSim] 일정 자동판별 AI 응답이 비어 있습니다.');
         return;
@@ -535,10 +539,13 @@ export async function triggerAiSchedule(onSave) {
 Current day: ${cal.today}. Choose a day within the next 14 days (wrap around 30 if needed).`;
 
     try {
-        if (!ctx || typeof ctx.generateQuietPrompt !== 'function') {
+        if (!ctx) {
             showToast('AI 생성 기능을 사용할 수 없습니다.', 'error'); return;
         }
-        const raw = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: charName }) || '';
+        const raw = (await slashGenQuiet(prompt))
+            || (typeof ctx.generateQuietPrompt === 'function'
+                ? (await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: charName }) || '')
+                : '');
         // 첫 번째 { ... } 블록을 비탐욕적으로 추출한다
         const match = raw.match(/\{[\s\S]*?\}/);
         if (!match) { showToast('AI가 일정을 만들지 못했습니다.', 'warn'); return; }

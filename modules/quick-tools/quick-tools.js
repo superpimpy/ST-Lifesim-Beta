@@ -10,7 +10,7 @@
  */
 
 import { getContext } from '../../utils/st-context.js';
-import { slashSend, slashGen, slashSendAs } from '../../utils/slash.js';
+import { slashSend, slashGen, slashGenQuiet, slashSendAs } from '../../utils/slash.js';
 import { showToast, escapeHtml, generateId } from '../../utils/ui.js';
 import { loadData, saveData, getExtensionSettings } from '../../utils/storage.js';
 import { getAppearanceTagsByName, getContacts } from '../contacts/contacts.js';
@@ -373,9 +373,12 @@ async function generateEvent(category) {
     let eventContent = `${category} 카테고리의 사건이 발생했습니다.`;
 
     try {
-        if (ctx && typeof ctx.generateQuietPrompt === 'function') {
+        if (ctx) {
             const titlePrompt = `Generate a SHORT title (under 10 words) for an unexpected "${category}" category event that fits naturally into the current story context. Return ONLY the title text, nothing else.`;
-            const titleResult = await ctx.generateQuietPrompt({ quietPrompt: titlePrompt, quietName: '이벤트' });
+            const titleResult = (await slashGenQuiet(titlePrompt))
+                || (typeof ctx.generateQuietPrompt === 'function'
+                    ? (await ctx.generateQuietPrompt({ quietPrompt: titlePrompt, quietName: '이벤트' }))
+                    : '');
             if (titleResult) eventTitle = titleResult.trim();
 
             const contentPrompt = `사건 카테고리: "${category}", 사건 제목: "${eventTitle}". 현재 상황에 맞는 사건 내용을 2~4문장으로 작성하세요.
@@ -383,7 +386,10 @@ async function generateEvent(category) {
 - 해당 요청은 user와 char 사이의 메시지 주고받기를 더 재미있게 변화구를 주기 위한 것입니다.
 - "현실에서 만나게 된다" 등 메신저 형식의 룰을 깨뜨리려는 내용은 일체 금지합니다.
 - 제3자/전지적 작가 시점의 시스템 안내문 톤으로 작성하고, 절대 ${ctx?.name2 || '{{char}}'}로 롤플레잉하지 마세요.`;
-            const contentResult = await ctx.generateQuietPrompt({ quietPrompt: contentPrompt, quietName: '이벤트' });
+            const contentResult = (await slashGenQuiet(contentPrompt))
+                || (typeof ctx.generateQuietPrompt === 'function'
+                    ? (await ctx.generateQuietPrompt({ quietPrompt: contentPrompt, quietName: '이벤트' }))
+                    : '');
             if (contentResult) eventContent = contentResult.trim();
         }
 
