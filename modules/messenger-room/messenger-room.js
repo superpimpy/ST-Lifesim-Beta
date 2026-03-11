@@ -41,6 +41,8 @@ const ROOM_AVATAR_DEFAULTS = { width: 48, height: 48, scale: 100, positionX: 50,
 const ROOM_AVATAR_PREVIEW_DEFAULTS = { width: 72, height: 72, scale: 100, positionX: 50, positionY: 50 };
 const roomAutoReplyState = new Map();
 const roomAutonomyState = new Map();
+/** 방 목록 팝업이 열려 있을 때 실시간 갱신용 렌더러 참조 */
+let _activeRoomListRenderer = null;
 
 function normalizeRoomBinding(binding) {
     return binding === 'character' ? 'character' : 'chat';
@@ -1171,6 +1173,7 @@ async function runRoomAutoReplies(roomId, onUpdate = null, options = {}) {
                         showToast(`${roomTitle} · ${senderLabel}: ${compactPreview}`, 'info', 2200);
                     }
                     latestState.onUpdate?.(freshRoom);
+                    _activeRoomListRenderer?.();
                     const nextResponders = [...usedResponders, responderKey];
                     if (nextResponders.length < maxResponses) {
                         scheduleAttempt(nextResponders);
@@ -2073,7 +2076,60 @@ function buildRoomListContent(onBack, initialRoomId = null) {
 
     search.oninput = renderRooms;
     renderRooms();
+    _activeRoomListRenderer = () => { if (list.isConnected) renderRooms(); };
     return wrapper;
+}
+
+/**
+ * 외부(index.js 등)에서 특정 방에 메시지를 추가한다.
+ * 채팅창(/sendas)을 거치지 않고 방 데이터에만 저장하여 채팅창 노출을 방지한다.
+ * @param {string} roomId
+ * @param {{ authorName: string, text: string, html?: string }} payload
+ * @returns {Object|null} 갱신된 방 객체
+ */
+export function appendExternalRoomMessage(roomId, { authorName, text, html = '' }) {
+    const room = getMessengerRoomById(roomId);
+    if (!room) return null;
+    const candidateMap = getCandidateMap();
+    const trimmedAuthor = String(authorName || '').trim();
+    const lowerAuthor = trimmedAuthor.toLowerCase();
+    const memberKey = room.members.find((key) => {
+        const label = getMemberDisplayLabel(key, candidateMap);
+        return label.toLowerCase() === lowerAuthor;
+    }) || trimmedAuthor;
+    const nextRoom = appendRoomMessage(room, {
+        id: generateId(),
+        authorKey: memberKey,
+        authorName: trimmedAuthor,
+        text: String(text || '').trim(),
+        html: String(html || '').trim(),
+        timestamp: Date.now(),
+        type: 'message',
+    });
+    _activeRoomListRenderer?.();
+    return nextRoom;
+}
+
+/**
+ * 방의 최근 메시지를 '[group-room] Speaker: text' 형식 텍스트로 반환한다.
+ * 단톡 자동 응답 프롬프트에서 사용한다.
+ * @param {string} roomId
+ * @param {number} [limit=8]
+ * @returns {string}
+ */
+export function buildRoomTranscriptText(roomId, limit = 8) {
+    const room = getMessengerRoomById(roomId);
+    if (!room?.messages?.length) return '';
+    const candidateMap = getCandidateMap();
+    const userName = String(getContext()?.name1 || '{{user}}').trim();
+    return room.messages.slice(-limit).map((msg) => {
+        const speaker = msg.authorKey === USER_MEMBER_KEY
+            ? (userName || '{{user}}')
+            : (msg.authorName || getMemberDisplayLabel(msg.authorKey, candidateMap));
+        // 마크업/템플릿 구문을 제거하여 프롬프트 오염을 방지한다
+        const text = String(msg?.text || '').replace(/[<>{}\[\]]+/g, ' ').replace(/\n/g, ' ').trim();
+        return `[group-room] ${speaker}: ${text}`;
+    }).join('\n');
 }
 
 registerContextBuilder('messenger-room', buildMessengerRoomsContextSection);
@@ -2090,5 +2146,6 @@ export function openMessengerRoomsPopup(onBack, initialRoomId = null) {
         content,
         className: 'slm-room-list-panel',
         onBack,
+        onClose: () => { _activeRoomListRenderer = null; },
     });
 }

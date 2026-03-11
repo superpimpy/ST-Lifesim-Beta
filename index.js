@@ -28,9 +28,9 @@ import { initWallet, openWalletPopup } from './modules/wallet/wallet.js';
 import { initSns, openSnsPopup, triggerNpcPosting, triggerPendingCommentReaction, hasPendingCommentReaction } from './modules/sns/sns.js';
 import { initCalendar, openCalendarPopup } from './modules/calendar/calendar.js';
 import { initGifticon, openGifticonPopup, trackGifticonUsageFromCharacterMessage } from './modules/gifticon/gifticon.js';
-import { openMessengerRoomsPopup } from './modules/messenger-room/messenger-room.js';
+import { openMessengerRoomsPopup, appendExternalRoomMessage, buildRoomTranscriptText } from './modules/messenger-room/messenger-room.js';
 import { buildDirectImagePrompt } from './utils/image-tag-generator.js';
-import { slashGenQuiet, slashSendAs } from './utils/slash.js';
+import { slashGenQuiet } from './utils/slash.js';
 
 // 설정 키
 const SETTINGS_KEY = 'st-lifesim';
@@ -1249,11 +1249,11 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
     return wrapRichMessageHtml(richHtml);
 }
 
-async function generateGroupChatReply(responder, roster) {
+async function generateGroupChatReply(responder, roster, transcriptOverride = null) {
     const ctx = getContext();
     if (!ctx) return '';
     const settings = getSettings();
-    const transcript = buildGroupChatTranscript();
+    const transcript = transcriptOverride || buildGroupChatTranscript();
     const responderName = sanitizeGroupChatPromptField(responder.displayName || responder.name);
     const latestUserMessage = sanitizeGroupChatPromptField(ctx?.chat?.[ctx.chat.length - 1]?.mes || '');
     const emoticonContext = buildAiEmoticonContext(responderName);
@@ -1397,33 +1397,26 @@ function schedulePlannedGroupChatTurn(plan) {
 
 async function executePlannedGroupChatTurn(plan) {
     if (!plan?.responders?.length) return;
+    if (!plan.roomId) {
+        console.warn('[ST-LifeSim] executePlannedGroupChatTurn: plan.roomId가 없어 실행할 수 없습니다.');
+        return;
+    }
     const ctx = getContext();
     if (!ctx) return;
-    const latestIdx = Number((ctx.chat?.length ?? 0) - 1);
-    if (!Number.isFinite(latestIdx) || latestIdx <= Number(plan.userMessageIndex)) return;
-    if (!ctx.chat?.[plan.userMessageIndex]?.is_user) return;
 
-    if (plan.suppressMainCharacterReply) {
-        const latestMsg = ctx.chat?.[latestIdx];
-        const canDeleteLastReply = Number.isFinite(latestIdx)
-            && latestIdx >= 0
-            && latestMsg
-            && !latestMsg.is_user
-            && typeof ctx.executeSlashCommandsWithOptions === 'function';
-        if (canDeleteLastReply) {
-            await ctx.executeSlashCommandsWithOptions(`/cut ${latestIdx}`, { showOutput: false });
-        }
-    }
-
+    const transcript = buildRoomTranscriptText(plan.roomId, GROUP_CHAT_TRANSCRIPT_LIMIT);
     const userName = String(ctx?.name1 || '{{user}}').trim().toLowerCase();
     for (const responder of plan.responders) {
         const responderNames = [responder?.displayName, responder?.name]
             .map((name) => String(name || '').trim().toLowerCase())
             .filter(Boolean);
         if (userName && responderNames.includes(userName)) continue;
-        const reply = await generateGroupChatReply(responder, plan.roster);
+        const reply = await generateGroupChatReply(responder, plan.roster, transcript);
         if (!reply) continue;
-        await slashSendAs(responder.displayName || responder.name, reply);
+        appendExternalRoomMessage(plan.roomId, {
+            authorName: responder.displayName || responder.name,
+            text: reply,
+        });
     }
 }
 
