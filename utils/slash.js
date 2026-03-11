@@ -36,11 +36,23 @@ function escapeSlashPromptText(text) {
         .replace(/\|/g, '\\|');
 }
 
-async function generateQuietText(prompt) {
+async function generateQuietText(prompt, quietName = null) {
     const ctx = getContext();
     if (prompt == null) return '';
     const quietPrompt = String(prompt).trim();
     if (!ctx || !quietPrompt) return '';
+
+    if (typeof ctx.generateQuietPrompt === 'function') {
+        try {
+            const result = await ctx.generateQuietPrompt({
+                quietPrompt,
+                quietName: quietName || ctx.name2 || '{{char}}',
+            });
+            if (result != null) return String(result).trim();
+        } catch (error) {
+            console.warn('[ST-LifeSim] generateQuietPrompt 조용한 생성 실패, /gen 폴백 사용:', error);
+        }
+    }
 
     try {
         const result = await run(`/gen lock=off quiet=true ${escapeSlashPromptText(quietPrompt)}`);
