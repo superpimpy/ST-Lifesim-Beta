@@ -133,26 +133,37 @@ function saveImagePresets(presets) {
     saveData(IMAGE_PRESETS_KEY, presets, SNS_PRESET_BINDING);
 }
 
+function loadSnsCharacterBoundValue(key, defaultValue) {
+    const current = loadData(key, null, SNS_PRESET_BINDING);
+    if (current !== null) return current;
+    const legacyBinding = getDefaultBinding();
+    const legacy = loadData(key, defaultValue, legacyBinding);
+    if (legacyBinding !== SNS_PRESET_BINDING && legacy !== null) {
+        saveData(key, legacy, SNS_PRESET_BINDING);
+    }
+    return legacy === null ? defaultValue : legacy;
+}
+
+function saveSnsCharacterBoundValue(key, value) {
+    saveData(key, value, SNS_PRESET_BINDING);
+}
+
 function loadPostingEnabledMap() {
-    return loadData(POSTING_ENABLED_KEY, {}, getDefaultBinding());
+    const value = loadSnsCharacterBoundValue(POSTING_ENABLED_KEY, {});
+    return value && typeof value === 'object' ? value : {};
 }
 
 function savePostingEnabledMap(map) {
-    saveData(POSTING_ENABLED_KEY, map, getDefaultBinding());
+    saveSnsCharacterBoundValue(POSTING_ENABLED_KEY, map);
 }
 
 function loadAuthorMinLikesMap() {
-    const current = loadData(AUTHOR_MIN_LIKES_KEY, null, SNS_PRESET_BINDING);
-    if (current && typeof current === 'object') return current;
-    const legacy = loadData(AUTHOR_MIN_LIKES_KEY, {}, getDefaultBinding());
-    if (legacy && typeof legacy === 'object' && Object.keys(legacy).length > 0 && getDefaultBinding() !== SNS_PRESET_BINDING) {
-        saveData(AUTHOR_MIN_LIKES_KEY, legacy, SNS_PRESET_BINDING);
-    }
-    return legacy && typeof legacy === 'object' ? legacy : {};
+    const value = loadSnsCharacterBoundValue(AUTHOR_MIN_LIKES_KEY, {});
+    return value && typeof value === 'object' ? value : {};
 }
 
 function saveAuthorMinLikesMap(map) {
-    saveData(AUTHOR_MIN_LIKES_KEY, map, SNS_PRESET_BINDING);
+    saveSnsCharacterBoundValue(AUTHOR_MIN_LIKES_KEY, map);
 }
 
 function getInitialLikes(authorName, fallback = 0) {
@@ -256,8 +267,8 @@ function buildSnsDirectImagePromptRequest(sourcePrompt, authorName) {
         `Return exactly one final direct image prompt for the author.`,
         'Output ONLY one line of English Danbooru-style tags for direct image generation.',
         'Do NOT write prose, captions, narration, or sentence-style descriptions.',
-        'Format: scene tags, [ Character 1: appearance tags ]',
-        'Keep the scene tags comma-separated, then wrap each character appearance block in square brackets.',
+        'Format exactly as "scene tags | Character 1: appearance tags" and keep the surrounding double quotes.',
+        'Keep the scene tags comma-separated inside the first segment, then separate each character appearance block with |.',
         'Use "Character N:" labels, NOT actual character names.',
         DANBOORU_SPACE_TAG_RULE,
         'Do not output explanations, markdown, XML tags, captions, or Korean.',
@@ -326,7 +337,8 @@ function enforceSnsLanguage(prompt, language) {
  * @returns {Object}
  */
 function loadUserIds() {
-    return loadData(USER_IDS_KEY, {}, getDefaultBinding());
+    const value = loadSnsCharacterBoundValue(USER_IDS_KEY, {});
+    return value && typeof value === 'object' ? value : {};
 }
 
 /**
@@ -334,7 +346,7 @@ function loadUserIds() {
  * @param {Object} ids
  */
 function saveUserIds(ids) {
-    saveData(USER_IDS_KEY, ids, getDefaultBinding());
+    saveSnsCharacterBoundValue(USER_IDS_KEY, ids);
 }
 
 function makeDefaultHandle(name) {
@@ -358,7 +370,7 @@ function getAuthorHandle(authorName, userIds = loadUserIds()) {
  * @returns {boolean}
  */
 function loadContactLink() {
-    const val = loadData(CONTACT_LINK_KEY, true, getDefaultBinding());
+    const val = loadSnsCharacterBoundValue(CONTACT_LINK_KEY, true);
     return val !== false;
 }
 
@@ -367,23 +379,25 @@ function loadContactLink() {
  * @param {boolean} val
  */
 function saveContactLink(val) {
-    saveData(CONTACT_LINK_KEY, val, getDefaultBinding());
+    saveSnsCharacterBoundValue(CONTACT_LINK_KEY, val);
 }
 
 function loadAuthorDefaultImages() {
-    return loadData(AUTHOR_DEFAULT_IMAGE_KEY, {}, getDefaultBinding());
+    const value = loadSnsCharacterBoundValue(AUTHOR_DEFAULT_IMAGE_KEY, {});
+    return value && typeof value === 'object' ? value : {};
 }
 
 function saveAuthorDefaultImages(map) {
-    saveData(AUTHOR_DEFAULT_IMAGE_KEY, map, getDefaultBinding());
+    saveSnsCharacterBoundValue(AUTHOR_DEFAULT_IMAGE_KEY, map);
 }
 
 function loadAuthorLanguages() {
-    return loadData(AUTHOR_LANGUAGE_KEY, {}, getDefaultBinding());
+    const value = loadSnsCharacterBoundValue(AUTHOR_LANGUAGE_KEY, {});
+    return value && typeof value === 'object' ? value : {};
 }
 
 function saveAuthorLanguages(map) {
-    saveData(AUTHOR_LANGUAGE_KEY, map, getDefaultBinding());
+    saveSnsCharacterBoundValue(AUTHOR_LANGUAGE_KEY, map);
 }
 
 function getAuthorLanguage(authorName, fallbackLanguage) {
@@ -569,7 +583,8 @@ function saveFeed(feed) {
  * @returns {Object} { [authorName]: avatarUrl }
  */
 function loadAvatars() {
-    return loadData(AVATARS_KEY, {}, getDefaultBinding());
+    const value = loadSnsCharacterBoundValue(AVATARS_KEY, {});
+    return value && typeof value === 'object' ? value : {};
 }
 
 /**
@@ -577,15 +592,16 @@ function loadAvatars() {
  * @param {Object} avatars
  */
 function saveAvatars(avatars) {
-    saveData(AVATARS_KEY, avatars, getDefaultBinding());
+    saveSnsCharacterBoundValue(AVATARS_KEY, avatars);
 }
 
 function loadAvatarStyles() {
-    return loadData(AVATAR_STYLES_KEY, {}, getDefaultBinding());
+    const value = loadSnsCharacterBoundValue(AVATAR_STYLES_KEY, {});
+    return value && typeof value === 'object' ? value : {};
 }
 
 function saveAvatarStyles(styles) {
-    saveData(AVATAR_STYLES_KEY, styles, getDefaultBinding());
+    saveSnsCharacterBoundValue(AVATAR_STYLES_KEY, styles);
 }
 
 function getAvatarStyle(authorName, avatarStyles, defaults) {

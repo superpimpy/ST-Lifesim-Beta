@@ -8,7 +8,7 @@
  *  - 태그 생성 단계가 반드시 선행
  *  - 태그는 영어 Danbooru 형식
  *  - 모든 이미지 생성 경로(메신저/SNS/유저)가 동일한 파이프라인을 사용
- *  - 최종 프롬프트 형식: scene tags, [ Character 1: appearance1 ], [ Character 2: appearance2 ]
+ *  - 최종 프롬프트 형식: "scene tags | Character 1: appearance1 | Character 2: appearance2"
  */
 
 import { getContext } from './st-context.js';
@@ -73,7 +73,7 @@ const TAG_CONVERSION_PROMPT = [
  * The AI is instructed to:
  *  1. Reason about which characters should appear (inside <img-gen> block)
  *  2. Output scene tags followed by selected characters' appearance tags
- *     in the format: scene tags, [Name: appearance], [Name2: appearance]
+ *     in the format: "scene tags | Character 1: appearance | Character 2: appearance"
  *
  * Only the content AFTER </img-gen> is used as the final image prompt.
  *
@@ -104,9 +104,10 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap, additionalPromp
         'OUTPUT FORMAT:',
         '1) Reasoning block in <img-gen>...</img-gen> tags (which characters to include and why).',
         '2) After </img-gen>, on a NEW line, the final prompt in this EXACT format:',
-        '   scene tags, [ Character 1: appearance tags ], [ Character 2: appearance tags ]',
-        '   Use comma-separated scene tags, then wrap each character block in square brackets.',
+        '   "scene tags | Character 1: appearance tags | Character 2: appearance tags"',
+        '   Keep scene tags comma-separated inside the first segment, then separate each character block with |.',
         '   Use "Character N:" labels, NOT actual character names.',
+        '   The double quotes around the entire final prompt are REQUIRED.',
         '',
         'RULES:',
         '1) Scene tags: comma-separated English Danbooru tags. Replace underscores with spaces.',
@@ -129,7 +130,7 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap, additionalPromp
         '17) If three or more characters appear, include the group shot tag.',
         '18) Never replace explicit count tags with generic people-count tags.',
         '19) Preserve any weighted tags or special syntax such as 2::tag::, -2::tag::, or 3::tag:: exactly as provided.',
-        '20) Always keep the final character appearance blocks in [ Character N: appearance tags ] format.',
+        '20) Always keep the final character appearance blocks in Character N: appearance tags format separated by |.',
         '',
         'EXAMPLE:',
         '* Input: "Alice and Bob go to cafe"',
@@ -140,7 +141,7 @@ function buildCharacterAwarePrompt(characters, appearanceVarMap, additionalPromp
         'Character 1 (Alice) and Character 2 (Bob) both appear. Cafe scene.',
         '</img-gen>',
         '',
-        '1girl, 1boy, cafe, sitting, table, indoor, warm lighting, upper body, [ Character 1: long hair, blue eyes ], [ Character 2: short hair, brown eyes ]',
+        '"1girl, 1boy, cafe, sitting, table, indoor, warm lighting, upper body | Character 1: long hair, blue eyes | Character 2: short hair, brown eyes"',
         '',
         'Known characters:',
         charList,
@@ -334,7 +335,7 @@ export async function generateDanbooruTags(rawPrompt, options) {
 /**
  * Build the final Image API prompt by combining Danbooru tags with appearance tags.
  * Korean text is never included.
- * Format: scene tags, [ Character 1: appearance1 ], [ Character 2: appearance2 ]
+ * Format: "scene tags | Character 1: appearance1 | Character 2: appearance2"
  *
  * @param {string} danbooruTags - Generated English Danbooru tags
  * @param {string|string[]} appearanceTags - Character appearance groups (already formatted as "Character N: tags")
@@ -350,28 +351,16 @@ export function buildImageApiPrompt(danbooruTags, appearanceTags, options) {
         ? appearanceTags.map(safeAppearanceGroup).filter(Boolean)
         : [safeAppearanceGroup(appearanceTags)].filter(Boolean);
 
-    // Format each appearance group as "[ Character N: tags ]"
-    const wrappedAppearance = appearanceGroups.map(a => {
-        // Already in "Character N: tags" format from buildMatchedAppearanceGroups
-        const colonIdx = a.indexOf(':');
-        if (colonIdx > 0) {
-            const label = a.substring(0, colonIdx).trim();
-            const tags = a.substring(colonIdx + 1).trim();
-            return `[ ${label}: ${tags} ]`;
-        }
-        return `[ ${a} ]`;
-    });
+    const wrappedAppearance = appearanceGroups;
 
     // Apply weight to scene tags if tagWeight > 0
     const wrappedScene = cleanDanbooru
         ? (tagWeight > 0 ? `${tagWeight}::${cleanDanbooru}::` : cleanDanbooru)
         : '';
 
-    if (!wrappedScene && wrappedAppearance.length === 0) return '';
-    if (!wrappedScene) return wrappedAppearance.join(', ');
-    if (wrappedAppearance.length === 0) return wrappedScene;
-
-    return `${wrappedScene}, ${wrappedAppearance.join(', ')}`;
+    const segments = [wrappedScene, ...wrappedAppearance].filter(Boolean);
+    if (segments.length === 0) return '';
+    return `"${segments.join(' | ')}"`;
 }
 
 function buildMatchedAppearanceGroups(matched = []) {
@@ -498,20 +487,29 @@ export function buildDirectImagePrompt(rawPrompt, options = {}) {
             .replace(/[\r\n]+/g, ', ')
             .trim(),
     );
+    const unwrappedPrompt = unwrapQuotedPrompt(directPrompt);
+    const pipeSegments = splitPromptSegmentsByPipe(unwrappedPrompt);
+    const pipeAppearanceBlocks = pipeSegments.filter(isPipeAppearanceSegment);
+    const pipeSceneOnly = pipeAppearanceBlocks.length > 0
+        ? pipeSegments.filter((segment) => !isPipeAppearanceSegment(segment)).join(', ')
+        : '';
     // Match both bracket format [Name: tags] and parenthetical format Character N: (tags)
     const appearanceBlockRegex = /\[[^\]]+:[^\]]+\]/g;
     const pipeCharBlockRegex = /Character\s+\d+:\s*\([^)]+\)/gi;
-    const promptAppearanceBlocks = directPrompt.match(appearanceBlockRegex) || [];
-    const promptPipeBlocks = directPrompt.match(pipeCharBlockRegex) || [];
+    const promptAppearanceBlocks = unwrappedPrompt.match(appearanceBlockRegex) || [];
+    const promptPipeBlocks = unwrappedPrompt.match(pipeCharBlockRegex) || [];
     const allPromptBlocks = [
         ...promptAppearanceBlocks.map(b => b.slice(1, -1).trim()),
         ...promptPipeBlocks.map(b => b.replace(/\(([^)]+)\)/, '$1').trim()),
+        ...pipeAppearanceBlocks,
     ].filter(Boolean);
     const uniquePromptBlocks = dedupeAppearanceGroups(allPromptBlocks);
-    const sceneOnly = directPrompt
-        .replace(appearanceBlockRegex, '')
-        .replace(pipeCharBlockRegex, '')
-        .replace(/\|/g, ',')
+    const sceneOnly = (pipeAppearanceBlocks.length > 0
+        ? pipeSceneOnly
+        : unwrappedPrompt
+            .replace(appearanceBlockRegex, '')
+            .replace(pipeCharBlockRegex, '')
+            .replace(/\|/g, ','))
         .split(',')
         .map(s => s.trim().replace(/^[`"'‘’“”]+|[`"'‘’“”]+$/g, '').replace(/[.!?]+$/g, ''))
         .filter(Boolean)
@@ -589,20 +587,30 @@ export async function generateImageTags(rawPrompt, options = {}) {
     }
 
     // Extract scene tags and appearance blocks from the AI output.
-    // The AI may include [Name: appearance] blocks or Character N: (tags) pipe blocks.
+    // The AI may include [Name: appearance] blocks, legacy Character N: (tags) blocks,
+    // or the final "scene | Character N: tags" pipe format.
+    const unwrappedSceneTags = unwrapQuotedPrompt(sceneTags);
+    const pipeSegments = splitPromptSegmentsByPipe(unwrappedSceneTags);
+    const pipeAppearanceBlocks = pipeSegments.filter(isPipeAppearanceSegment);
+    const pipeSceneOnly = pipeAppearanceBlocks.length > 0
+        ? pipeSegments.filter((segment) => !isPipeAppearanceSegment(segment)).join(', ')
+        : '';
     const appearanceBlockRegex = /\[[^\]]+:[^\]]+\]/g;
     const pipeCharBlockRegex = /Character\s+\d+:\s*\([^)]+\)/gi;
-    const aiAppearanceBlocks = sceneTags.match(appearanceBlockRegex) || [];
-    const aiPipeBlocks = sceneTags.match(pipeCharBlockRegex) || [];
+    const aiAppearanceBlocks = unwrappedSceneTags.match(appearanceBlockRegex) || [];
+    const aiPipeBlocks = unwrappedSceneTags.match(pipeCharBlockRegex) || [];
     const allAiBlocks = [
         ...aiAppearanceBlocks.map(b => b.slice(1, -1).trim()),
         ...aiPipeBlocks.map(b => b.replace(/\(([^)]+)\)/, '$1').trim()),
+        ...pipeAppearanceBlocks,
     ].filter(Boolean);
     const uniqueAiBlocks = dedupeAppearanceGroups(allAiBlocks);
-    const sceneOnly = sceneTags
-        .replace(appearanceBlockRegex, '')  // Remove [Name: appearance] blocks
-        .replace(pipeCharBlockRegex, '')    // Remove Character N: (tags) blocks
-        .replace(/\|/g, ',')               // 파이프를 쉼표로 변환
+    const sceneOnly = (pipeAppearanceBlocks.length > 0
+        ? pipeSceneOnly
+        : unwrappedSceneTags
+            .replace(appearanceBlockRegex, '')  // Remove [Name: appearance] blocks
+            .replace(pipeCharBlockRegex, '')    // Remove Character N: (tags) blocks
+            .replace(/\|/g, ','))               // 파이프를 쉼표로 변환
         .split(',')
         .map(s => s.trim())
         .filter(Boolean)
@@ -617,7 +625,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
     }
 
     // ── Step 4: Build final prompt ──
-    // Result: "scene tags, [ Character 1: appearance1 ], [ Character 2: appearance2 ]"
+    // Result: "scene tags | Character 1: appearance1 | Character 2: appearance2"
     const filteredSceneTags = stripAppearanceTagsFromScene(sceneOnly, appearanceGroups);
     const finalPrompt = buildImageApiPrompt(filteredSceneTags, appearanceGroups, { tagWeight });
 
@@ -629,7 +637,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
 
 /**
  * Sanitize AI output: strip non-tag noise, reject if Korean remains.
- * Strips pipe characters and extracts content after </img-gen> if present.
+ * Extracts content after </img-gen> if present.
  *
  * Korean characters inside [Name: appearance] bracket blocks are tolerated
  * (character names may be Korean) — only Korean in the scene-tag portion
@@ -652,7 +660,6 @@ function sanitizeTags(raw) {
     // Remove common AI preamble / markdown fences (keep fenced content)
     cleaned = cleaned
         .replace(/```[a-zA-Z0-9_-]*\s*\n?/g, '')
-        .replace(/\|/g, ',')               // 파이프를 쉼표로 변환
         .replace(/^[^a-zA-Z0-9_(\[]*/, '')
         .trim();
 
@@ -661,7 +668,7 @@ function sanitizeTags(raw) {
     const bracketBlocks = [];
     const withoutBrackets = cleaned.replace(/\[[^\]]+\]/g, (match) => {
         bracketBlocks.push(match);
-        return `__BRACKET_${bracketBlocks.length - 1}__`;
+        return `@@BRACKET_${bracketBlocks.length - 1}@@`;
     });
 
     // Reject if Korean characters appear in the scene-tag portion
@@ -675,22 +682,14 @@ function sanitizeTags(raw) {
         return '';
     }
 
-    // 태그 정리: 쉼표로 분리 → 각 태그 언더스코어→공백, 공백 정규화
     const cleanedParts = withoutBrackets
-        .split(',')
-        .map(t => {
-            const trimmed = t.trim();
-            // Restore bracket placeholders
-            const placeholderMatch = trimmed.match(/^__BRACKET_(\d+)__$/);
-            if (placeholderMatch) {
-                return bracketBlocks[Number(placeholderMatch[1])];
-            }
-            return trimmed.replace(/_/g, ' ').replace(/\s+/g, ' ');
-        })
-        .filter(Boolean)
-        .join(', ');
+        .replace(/_/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*,\s*/g, ', ')
+        .replace(/\s*\|\s*/g, ' | ')
+        .trim();
 
-    return cleanedParts;
+    return cleanedParts.replace(/@@BRACKET_(\d+)@@/g, (_, index) => bracketBlocks[Number(index)] || '');
 }
 
 
@@ -741,6 +740,26 @@ function unwrapOuterParens(text) {
     const trimmed = String(text || '').trim();
     if (!trimmed.startsWith('(') || !trimmed.endsWith(')')) return trimmed;
     return trimmed.slice(1, -1).trim();
+}
+
+function unwrapQuotedPrompt(text) {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return '';
+    if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+        return trimmed.slice(1, -1).trim();
+    }
+    return trimmed;
+}
+
+function splitPromptSegmentsByPipe(text) {
+    return unwrapQuotedPrompt(text)
+        .split('|')
+        .map((segment) => segment.trim())
+        .filter(Boolean);
+}
+
+function isPipeAppearanceSegment(segment) {
+    return /^Character\s+\d+\s*:/i.test(String(segment || '').trim());
 }
 
 function dedupeAppearanceGroups(groups = []) {

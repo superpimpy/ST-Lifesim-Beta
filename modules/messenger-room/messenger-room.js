@@ -1,5 +1,6 @@
 import { getContext } from '../../utils/st-context.js';
 import { getDefaultBinding, getExtensionSettings, loadData, saveData } from '../../utils/storage.js';
+import { injectContext, registerContextBuilder } from '../../utils/context-inject.js';
 import { createPopup, closePopup } from '../../utils/popup.js';
 import { getAppearanceTagsByName, getContacts } from '../contacts/contacts.js';
 import { buildAiEmoticonContext, replaceAiSelectedEmoticons, buildEmoticonMessageHtml, buildEmoticonPickerContent } from '../emoticon/emoticon.js';
@@ -19,7 +20,7 @@ const ROOM_AUTONOMY_DELAY_MAX_MS = 6500;
 const ROOM_IMAGE_TEXT_TEMPLATE_DEFAULT = '[사진: {description}]';
 const ROOM_ICON_GROUP = '👥';
 const ROOM_ICON_DIRECT = '💬';
-const ROOM_IMAGE_ON_PROMPT = '<image_generation_rule>\nWhen the responder would realistically take and send a photo in this room, insert a <pic prompt="concise English Danbooru-style tags"> tag.\nOnly use <pic> for photos the responder could actually take with their phone.\nNo narration, mood shots, or third-person views.\nRules:\n1) <pic prompt="..."> must already be final direct image tags.\n2) Format: scene tags, [ Character 1: appearance tags ], [ Character 2: appearance tags ]\n3) Use "Character N:" labels, not actual names, for appearance blocks.\n4) Use explicit count tags such as 1girl, 1boy, 2girls, 2boys; never generic people-count tags.\n5) If three or more characters appear, include group shot.\n6) Preserve any weighted tags or special syntax such as 2::tag::, -2::tag::, or 3::tag:: exactly as written.\n7) Keep core appearance tags such as hair, eyes, and outfit when they are available for included characters.\n8) No Korean, explanations, markdown, or prose.\n</image_generation_rule>';
+const ROOM_IMAGE_ON_PROMPT = '<image_generation_rule>\nWhen the responder would realistically take and send a photo in this room, insert a <pic prompt="concise English Danbooru-style tags"> tag.\nOnly use <pic> for photos the responder could actually take with their phone.\nNo narration, mood shots, or third-person views.\nRules:\n1) <pic prompt="..."> must already be final direct image tags.\n2) Format must be exactly "scene tags | Character 1: appearance tags | Character 2: appearance tags" with the double quotes included.\n3) Use "Character N:" labels, not actual names, for appearance blocks.\n4) Use explicit count tags such as 1girl, 1boy, 2girls, 2boys; never generic people-count tags.\n5) If three or more characters appear, include group shot.\n6) Preserve any weighted tags or special syntax such as 2::tag::, -2::tag::, or 3::tag:: exactly as written.\n7) Keep core appearance tags such as hair, eyes, and outfit when they are available for included characters.\n8) No Korean, explanations, markdown, or prose.\n</image_generation_rule>';
 const ROOM_IMAGE_OFF_PROMPT = '<image_generation_rule>\nWhen the responder would realistically take and send a photo in this room, insert a <pic prompt="short Korean photo description"> tag.\nOnly use <pic> for photos the responder could actually take with their phone.\nNo narration, mood shots, or third-person views.\n</image_generation_rule>';
 const ROOM_PIC_TAG_REGEX = /<?pic\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi;
 const ROOM_EMOTICON_ONLY_HTML_REGEX = /^<img\b[^>]*aria-label="[^"]*이모티콘[^"]*"[^>]*>$/i;
@@ -29,11 +30,16 @@ const ROOM_DEFAULTS = {
     responseProbability: 100,
     extraResponseProbability: 35,
     maxResponses: 2,
+    contextEnabled: false,
+    autonomyEnabled: false,
+    autonomyIntervalSec: 30,
+    autonomyProbability: 15,
 };
 const ROOM_BINDINGS = ['chat', 'character'];
 const ROOM_AVATAR_DEFAULTS = { width: 48, height: 48, scale: 100, positionX: 50, positionY: 50 };
 const ROOM_AVATAR_PREVIEW_DEFAULTS = { width: 72, height: 72, scale: 100, positionX: 50, positionY: 50 };
 const roomAutoReplyState = new Map();
+const roomAutonomyState = new Map();
 
 function normalizeRoomBinding(binding) {
     return binding === 'character' ? 'character' : 'chat';
@@ -192,14 +198,27 @@ export function normalizeMessengerRooms(rooms = [], binding = 'chat') {
                 createdAt,
                 updatedAt,
                 messages,
-                settings: {
-                    ...ROOM_DEFAULTS,
-                    ...(room?.settings && typeof room.settings === 'object' ? room.settings : {}),
-                },
+                settings: normalizeRoomSettings(room?.settings),
             };
         })
         .filter((room) => room.members.length > 0)
         .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+}
+
+function normalizeRoomSettings(settings = {}) {
+    const next = {
+        ...ROOM_DEFAULTS,
+        ...(settings && typeof settings === 'object' ? settings : {}),
+    };
+    next.autoReplyEnabled = next.autoReplyEnabled !== false;
+    next.contextEnabled = next.contextEnabled === true;
+    next.autonomyEnabled = next.autonomyEnabled === true;
+    next.responseProbability = clampRoomPercentage(next.responseProbability, ROOM_DEFAULTS.responseProbability);
+    next.extraResponseProbability = clampRoomPercentage(next.extraResponseProbability, ROOM_DEFAULTS.extraResponseProbability);
+    next.maxResponses = clampRoomResponseCount(next.maxResponses, ROOM_DEFAULTS.maxResponses);
+    next.autonomyIntervalSec = Math.max(5, Math.min(3600, Number.parseInt(next.autonomyIntervalSec, 10) || ROOM_DEFAULTS.autonomyIntervalSec));
+    next.autonomyProbability = clampRoomPercentage(next.autonomyProbability, ROOM_DEFAULTS.autonomyProbability);
+    return next;
 }
 
 function normalizeCategoryList(categories) {
@@ -248,6 +267,10 @@ function saveMessengerRooms(rooms, binding = 'chat') {
     return saveData(MODULE_KEY, { rooms: normalizeMessengerRooms(rooms, binding) }, binding);
 }
 
+function refreshMessengerRoomContext() {
+    void injectContext().catch((error) => console.error('[ST-LifeSim] 메신저 방 컨텍스트 주입 오류:', error));
+}
+
 function upsertMessengerRoom(nextRoom) {
     const room = normalizeMessengerRooms([nextRoom], nextRoom?.binding || 'chat')[0];
     if (!room) return null;
@@ -256,14 +279,19 @@ function upsertMessengerRoom(nextRoom) {
         if (binding === room.binding) rooms.push(room);
         saveMessengerRooms(rooms, binding);
     });
+    ensureRoomAutonomySchedule(room.id);
+    refreshMessengerRoomContext();
     return room;
 }
 
 function deleteMessengerRoom(roomId) {
+    clearRoomAutoReplySchedule(roomId);
+    clearRoomAutonomySchedule(roomId);
     ROOM_BINDINGS.forEach((binding) => {
         const nextRooms = loadMessengerRooms(binding).filter((room) => room.id !== roomId);
         saveMessengerRooms(nextRooms, binding);
     });
+    refreshMessengerRoomContext();
 }
 
 function getMessengerRoomById(roomId) {
@@ -465,6 +493,49 @@ function clearRoomAutoReplySchedule(roomId) {
     roomAutoReplyState.delete(roomId);
 }
 
+function clearRoomAutonomySchedule(roomId) {
+    const state = roomAutonomyState.get(roomId);
+    if (state?.timerId) clearTimeout(state.timerId);
+    roomAutonomyState.delete(roomId);
+}
+
+function ensureRoomAutonomySchedule(roomId, onUpdate = null) {
+    const room = getMessengerRoomById(roomId);
+    if (!room) {
+        clearRoomAutonomySchedule(roomId);
+        return;
+    }
+    const settings = normalizeRoomSettings(room.settings);
+    if (!settings.autonomyEnabled) {
+        clearRoomAutonomySchedule(roomId);
+        return;
+    }
+    const intervalMs = Math.max(5000, settings.autonomyIntervalSec * 1000);
+    const existing = roomAutonomyState.get(roomId);
+    if (existing?.timerId) clearTimeout(existing.timerId);
+    const state = {
+        onUpdate: typeof onUpdate === 'function' ? onUpdate : existing?.onUpdate || null,
+        timerId: null,
+    };
+    roomAutonomyState.set(roomId, state);
+    state.timerId = setTimeout(async function tick() {
+        const latestRoom = getMessengerRoomById(roomId);
+        if (!latestRoom) {
+            clearRoomAutonomySchedule(roomId);
+            return;
+        }
+        const latestSettings = normalizeRoomSettings(latestRoom.settings);
+        if (!latestSettings.autonomyEnabled) {
+            clearRoomAutonomySchedule(roomId);
+            return;
+        }
+        if (!roomAutoReplyState.has(roomId) && Math.random() * 100 < latestSettings.autonomyProbability) {
+            void runRoomAutoReplies(roomId, state.onUpdate, { forceFirstReply: true });
+        }
+        ensureRoomAutonomySchedule(roomId, state.onUpdate);
+    }, intervalMs);
+}
+
 function getContactMemberKey(contact) {
     return buildContactMemberKey(contact);
 }
@@ -587,6 +658,33 @@ function buildRoomTranscript(room, candidateMap) {
         const author = String(message?.authorName || getMemberDisplayLabel(message?.authorKey, candidateMap) || '{{user}}').trim();
         return `[room] ${author}: ${normalizeRoomPromptText(message?.text || '')}`;
     }).join('\n');
+}
+
+function buildMessengerRoomsContextSection() {
+    const candidateMap = getCandidateMap();
+    const rooms = loadMessengerRooms()
+        .filter((room) => normalizeRoomSettings(room.settings).contextEnabled === true)
+        .filter((room) => Array.isArray(room?.messages) && room.messages.length > 0);
+    if (rooms.length === 0) return '';
+    const sections = rooms.map((room) => {
+        const transcript = buildRoomTranscript({
+            ...room,
+            messages: room.messages.slice(-6),
+        }, candidateMap);
+        const memberText = room.members.map((memberKey) => getMemberDisplayLabel(memberKey, candidateMap)).join(', ') || '(unknown)';
+        const directMention = isMainCharInRoom(room);
+        const contextRule = directMention
+            ? '- {{char}} belongs to this room, so {{char}} may naturally mention related room events or topics to {{user}} when relevant, while still keeping the main 1:1 chat separate from the room itself.'
+            : '- {{char}} is NOT a member of this room (including NPC private chats or outsider group chats), so {{char}} must never claim full access to unseen logs. {{char}} may only mention it indirectly, cautiously, or as an impression/vibe.';
+        return [
+            `[Messenger Room Context: ${getRoomTitle(room, candidateMap)}]`,
+            `Members: ${memberText}`,
+            contextRule,
+            '[Recent room recap]',
+            transcript || '(no recent room messages)',
+        ].join('\n');
+    });
+    return sections.join('\n\n');
 }
 
 function getRoomImageSettings() {
@@ -865,7 +963,7 @@ async function generateOutsiderObservation(room, candidateMap) {
     return sanitizeRoomReply(rawReply, charName, [charName]);
 }
 
-async function runRoomAutoReplies(roomId, onUpdate = null) {
+async function runRoomAutoReplies(roomId, onUpdate = null, options = {}) {
     clearRoomAutoReplySchedule(roomId);
     const room = getMessengerRoomById(roomId);
     if (!room || room.settings?.autoReplyEnabled !== true) return;
@@ -884,7 +982,9 @@ async function runRoomAutoReplies(roomId, onUpdate = null) {
                     return;
                 }
                 const probability = usedResponders.length === 0
-                    ? clampRoomPercentage(freshRoom.settings?.responseProbability, ROOM_DEFAULTS.responseProbability)
+                    ? (options.forceFirstReply
+                        ? 100
+                        : clampRoomPercentage(freshRoom.settings?.responseProbability, ROOM_DEFAULTS.responseProbability))
                     : clampRoomPercentage(freshRoom.settings?.extraResponseProbability, ROOM_DEFAULTS.extraResponseProbability);
                 if (Math.random() * 100 >= probability) {
                     clearRoomAutoReplySchedule(roomId);
@@ -1341,6 +1441,8 @@ function openMessengerRoomDetail(roomId, onBack) {
         return;
     }
     const candidateMap = getCandidateMap();
+    const roomSettings = normalizeRoomSettings(room.settings);
+    const isGroupRoom = isGroupMessengerRoom(room);
     const wrapper = document.createElement('div');
     wrapper.className = 'slm-room-view';
 
@@ -1374,6 +1476,65 @@ function openMessengerRoomDetail(roomId, onBack) {
         }
         wrapper.appendChild(headerMeta);
     }
+
+    const settingsCard = document.createElement('div');
+    settingsCard.className = 'slm-room-meta-card';
+    const contextToggle = document.createElement('label');
+    contextToggle.className = 'slm-toggle-label';
+    const contextCheck = document.createElement('input');
+    contextCheck.type = 'checkbox';
+    contextCheck.checked = roomSettings.contextEnabled === true;
+    contextToggle.append(contextCheck, document.createTextNode(' 메인 대화 컨텍스트에 이 방 포함'));
+    const contextDesc = document.createElement('div');
+    contextDesc.className = 'slm-desc';
+    contextDesc.textContent = isMainCharInRoom(room)
+        ? '{{char}}가 이 방에 속해 있으므로, 포함 시 {{user}}와의 대화에서도 이 방 관련 내용을 직접 언급할 수 있습니다.'
+        : '{{char}}가 이 방 멤버가 아니므로, 포함 시에도 정확한 로그를 아는 척하지 않고 간접적인 분위기/정황만 언급하도록 처리됩니다.';
+    const autonomyRow = document.createElement('div');
+    autonomyRow.className = 'slm-input-row';
+    autonomyRow.style.alignItems = 'center';
+    autonomyRow.style.flexWrap = 'wrap';
+    const autonomyToggle = document.createElement('label');
+    autonomyToggle.className = 'slm-toggle-label';
+    const autonomyCheck = document.createElement('input');
+    autonomyCheck.type = 'checkbox';
+    autonomyCheck.checked = roomSettings.autonomyEnabled === true;
+    autonomyToggle.append(autonomyCheck, document.createTextNode(isGroupRoom ? ' 자유대화 자동 발생' : ' 선톡 자동 발생'));
+    const autonomyIntervalInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input slm-input-sm',
+        type: 'number',
+        min: '5',
+        max: '3600',
+        value: String(roomSettings.autonomyIntervalSec),
+    });
+    autonomyIntervalInput.style.width = '88px';
+    const autonomyProbabilityInput = Object.assign(document.createElement('input'), {
+        className: 'slm-input slm-input-sm',
+        type: 'number',
+        min: '0',
+        max: '100',
+        value: String(roomSettings.autonomyProbability),
+    });
+    autonomyProbabilityInput.style.width = '74px';
+    const settingsSaveBtn = document.createElement('button');
+    settingsSaveBtn.type = 'button';
+    settingsSaveBtn.className = 'slm-btn slm-btn-secondary slm-btn-sm';
+    settingsSaveBtn.textContent = '방 설정 저장';
+    autonomyRow.append(
+        autonomyToggle,
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '간격(초)' }),
+        autonomyIntervalInput,
+        Object.assign(document.createElement('span'), { className: 'slm-label', textContent: '확률(%)' }),
+        autonomyProbabilityInput,
+        settingsSaveBtn,
+    );
+    const autonomyDesc = document.createElement('div');
+    autonomyDesc.className = 'slm-desc';
+    autonomyDesc.textContent = isGroupRoom
+        ? '자유대화를 켜면 유저가 답장하지 않아도 이 그룹방이 일정 확률로 스스로 굴러갑니다.'
+        : '선톡을 켜면 유저가 먼저 입력하지 않아도 이 1:1 방에서 일정 확률로 먼저 말을 걸 수 있습니다.';
+    settingsCard.append(contextToggle, contextDesc, autonomyRow, autonomyDesc);
+    wrapper.appendChild(settingsCard);
 
     const actions = document.createElement('div');
     actions.className = 'slm-btn-row';
@@ -1453,6 +1614,34 @@ function openMessengerRoomDetail(roomId, onBack) {
         // Send button is always enabled to allow triggering AI responses even with empty input
         sendBtn.disabled = false;
         quickSendBtn.disabled = false;
+    };
+
+    settingsSaveBtn.onclick = () => {
+        const freshRoom = getMessengerRoomById(roomId);
+        if (!freshRoom) {
+            showToast('메신저 방을 찾을 수 없습니다.', 'warn');
+            return;
+        }
+        const nextRoom = upsertMessengerRoom({
+            ...freshRoom,
+            settings: {
+                ...normalizeRoomSettings(freshRoom.settings),
+                contextEnabled: contextCheck.checked,
+                autonomyEnabled: autonomyCheck.checked,
+                autonomyIntervalSec: Math.max(5, Math.min(3600, Number.parseInt(autonomyIntervalInput.value, 10) || ROOM_DEFAULTS.autonomyIntervalSec)),
+                autonomyProbability: clampRoomPercentage(autonomyProbabilityInput.value, ROOM_DEFAULTS.autonomyProbability),
+            },
+        });
+        if (!nextRoom) {
+            showToast('방 설정 저장 실패', 'error');
+            return;
+        }
+        autonomyIntervalInput.value = String(nextRoom.settings.autonomyIntervalSec);
+        autonomyProbabilityInput.value = String(nextRoom.settings.autonomyProbability);
+        ensureRoomAutonomySchedule(roomId, () => {
+            if (messageList.isConnected) renderMessages();
+        });
+        showToast('방 설정 저장', 'success', 1200);
     };
 
     const submitRoomMessage = (options = {}) => {
@@ -1614,6 +1803,9 @@ function openMessengerRoomDetail(roomId, onBack) {
     input.addEventListener('input', updateComposerState);
 
     renderMessages();
+    ensureRoomAutonomySchedule(roomId, () => {
+        if (messageList.isConnected) renderMessages();
+    });
     updateComposerState();
     closePopup('messenger-rooms');
     createPopup({
@@ -1810,6 +2002,11 @@ function buildRoomListContent(onBack, initialRoomId = null) {
     renderRooms();
     return wrapper;
 }
+
+registerContextBuilder('messenger-room', buildMessengerRoomsContextSection);
+queueMicrotask(() => {
+    loadMessengerRooms().forEach((room) => ensureRoomAutonomySchedule(room.id));
+});
 
 export function openMessengerRoomsPopup(onBack, initialRoomId = null) {
     const content = buildRoomListContent(onBack, initialRoomId);

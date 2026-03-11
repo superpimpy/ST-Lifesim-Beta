@@ -1251,7 +1251,7 @@ body[data-theme="dark"],
 .slm-room-message-bubble {
   display: inline-block;
   align-self: flex-start;
-  width: fit-content;
+  width: fit-content !important;
   max-width: 100%;
   box-sizing: border-box;
   padding: 9px 13px;
@@ -1300,6 +1300,7 @@ body[data-theme="dark"],
 /* 사용자 메시지 버블 — iMessage 파란색 */
 .slm-room-message.user .slm-room-message-bubble {
   align-self: flex-end;
+  width: fit-content !important;
   background: var(--slm-bubble-user-bg);
   color: var(--slm-bubble-user-text);
   border-radius: 18px 18px 4px 18px; /* 발신: 오른쪽 하단 꺾임 */
@@ -2199,7 +2200,7 @@ body[data-theme="dark"],
   overflow-y: auto;
   scrollbar-width: none;
   border-radius: 16px;
-  overflow: hidden;
+  overflow-x: hidden;
   border: 0.5px solid var(--slm-separator);
 }
 .slm-feed-list::-webkit-scrollbar { display: none; }
