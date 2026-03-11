@@ -1320,13 +1320,12 @@ async function generateGroupChatReply(responder, roster) {
         `Output only ${responderName}'s next message.`,
     ].filter(Boolean).join('\n');
 
-    let rawReply = await slashGenQuiet(prompt);
+    let rawReply = '';
+    if (typeof ctx.generateQuietPrompt === 'function') {
+        rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: responder.displayName });
+    }
     if (!rawReply) {
-        if (typeof ctx.generateQuietPrompt === 'function') {
-            rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: responder.displayName });
-        } else if (typeof ctx.generateRaw === 'function') {
-            rawReply = await ctx.generateRaw({ prompt, quietToLoud: false, trimNames: true });
-        }
+        rawReply = await slashGenQuiet(prompt);
     }
     const sanitizedReply = sanitizeGroupChatReply(rawReply, responder.displayName, roster);
     if (!sanitizedReply) return '';
