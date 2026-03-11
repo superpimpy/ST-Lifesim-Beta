@@ -1069,6 +1069,7 @@ body[data-theme="dark"],
   width: 48px;
   height: 48px;
   border-radius: 50%;
+  overflow: hidden;
   background: linear-gradient(135deg, var(--slm-accent), #c77dff);
   display: flex;
   align-items: center;
@@ -1081,7 +1082,9 @@ body[data-theme="dark"],
 .slm-room-card-icon-image {
   width: 100%;
   height: 100%;
+  display: block;
   object-fit: cover;
+  flex: 0 0 100%;
 }
 
 .slm-room-card-body {
