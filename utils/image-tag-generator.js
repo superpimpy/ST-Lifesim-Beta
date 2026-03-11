@@ -505,7 +505,7 @@ export function buildDirectImagePrompt(rawPrompt, options = {}) {
         .replace(pipeCharBlockRegex, '')
         .replace(/\|/g, ',')
         .split(',')
-        .map(s => s.trim().replace(/^[`"\u2018\u2019\u201c\u201d]+|[`"\u2018\u2019\u201c\u201d]+$/g, '').replace(/[.!?]+$/g, ''))
+        .map(s => s.trim().replace(/^[`"'‘’“”]+|[`"'‘’“”]+$/g, '').replace(/[.!?]+$/g, ''))
         .filter(Boolean)
         .join(', ');
     const matchedAppearanceGroups = buildMatchedAppearanceGroups(matched);
