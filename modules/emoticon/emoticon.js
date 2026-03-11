@@ -298,7 +298,7 @@ export function buildAiEmoticonContext(senderName = getCurrentCharName()) {
         '이모티콘용 HTML, 이미지 URL, markdown, 설명은 직접 출력하지 마세요.',
         'Do not output emoticon HTML, image URLs, markdown, or explanations directly.',
         '',
-        'CRITICAL: Never translate or rephrase any emoticon identifier. The safest output is the numeric token only, because the numbers must stay unchanged.',
+        'CRITICAL: Never translate or rephrase any emoticon identifier. The safest output is the numeric token, because the numbers must stay unchanged.',
     ].join('\n');
 }
 
