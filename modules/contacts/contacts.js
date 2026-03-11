@@ -1236,9 +1236,10 @@ export function getContacts(binding = 'chat') {
 export function getAllContacts() {
     const merged = new Map();
     [...loadContacts('chat'), ...loadContacts('character')].forEach((contact) => {
-        const identifier = String(contact?.id || '').trim() || String(contact?.name || '').trim();
-        if (!identifier) return;
-        const key = `${contact?.binding === 'character' ? 'character' : 'chat'}:${identifier}`;
+        const contactId = String(contact?.id || '').trim();
+        const contactName = String(contact?.name || '').trim();
+        if (!contactId && !contactName) return;
+        const key = `${contact?.binding === 'character' ? 'character' : 'chat'}:${contactId || '(no-id)'}:${contactName || '(no-name)'}`;
         if (merged.has(key)) return;
         merged.set(key, contact);
     });

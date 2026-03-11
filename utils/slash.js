@@ -127,7 +127,7 @@ export async function slashGen(prompt, name = null) {
  */
 export async function slashGenQuiet(prompt) {
     const result = await run(`/gen quiet=true ${prompt}`);
-    return String(result?.pipe || result || '').trim();
+    return String(result?.pipe ?? result ?? '').trim();
 }
 
 /**
