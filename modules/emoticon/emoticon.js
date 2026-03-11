@@ -66,15 +66,17 @@ function loadEmoticons() {
     const globalEmoticons = loadData(MODULE_KEY, null, GLOBAL_BINDING);
     if (Array.isArray(globalEmoticons)) {
         const normalized = globalEmoticons.map(normalizeEmoticonRecord).filter(Boolean);
-        if (JSON.stringify(globalEmoticons) !== JSON.stringify(normalized)) {
-            saveData(MODULE_KEY, normalized, GLOBAL_BINDING);
+        if (needsEmoticonMigration(globalEmoticons, normalized)) {
+            const saved = saveData(MODULE_KEY, normalized, GLOBAL_BINDING);
+            if (!saved) console.error('[ST-LifeSim] 이모티콘 마이그레이션 저장 실패');
         }
         return normalized;
     }
     const legacy = loadData(MODULE_KEY, [], getDefaultBinding());
     const normalizedLegacy = legacy.map(normalizeEmoticonRecord).filter(Boolean);
     if (legacy.length > 0) {
-        saveData(MODULE_KEY, normalizedLegacy, GLOBAL_BINDING);
+        const saved = saveData(MODULE_KEY, normalizedLegacy, GLOBAL_BINDING);
+        if (!saved) console.error('[ST-LifeSim] 레거시 이모티콘 마이그레이션 저장 실패');
     }
     return normalizedLegacy;
 }
@@ -283,6 +285,20 @@ function normalizeEmoticonRecord(emoticon) {
         category: String(emoticon.category || '').trim() || DEFAULT_EMOTICON_CATEGORY,
         favorite: emoticon.favorite === true,
     };
+}
+
+function needsEmoticonMigration(rawEmoticons, normalizedEmoticons) {
+    if (!Array.isArray(rawEmoticons) || rawEmoticons.length !== normalizedEmoticons.length) return true;
+    return rawEmoticons.some((emoticon, index) => {
+        if (!emoticon || typeof emoticon !== 'object') return true;
+        const normalized = normalizedEmoticons[index];
+        if (!normalized) return true;
+        return String(emoticon.id || '').trim() !== normalized.id
+            || normalizeEmoticonName(emoticon.name) !== normalized.name
+            || String(emoticon.url || '').trim() !== normalized.url
+            || (String(emoticon.category || '').trim() || DEFAULT_EMOTICON_CATEGORY) !== normalized.category
+            || (emoticon.favorite === true) !== normalized.favorite;
+    });
 }
 
 /**
