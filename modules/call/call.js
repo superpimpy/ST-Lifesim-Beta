@@ -11,11 +11,12 @@
  */
 
 import { getContext } from '../../utils/st-context.js';
-import { slashSend, slashSendAs, slashGen, slashGenQuiet } from '../../utils/slash.js';
+import { slashSend, slashSendAs } from '../../utils/slash.js';
 import { loadData, saveData, getDefaultBinding, getExtensionSettings } from '../../utils/storage.js';
 import { showToast, escapeHtml, generateId, showConfirm } from '../../utils/ui.js';
 import { createPopup } from '../../utils/popup.js';
 import { getAllContacts } from '../contacts/contacts.js';
+import { generateBackendText } from '../../utils/backend-generation.js';
 
 const MODULE_KEY = 'call-logs';
 const COLLAPSED_KEY = 'call-log-collapsed';
@@ -35,32 +36,6 @@ const PROACTIVE_CALL_COOLDOWN_MS = 30000;
 const PROACTIVE_CALL_DELAY_MS = 1600;
 const PROACTIVE_CALL_AFTER_AI_DELAY_MS = 3000;
 const PROACTIVE_CALL_DEFER_MAX_WAIT_MS = 45000;
-const MODEL_KEY_BY_SOURCE = {
-    openai: 'openai_model',
-    claude: 'claude_model',
-    makersuite: 'google_model',
-    vertexai: 'vertexai_model',
-    openrouter: 'openrouter_model',
-    ai21: 'ai21_model',
-    mistralai: 'mistralai_model',
-    cohere: 'cohere_model',
-    perplexity: 'perplexity_model',
-    groq: 'groq_model',
-    chutes: 'chutes_model',
-    siliconflow: 'siliconflow_model',
-    electronhub: 'electronhub_model',
-    nanogpt: 'nanogpt_model',
-    deepseek: 'deepseek_model',
-    aimlapi: 'aimlapi_model',
-    xai: 'xai_model',
-    pollinations: 'pollinations_model',
-    cometapi: 'cometapi_model',
-    moonshot: 'moonshot_model',
-    fireworks: 'fireworks_model',
-    azure_openai: 'azure_openai_model',
-    custom: 'custom_model',
-    zai: 'zai_model',
-};
 
 /**
  * 음성메세지 포맷: 텍스트 내 첫 번째 `<br>` 이후의 내용을 `**...**`로 감싸 이탤릭체 처리한다.
@@ -212,50 +187,14 @@ function getCallEndByCharMessage(charName, timeStr) {
     return `📵 ${charName}${p} 통화를 종료했습니다. (통화시간: ${timeStr})`;
 }
 
-function inferModelSettingKey(source) {
-    return MODEL_KEY_BY_SOURCE[String(source || '').toLowerCase()] || '';
-}
-
 async function generateCallSummaryText(ctx, quietPrompt, quietName) {
     if (!ctx) return '';
-    const slashResult = await slashGenQuiet(quietPrompt);
-    if (slashResult) return slashResult.trim();
-    if (typeof ctx.generateRaw === 'function') {
-        const aiRoute = getCallSummaryAiRouteSettings();
-        const chatSettings = ctx.chatCompletionSettings;
-        const sourceBefore = chatSettings?.chat_completion_source;
-        let modelKey = '';
-        let modelBefore;
-        if (chatSettings && aiRoute.chatSource) {
-            chatSettings.chat_completion_source = aiRoute.chatSource;
-        }
-        if (chatSettings) {
-            modelKey = aiRoute.modelSettingKey || inferModelSettingKey(aiRoute.chatSource || sourceBefore);
-            if (modelKey && typeof aiRoute.model === 'string' && aiRoute.model.length > 0) {
-                modelBefore = chatSettings[modelKey];
-                chatSettings[modelKey] = aiRoute.model;
-            }
-        }
-        try {
-            return (await ctx.generateRaw({
-                prompt: quietPrompt,
-                quietToLoud: false,
-                trimNames: true,
-                api: aiRoute.api || null,
-            }) || '').trim();
-        } finally {
-            if (chatSettings && aiRoute.chatSource) {
-                chatSettings.chat_completion_source = sourceBefore;
-            }
-            if (chatSettings && modelKey && typeof aiRoute.model === 'string' && aiRoute.model.length > 0) {
-                chatSettings[modelKey] = modelBefore;
-            }
-        }
-    }
-    if (typeof ctx.generateQuietPrompt === 'function') {
-        return (await ctx.generateQuietPrompt({ quietPrompt, quietName }) || '').trim();
-    }
-    return '';
+    return await generateBackendText({
+        ctx,
+        prompt: quietPrompt,
+        quietName,
+        route: getCallSummaryAiRouteSettings(),
+    });
 }
 
 /**
@@ -542,10 +481,11 @@ Set incoming_call=true ONLY when the message clearly means "the caller is callin
 Set false for hypothetical talk, future planning, roleplay narration of an already-active call, or vague mention of phone/call.
 No prose, no markdown, JSON only.`;
     try {
-        const raw = (await slashGenQuiet(prompt))
-            || (typeof ctx.generateQuietPrompt === 'function'
-                ? (await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: 'call-intent' }) || '')
-                : '');
+        const raw = await generateBackendText({
+            ctx,
+            prompt,
+            quietName: 'call-intent',
+        });
         const jsonPart = raw.match(/\{[\s\S]*\}/)?.[0];
         if (!jsonPart) return fallback;
         const parsed = JSON.parse(jsonPart);
@@ -630,30 +570,39 @@ async function showIncomingCallDialog(charName) {
         const matchedContact = getAllContacts().find(c => c.name === charName) || null;
         await startCall(charName, matchedContact, 'incoming');
         const recentDialogue = buildRecentDialogueLines(5);
-        await slashGen(
-            `You just connected a phone call with {{user}}. Start the call naturally with one short opening utterance. Do not narrate that the call was already active before this moment. Base your response on the latest five dialogue lines when relevant.\n${recentDialogue ? `Latest 5 dialogue lines:\n${recentDialogue}` : ''}`,
-            charName,
-        );
+        const openingLine = await generateBackendText({
+            prompt: `You just connected a phone call with {{user}}. Start the call naturally with one short opening utterance. Do not narrate that the call was already active before this moment. Base your response on the latest five dialogue lines when relevant.\n${recentDialogue ? `Latest 5 dialogue lines:\n${recentDialogue}` : ''}`,
+            quietName: charName,
+        });
+        if (openingLine) {
+            await slashSendAs(charName, openingLine);
+        }
     };
 
     rejectBtn.onclick = async () => {
         cleanup();
         await slashSend(`📵 수신 거절 — ${displayName}`);
         appendMissedCallLog(displayName, '수신 거절');
-        await slashGen(
-            `${charName}'s call was rejected by {{user}}. Generate one short follow-up reaction as a normal chat message.`,
-            charName,
-        );
+        const rejectReaction = await generateBackendText({
+            prompt: `${charName}'s call was rejected by {{user}}. Generate one short follow-up reaction as a normal chat message.`,
+            quietName: charName,
+        });
+        if (rejectReaction) {
+            await slashSendAs(charName, rejectReaction);
+        }
     };
 
     missedBtn.onclick = async () => {
         cleanup();
         await slashSend(`📵 부재중 전화 — ${displayName}`);
         appendMissedCallLog(displayName, '부재중');
-        await slashGen(
-            `${charName} called {{user}} but {{user}} didn't answer. ${charName} noticed the missed call. Generate one short natural follow-up reaction (e.g. a text message or leaving a voicemail comment) as ${charName}.`,
-            charName,
-        );
+        const missedReaction = await generateBackendText({
+            prompt: `${charName} called {{user}} but {{user}} didn't answer. ${charName} noticed the missed call. Generate one short natural follow-up reaction (e.g. a text message or leaving a voicemail comment) as ${charName}.`,
+            quietName: charName,
+        });
+        if (missedReaction) {
+            await slashSendAs(charName, missedReaction);
+        }
     };
 
 }
@@ -973,10 +922,11 @@ async function initiateCallWithAiDecision(charName) {
                 matchedContact,
                 activeChar,
             });
-            const decision = (await slashGenQuiet(decisionPrompt))
-                || (typeof ctx.generateQuietPrompt === 'function'
-                    ? (await ctx.generateQuietPrompt({ quietPrompt: decisionPrompt, quietName: charName }) || 'ACCEPT')
-                    : 'ACCEPT');
+            const decision = (await generateBackendText({
+                ctx,
+                prompt: decisionPrompt,
+                quietName: charName,
+            })) || 'ACCEPT';
             acceptCall = !decision.toUpperCase().includes('REJECT');
         }
     } catch (e) {

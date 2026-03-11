@@ -30,7 +30,7 @@ import { initCalendar, openCalendarPopup } from './modules/calendar/calendar.js'
 import { initGifticon, openGifticonPopup, trackGifticonUsageFromCharacterMessage } from './modules/gifticon/gifticon.js';
 import { openMessengerRoomsPopup, appendExternalRoomMessage, buildRoomTranscriptText } from './modules/messenger-room/messenger-room.js';
 import { buildDirectImagePrompt } from './utils/image-tag-generator.js';
-import { slashGenQuiet } from './utils/slash.js';
+import { generateBackendText } from './utils/backend-generation.js';
 
 // 설정 키
 const SETTINGS_KEY = 'st-lifesim';
@@ -1320,13 +1320,11 @@ async function generateGroupChatReply(responder, roster, transcriptOverride = nu
         `Output only ${responderName}'s next message.`,
     ].filter(Boolean).join('\n');
 
-    let rawReply = '';
-    if (typeof ctx.generateQuietPrompt === 'function') {
-        rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: responder.displayName });
-    }
-    if (!rawReply) {
-        rawReply = await slashGenQuiet(prompt);
-    }
+    const rawReply = await generateBackendText({
+        ctx,
+        prompt,
+        quietName: responder.displayName,
+    });
     const sanitizedReply = sanitizeGroupChatReply(rawReply, responder.displayName, roster);
     if (!sanitizedReply) return '';
     return enrichGroupChatReplyContent(sanitizedReply, responderName, transcript);

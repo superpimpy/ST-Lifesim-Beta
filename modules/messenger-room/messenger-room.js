@@ -3,7 +3,7 @@ import { getDefaultBinding, getExtensionSettings, loadData, saveData } from '../
 import { injectContext, registerContextBuilder } from '../../utils/context-inject.js';
 import { createPopup, closePopup } from '../../utils/popup.js';
 import { getAllContacts, getAppearanceTagsByName, getContacts } from '../contacts/contacts.js';
-import { slashGenQuiet } from '../../utils/slash.js';
+import { generateBackendText } from '../../utils/backend-generation.js';
 import { buildAiEmoticonContext, replaceAiSelectedEmoticons, buildEmoticonMessageHtml, buildEmoticonPickerContent } from '../emoticon/emoticon.js';
 import { translateTextToKorean } from '../sns/sns.js';
 import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
@@ -1075,13 +1075,7 @@ async function generateRoomReply(room, responderKey, candidateMap) {
         `Output only ${responderName}'s next room message.`,
     ].join('\n');
 
-    let rawReply = '';
-    if (typeof ctx.generateQuietPrompt === 'function') {
-        rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: responderName });
-    }
-    if (!rawReply) {
-        rawReply = await slashGenQuiet(prompt);
-    }
+    const rawReply = await generateBackendText({ ctx, prompt, quietName: responderName });
     const sanitizedReply = sanitizeRoomReply(rawReply, responderName, memberLabels);
     if (!sanitizedReply) return '';
     return enrichRoomReplyContent(sanitizedReply, responderName, room, candidateMap);
@@ -1110,13 +1104,7 @@ async function generateOutsiderObservation(room, candidateMap) {
         'Output only the indirect observation line.',
     ].join('\n');
 
-    let rawReply = '';
-    if (typeof ctx.generateQuietPrompt === 'function') {
-        rawReply = await ctx.generateQuietPrompt({ quietPrompt: prompt, quietName: charName });
-    }
-    if (!rawReply) {
-        rawReply = await slashGenQuiet(prompt);
-    }
+    const rawReply = await generateBackendText({ ctx, prompt, quietName: charName });
     return sanitizeRoomReply(rawReply, charName, [charName]);
 }
 

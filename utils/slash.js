@@ -7,6 +7,7 @@
 import { getContext } from './st-context.js';
 import { getContacts } from '../modules/contacts/contacts.js';
 import { applyProfileImageStyle } from './profile-image.js';
+import { generateBackendText } from './backend-generation.js';
 
 /**
  * 슬래시 커맨드를 실행하는 내부 함수
@@ -29,42 +30,12 @@ async function run(command) {
     }
 }
 
-function escapeSlashPromptText(text) {
-    // SillyTavern slash parser treats `|` as a pipe separator, so escape it to keep prompt text intact.
-    return String(text ?? '')
-        .replace(/\\/g, '\\\\')
-        .replace(/\|/g, '\\|');
-}
-
 async function generateQuietText(prompt, quietName = null) {
-    const ctx = getContext();
     if (prompt == null) return '';
-    const quietPrompt = String(prompt).trim();
-    if (!ctx || !quietPrompt) return '';
-
-    if (typeof ctx.generateQuietPrompt === 'function') {
-        try {
-            const result = await ctx.generateQuietPrompt({
-                quietPrompt,
-                quietName: quietName || ctx.name2 || '{{char}}',
-            });
-            if (result != null) return String(result).trim();
-        } catch (error) {
-            console.warn('[ST-LifeSim] generateQuietPrompt 조용한 생성 실패, /gen 폴백 사용:', error);
-        }
-    }
-
-    try {
-        const result = await run(`/gen lock=off quiet=true ${escapeSlashPromptText(quietPrompt)}`);
-        if (result?.isError) {
-            console.warn('[ST-LifeSim] /gen lock=off quiet=true 실행 실패:', result.errorMessage || result);
-            return '';
-        }
-        return String(result?.pipe ?? result ?? '').trim();
-    } catch (error) {
-        console.warn('[ST-LifeSim] /gen lock=off quiet=true 조용한 생성 실패:', error);
-        return '';
-    }
+    return await generateBackendText({
+        prompt: String(prompt).trim(),
+        quietName: quietName || undefined,
+    });
 }
 
 function findContactByNameVariant(name) {
@@ -153,13 +124,14 @@ export async function slashGen(prompt, name = null) {
         const generated = await generateQuietText(prompt, name);
         if (generated) {
             await slashSendAs(name, generated);
-            return;
         }
-        // 최종 폴백: /gen quiet=true ... | /sendas name="..." 형태로 실행
-        await run(`/gen lock=off quiet=true ${prompt} | /sendas name="${name}"`);
     } else {
-        // /gen quiet=true만 단독 사용 (기본 {{char}} 응답)
-        await run(`/gen lock=off quiet=true ${prompt}`);
+        const ctx = getContext();
+        const charName = ctx?.name2 || '{{char}}';
+        const generated = await generateQuietText(prompt, charName);
+        if (generated) {
+            await slashSendAs(charName, generated);
+        }
     }
 }
 
