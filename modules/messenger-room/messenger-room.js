@@ -1715,9 +1715,6 @@ function openMessengerRoomDetail(roomId, onBack) {
     const submitRoomMessage = (options = {}) => {
         const text = normalizeRoomPromptText(input.value);
         input.value = '';
-        sendBtn.disabled = true;
-        quickSendBtn.disabled = true;
-        input.disabled = true;
         if (text) {
             appendUserRoomMessage({ text }, options);
         } else {
@@ -1728,7 +1725,6 @@ function openMessengerRoomDetail(roomId, onBack) {
                 });
             }
         }
-        input.disabled = false;
         updateComposerState();
         input.focus();
         renderMessages();

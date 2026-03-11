@@ -692,33 +692,18 @@ export async function triggerNpcPosting() {
         const presetPick = getRandomItem(presets);
         const presetImg = presetPick ? presetPick.url : '';
         // 캐릭터별 기본 이미지가 있으면 우선 사용하고, 없을 때만 프리셋으로 보완한다.
+        const postId = generateId();
         let finalImageUrl = defaultImg || presetImg;
         let imageDescription = '';
         let resolvedImagePrompt = '';
         if (promptSettings.snsImageMode) {
-            const imageInputPrompt = buildSnsImageInputPrompt(promptSettings.snsImagePrompt, pick.name, postContent);
-            const promptResult = await createSnsImagePrompt(freshCtx, imageInputPrompt, pick.name, [...getContacts('character'), ...getContacts('chat')]);
-            resolvedImagePrompt = promptResult.finalPrompt || imageInputPrompt;
-
-            if (promptResult.finalPrompt) {
-                try {
-                    const generatedUrl = await generateImageViaApi(promptResult.finalPrompt);
-                    if (generatedUrl) {
-                        finalImageUrl = generatedUrl;
-                        imageDescription = '';
-                    }
-                } catch (imgErr) {
-                    console.warn('[ST-LifeSim] SNS 이미지 생성 실패, 기본 이미지 사용:', imgErr);
-                }
-            } else {
-                console.warn('[ST-LifeSim] SNS 직접 이미지 프롬프트 생성 결과 없음, 이미지 생성 건너뜀');
-            }
+            resolvedImagePrompt = buildSnsImageInputPrompt(promptSettings.snsImagePrompt, pick.name, postContent);
         }
         if (!imageDescription && inlineCaption) imageDescription = inlineCaption;
 
         const feed = loadFeed();
         feed.push({
-            id: generateId(),
+            id: postId,
             authorName: pick.name,
             authorIsUser: false,
             date: new Date().toISOString(),
@@ -734,7 +719,23 @@ export async function triggerNpcPosting() {
         });
         saveFeed(feed);
 
-        showToast(`📸 ${pick.name}님이 새 게시물을 올렸습니다.`, 'info', 2500);
+        if (promptSettings.snsImageMode && resolvedImagePrompt) {
+            void applyGeneratedImageToPost(postId, {
+                promptSource: resolvedImagePrompt,
+                authorName: pick.name,
+                fallbackImageUrl: finalImageUrl,
+            }).catch((imgErr) => {
+                console.warn('[ST-LifeSim] SNS 백그라운드 이미지 생성 실패, 기본 이미지 유지:', imgErr);
+            });
+        }
+
+        showToast(
+            promptSettings.snsImageMode && resolvedImagePrompt
+                ? `📸 ${pick.name}님이 새 게시물을 올렸습니다. (이미지 생성 중...)`
+                : `📸 ${pick.name}님이 새 게시물을 올렸습니다.`,
+            'info',
+            2500,
+        );
     } catch (e) {
         console.error('[ST-LifeSim] NPC 포스팅 생성 오류:', e);
     }
@@ -837,14 +838,25 @@ function buildSnsContent() {
     npcPostBtn.className = 'slm-sns-action-btn';
     npcPostBtn.title = 'NPC 포스팅';
     npcPostBtn.innerHTML = '<span class="slm-sns-action-icon">🎲</span><span class="slm-sns-action-label">NPC</span>';
-    npcPostBtn.onclick = async () => {
+    npcPostBtn.onclick = () => {
+        const originalHtml = npcPostBtn.innerHTML;
         npcPostBtn.disabled = true;
-        try {
-            await triggerNpcPosting();
-            renderFeed();
-        } finally {
-            npcPostBtn.disabled = false;
-        }
+        npcPostBtn.innerHTML = '<span class="slm-sns-action-icon">⏳</span><span class="slm-sns-action-label">생성중</span>';
+        showToast('NPC 포스팅 생성을 백그라운드에서 시작합니다...', 'info', 1600);
+        void triggerNpcPosting()
+            .then(() => {
+                renderFeed();
+            })
+            .catch((error) => {
+                console.error('[ST-LifeSim] 수동 NPC 포스팅 생성 오류:', error);
+                showToast('NPC 포스팅 생성 실패', 'error', 1800);
+            })
+            .finally(() => {
+                if (npcPostBtn.isConnected) {
+                    npcPostBtn.disabled = false;
+                    npcPostBtn.innerHTML = originalHtml;
+                }
+            });
     };
 
     const avatarBtn = document.createElement('button');

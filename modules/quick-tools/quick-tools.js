@@ -579,7 +579,7 @@ export function renderVoiceMemoUI() {
     const genImageBtn = document.createElement('button');
     genImageBtn.className = 'slm-btn slm-btn-primary slm-btn-sm';
     genImageBtn.textContent = '🎨 생성';
-    genImageBtn.onclick = async () => {
+    genImageBtn.onclick = () => {
         const prompt = genImagePromptInput.value.trim();
         if (!prompt) {
             showToast('이미지 설명을 입력해주세요.', 'warn');
@@ -587,23 +587,19 @@ export function renderVoiceMemoUI() {
         }
         genImageBtn.disabled = true;
         genImageBtn.textContent = '⏳ 생성 중...';
-        try {
-            const imageUrl = await generateUserImage(prompt);
-            if (imageUrl) {
-                const radius = getImageRadius();
-                await slashSend(`<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(prompt)}" class="slm-quick-image" style="border-radius:${radius}px">`);
-                genImagePromptInput.value = '';
-                showToast('이미지 생성 및 전송 완료', 'success', 1500);
-            } else {
-                showToast('이미지 생성에 실패했습니다. SD API가 활성화되어 있는지 확인해주세요.', 'error');
-            }
-        } catch (e) {
-            console.error('[ST-LifeSim] 유저 이미지 생성 오류:', e);
-            showToast('이미지 생성 실패: ' + e.message, 'error');
-        } finally {
-            genImageBtn.disabled = false;
-            genImageBtn.textContent = '🎨 생성';
-        }
+        void triggerUserImageGenerationAndSendInBackground(prompt, {
+            onSuccess: () => {
+                if (genImagePromptInput.isConnected) {
+                    genImagePromptInput.value = '';
+                }
+            },
+            onFinally: () => {
+                if (genImageBtn.isConnected) {
+                    genImageBtn.disabled = false;
+                    genImageBtn.textContent = '🎨 생성';
+                }
+            },
+        });
     };
 
     genImageRow.appendChild(genImagePromptInput);
@@ -672,6 +668,34 @@ export async function triggerUserImageGenerationAndSend(prompt) {
     await slashSend(`<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(trimmed)}" class="slm-quick-image" style="border-radius:${radius}px">`);
     showToast('이미지 생성 및 전송 완료', 'success', 1500);
     return true;
+}
+
+export function triggerUserImageGenerationAndSendInBackground(prompt, callbacks = {}) {
+    const trimmed = String(prompt || '').trim();
+    if (!trimmed) return Promise.resolve(false);
+    const { onSuccess, onFailure, onFinally } = callbacks || {};
+    showToast('이미지 생성을 백그라운드에서 시작합니다...', 'info', 1600);
+    const task = (async () => {
+        try {
+            const ok = await triggerUserImageGenerationAndSend(trimmed);
+            if (!ok) {
+                showToast('이미지 생성에 실패했습니다.', 'error', 2000);
+                onFailure?.();
+                return false;
+            }
+            onSuccess?.();
+            return true;
+        } catch (error) {
+            console.error('[ST-LifeSim] 백그라운드 유저 이미지 생성 오류:', error);
+            showToast('이미지 생성 실패: ' + error.message, 'error');
+            onFailure?.(error);
+            return false;
+        } finally {
+            onFinally?.();
+        }
+    })();
+    void task.catch(() => {});
+    return task;
 }
 
 /**
