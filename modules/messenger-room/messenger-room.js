@@ -303,7 +303,9 @@ function replaceRoomMessage(roomId, messageId, updater) {
     if (!room) return null;
     const nextMessages = room.messages.map((message) => {
         if (message.id !== messageId) return message;
-        const updated = typeof updater === 'function' ? updater(message) : updater;
+        const updated = typeof updater === 'function'
+            ? updater(message)
+            : (updater && typeof updater === 'object' ? updater : null);
         return {
             ...message,
             ...(updated && typeof updated === 'object' ? updated : {}),
@@ -1307,9 +1309,6 @@ function buildRoomListContent(onBack, initialRoomId = null) {
         }
         const dialog = document.createElement('div');
         dialog.className = 'slm-form';
-        const hint = document.createElement('div');
-        hint.className = 'slm-desc';
-        hint.textContent = '연락처에 등록된 NPC와 개인 메신저 방을 바로 엽니다.';
         const select = document.createElement('select');
         select.className = 'slm-select';
         npcContacts.forEach((contact) => {
@@ -1318,7 +1317,12 @@ function buildRoomListContent(onBack, initialRoomId = null) {
             option.textContent = getContactMemberKey(contact);
             select.appendChild(option);
         });
-        if (!getRoomUiSettings().hideHelperText) dialog.append(hint);
+        if (!getRoomUiSettings().hideHelperText) {
+            const hint = document.createElement('div');
+            hint.className = 'slm-desc';
+            hint.textContent = '연락처에 등록된 NPC와 개인 메신저 방을 바로 엽니다.';
+            dialog.append(hint);
+        }
         dialog.append(select);
         const dialogFooter = document.createElement('div');
         dialogFooter.className = 'slm-panel-footer';
