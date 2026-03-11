@@ -2,7 +2,7 @@ import { getContext } from '../../utils/st-context.js';
 import { getDefaultBinding, getExtensionSettings, loadData, saveData } from '../../utils/storage.js';
 import { createPopup, closePopup } from '../../utils/popup.js';
 import { getAppearanceTagsByName, getContacts } from '../contacts/contacts.js';
-import { buildAiEmoticonContext, replaceAiSelectedEmoticons, getStoredEmoticons, buildEmoticonMessageHtml } from '../emoticon/emoticon.js';
+import { buildAiEmoticonContext, replaceAiSelectedEmoticons, buildEmoticonMessageHtml, buildEmoticonPickerContent } from '../emoticon/emoticon.js';
 import { translateTextToKorean } from '../sns/sns.js';
 import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
 import { applyProfileImageStyle, normalizeProfileImageStyle, readImageFileAsDataUrl } from '../../utils/profile-image.js';
@@ -949,50 +949,19 @@ function openRoomMessageEditPopup(roomId, messageId, onBack, onSaved) {
 }
 
 function openRoomEmoticonPicker(roomId, onBack, onSend) {
-    const emoticons = getStoredEmoticons();
-    if (emoticons.length === 0) {
-        showToast('보낼 수 있는 이모티콘이 없습니다.', 'warn');
-        return;
-    }
-    const wrapper = document.createElement('div');
-    wrapper.className = 'slm-form';
-    const search = document.createElement('input');
-    search.className = 'slm-input';
-    search.type = 'search';
-    search.placeholder = '🔍 이모티콘 검색';
-    const list = document.createElement('div');
-    list.className = 'slm-room-emoticon-list';
-    wrapper.append(search, list);
-
-    const renderList = () => {
-        const query = String(search.value || '').trim().toLowerCase();
-        list.innerHTML = '';
-        emoticons
-            .filter((emoticon) => {
-                if (!query) return true;
-                return `${emoticon.name} ${emoticon.category}`.toLowerCase().includes(query);
-            })
-            .forEach((emoticon) => {
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'slm-btn slm-btn-ghost slm-room-emoticon-btn';
-                const html = buildEmoticonMessageHtml(emoticon, String(getContext()?.name1 || '{{user}}').trim() || '{{user}}');
-                btn.innerHTML = html;
-                btn.title = emoticon.name;
-                btn.setAttribute('aria-label', emoticon.name);
-                btn.onclick = () => {
-                    close();
-                    onSend?.(emoticon);
-                };
-                list.appendChild(btn);
-            });
-        if (!list.childElementCount) {
-            const empty = document.createElement('div');
-            empty.className = 'slm-empty';
-            empty.textContent = '조건에 맞는 이모티콘이 없습니다.';
-            list.appendChild(empty);
-        }
-    };
+    const userName = String(getContext()?.name1 || '{{user}}').trim() || '{{user}}';
+    const wrapper = buildEmoticonPickerContent({
+        readOnly: true,
+        senderName: userName,
+        showAiPolicy: false,
+        showFooter: false,
+        helperText: '기존 이모티콘 탭과 같은 방식으로 카테고리를 전환한 뒤, 보낼 이모티콘을 선택하세요.',
+        emptyText: '조건에 맞는 이모티콘이 없습니다.',
+        onSelect: (emoticon) => {
+            close();
+            onSend?.(emoticon);
+        },
+    });
 
     const footer = document.createElement('div');
     footer.className = 'slm-panel-footer';
@@ -1010,8 +979,6 @@ function openRoomEmoticonPicker(roomId, onBack, onSend) {
         onBack,
     });
     closeBtn.onclick = () => close();
-    search.oninput = renderList;
-    renderList();
 }
 
 function openRoomCreatePopup(onBack, roomId = null) {

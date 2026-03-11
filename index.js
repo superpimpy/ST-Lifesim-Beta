@@ -4152,27 +4152,36 @@ async function init() {
     const eventTypes = ctx.eventTypes || ctx.event_types;
     const evSrc = ctx.eventSource;
 
+    let refreshContextAndInjectionQueued = false;
     const refreshContextAndInjection = async () => {
+        refreshContextAndInjectionQueued = false;
         if (!isEnabled()) return;
         await injectContext().catch(e => console.error('[ST-LifeSim] 컨텍스트 주입 오류:', e));
         try { updateMessageImageInjection(); } catch (e) { console.error('[ST-LifeSim] 이미지 프롬프트 재주입 오류:', e); }
     };
+    const scheduleRefreshContextAndInjection = () => {
+        if (refreshContextAndInjectionQueued) return;
+        refreshContextAndInjectionQueued = true;
+        setTimeout(() => {
+            void refreshContextAndInjection();
+        }, 0);
+    };
 
     if (evSrc && eventTypes?.CHARACTER_MESSAGE_RENDERED) {
-        evSrc.on(eventTypes.CHARACTER_MESSAGE_RENDERED, refreshContextAndInjection);
+        evSrc.on(eventTypes.CHARACTER_MESSAGE_RENDERED, scheduleRefreshContextAndInjection);
     }
 
     // 채팅/캐릭터 전환 시 컨텍스트를 즉시 갱신
     if (evSrc && eventTypes?.CHAT_CHANGED) {
-        evSrc.on(eventTypes.CHAT_CHANGED, refreshContextAndInjection);
+        evSrc.on(eventTypes.CHAT_CHANGED, scheduleRefreshContextAndInjection);
     }
     if (evSrc && eventTypes?.CHARACTER_CHANGED) {
-        evSrc.on(eventTypes.CHARACTER_CHANGED, refreshContextAndInjection);
+        evSrc.on(eventTypes.CHARACTER_CHANGED, scheduleRefreshContextAndInjection);
     }
     if (evSrc && eventTypes?.CHARACTER_SELECTED) {
-        evSrc.on(eventTypes.CHARACTER_SELECTED, refreshContextAndInjection);
+        evSrc.on(eventTypes.CHARACTER_SELECTED, scheduleRefreshContextAndInjection);
     }
-    void refreshContextAndInjection();
+    scheduleRefreshContextAndInjection();
 
     // 유저 메시지 전송 시 설정된 확률로 SNS 포스팅 트리거
     if (evSrc && eventTypes?.MESSAGE_SENT) {
