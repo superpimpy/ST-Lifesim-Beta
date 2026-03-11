@@ -363,6 +363,22 @@ export function buildImageApiPrompt(danbooruTags, appearanceTags, options) {
     return `${wrappedScene}, ${wrappedAppearance.join(', ')}`;
 }
 
+function buildMatchedAppearanceGroups(matched = []) {
+    if (!Array.isArray(matched) || matched.length === 0) return [];
+    const seen = new Set();
+    return matched
+        .map((entry) => {
+            const name = String(entry?.name || '').trim();
+            const tags = String(entry?.appearanceTags || '').trim();
+            if (!name || !tags) return '';
+            const normalized = name.toLowerCase();
+            if (seen.has(normalized)) return '';
+            seen.add(normalized);
+            return safeAppearanceGroup(`${name}: ${tags}`);
+        })
+        .filter(Boolean);
+}
+
 
 /**
  * Resolve image prompt context and matched character appearance data.
@@ -480,16 +496,13 @@ export function buildDirectImagePrompt(rawPrompt, options = {}) {
         .map(s => s.trim().replace(/^[`"'“”‘’]+|[`"'“”‘’]+$/g, '').replace(/[.!?]+$/g, ''))
         .filter(Boolean)
         .join(', ');
-    const appearanceGroups = mergeAppearanceGroupsWithMatched(promptAppearanceBlocks.length > 0
-        ? promptAppearanceBlocks.map(b => b.slice(1, -1).trim()).filter(Boolean)
-        : matched
-            .map(c => {
-                const name = String(c?.name || '').trim();
-                const tags = String(c?.appearanceTags || '').trim();
-                if (!name || !tags) return '';
-                return `${name}: ${tags}`;
-            })
-            .filter(Boolean), matched);
+    const matchedAppearanceGroups = buildMatchedAppearanceGroups(matched);
+    const appearanceGroups = matchedAppearanceGroups.length > 0
+        ? matchedAppearanceGroups
+        : mergeAppearanceGroupsWithMatched(
+            promptAppearanceBlocks.map(b => b.slice(1, -1).trim()).filter(Boolean),
+            matched,
+        );
     const filteredSceneTags = stripAppearanceTagsFromScene(sceneOnly, appearanceGroups);
     const finalPrompt = buildImageApiPrompt(filteredSceneTags, appearanceGroups, { tagWeight });
     if (!finalPrompt && appearanceGroups.length === 0) return emptyResult;
@@ -550,14 +563,7 @@ export async function generateImageTags(rawPrompt, options = {}) {
 
     // ── Step 2b: If scene tag generation failed, collect appearance tags as fallback ──
     if (!sceneTags) {
-        const fallbackAppearance = mergeAppearanceGroupsWithMatched(matched
-            .map(c => {
-                const name = String(c?.name || '').trim();
-                const tags = String(c?.appearanceTags || '').trim();
-                if (!name || !tags) return '';
-                return `${name}: ${tags}`;
-            })
-            .filter(Boolean), matched);
+        const fallbackAppearance = buildMatchedAppearanceGroups(matched);
         if (fallbackAppearance.length > 0) {
             const fallbackPrompt = buildImageApiPrompt('', fallbackAppearance, { tagWeight });
             return { sceneTags: '', appearanceGroups: fallbackAppearance, finalPrompt: fallbackPrompt };
@@ -579,21 +585,10 @@ export async function generateImageTags(rawPrompt, options = {}) {
 
     // ── Step 3: Collect appearance tag groups ──
     // Prefer AI-selected appearance blocks; fall back to all matched characters
-    let appearanceGroups;
-    if (aiAppearanceBlocks.length > 0) {
-        // AI selected characters — use its output directly (strip outer brackets for buildImageApiPrompt)
+    const matchedAppearanceGroups = buildMatchedAppearanceGroups(matched);
+    let appearanceGroups = matchedAppearanceGroups;
+    if (appearanceGroups.length === 0 && aiAppearanceBlocks.length > 0) {
         appearanceGroups = mergeAppearanceGroupsWithMatched(aiAppearanceBlocks.map(b => b.slice(1, -1).trim()).filter(Boolean), matched);
-    } else {
-        // AI didn't include appearance blocks — fall back to matched characters
-        // Format: "name: tags" (buildImageApiPrompt will wrap these in [])
-        appearanceGroups = mergeAppearanceGroupsWithMatched(matched
-            .map(c => {
-                const name = String(c?.name || '').trim();
-                const tags = String(c?.appearanceTags || '').trim();
-                if (!name || !tags) return '';
-                return `${name}: ${tags}`;
-            })
-            .filter(Boolean), matched);
     }
 
     // ── Step 4: Build final prompt ──

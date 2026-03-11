@@ -39,6 +39,8 @@
   --slm-danger-bg: #fff0ee;
   --slm-overlay-bg: rgba(0, 0, 0, 0.4);
   --slm-panel-radius: 20px;
+  --slm-phone-frame: #111111;
+  --slm-phone-notch: #0b0b0d;
   --slm-bubble-radius: 18px;
   --slm-btn-radius: 12px;
   --slm-shadow: 0 20px 60px rgba(0,0,0,0.15), 0 4px 16px rgba(0,0,0,0.08);
@@ -181,7 +183,7 @@ body[data-theme="dark"],
 .slm-panel {
   background: var(--slm-bg);
   border-radius: var(--slm-panel-radius);
-  box-shadow: 0 24px 64px rgba(0,0,0,0.22), 0 8px 24px rgba(0,0,0,0.12);
+  box-shadow: 0 28px 72px rgba(0,0,0,0.28), 0 8px 24px rgba(0,0,0,0.16);
   width: 100%;
   max-width: 420px;
   max-height: 88vh;
@@ -191,8 +193,35 @@ body[data-theme="dark"],
   font-family: var(--slm-font);
   color: var(--slm-text);
   position: relative;
-  border: 0.5px solid var(--slm-separator);
+  border: 10px solid var(--slm-phone-frame);
   animation: slm-panel-in 0.28s cubic-bezier(0.34,1.26,0.64,1);
+}
+
+.slm-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 110px;
+  height: 20px;
+  background: var(--slm-phone-notch);
+  border-radius: 0 0 16px 16px;
+  z-index: 3;
+}
+
+.slm-panel::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  width: 108px;
+  height: 4px;
+  background: rgba(255,255,255,0.28);
+  border-radius: 999px;
+  z-index: 3;
+  pointer-events: none;
 }
 
 @keyframes slm-panel-in {
@@ -244,7 +273,7 @@ body[data-theme="dark"],
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px 13px;
+  padding: 28px 16px 13px;
   border-bottom: 0.5px solid var(--slm-separator);
   font-size: 17px;
   font-weight: 600;
@@ -278,7 +307,7 @@ body[data-theme="dark"],
 .slm-panel-body {
   overflow-y: auto;
   flex: 1;
-  padding: 14px 16px;
+  padding: 14px 16px 20px;
   -webkit-overflow-scrolling: touch;
   /* 스크롤바 숨기기 (모바일 앱 느낌) */
   scrollbar-width: none;
@@ -287,7 +316,7 @@ body[data-theme="dark"],
 .slm-panel-body::-webkit-scrollbar { display: none; }
 
 .slm-panel-footer {
-  padding: 10px 16px;
+  padding: 10px 16px 18px;
   border-top: 0.5px solid var(--slm-separator);
   display: flex;
   gap: 8px;
@@ -1202,13 +1231,21 @@ body[data-theme="dark"],
   box-shadow: none;
 }
 
-.slm-room-message-lines {
+.slm-room-message-bubble.emoticon-only {
+  display: inline-flex;
+  align-self: flex-start;
+  width: auto;
+  max-width: fit-content;
+  padding: 6px;
+}
+
+.slm-room-message-segments {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.slm-room-message-lines > *:not(div):not(br):not(hr):not(details) {
+.slm-room-message-segment {
   display: block;
   padding: 9px 13px;
   border-radius: 18px 18px 18px 4px;
@@ -1225,11 +1262,22 @@ body[data-theme="dark"],
   box-shadow: 0 1px 4px rgba(155,114,208,0.3);
 }
 
-.slm-room-message.user .slm-room-message-lines > *:not(div):not(br):not(hr):not(details) {
+.slm-room-message.user .slm-room-message-bubble.emoticon-only {
+  background: rgba(155,114,208,0.12);
+}
+
+.slm-room-message.user .slm-room-message-segment {
   border-radius: 18px 18px 4px 18px;
   background: var(--slm-bubble-user-bg);
   color: var(--slm-bubble-user-text);
   box-shadow: 0 1px 4px rgba(155,114,208,0.3);
+}
+
+.slm-room-message-translation {
+  font-size: 12px;
+  color: var(--slm-text-secondary);
+  padding: 2px 6px 0;
+  line-height: 1.45;
 }
 
 /* 타임스탬프 */

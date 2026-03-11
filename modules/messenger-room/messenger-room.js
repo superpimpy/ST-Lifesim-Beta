@@ -3,6 +3,7 @@ import { getExtensionSettings, loadData, saveData } from '../../utils/storage.js
 import { createPopup, closePopup } from '../../utils/popup.js';
 import { getAppearanceTagsByName, getContacts } from '../contacts/contacts.js';
 import { buildAiEmoticonContext, replaceAiSelectedEmoticons, getStoredEmoticons, buildEmoticonMessageHtml } from '../emoticon/emoticon.js';
+import { translateTextToKorean } from '../sns/sns.js';
 import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
 import { applyProfileImageStyle } from '../../utils/profile-image.js';
 import { escapeHtml, generateId, showConfirm, showToast } from '../../utils/ui.js';
@@ -19,6 +20,8 @@ const ROOM_ICON_GROUP = '👥';
 const ROOM_ICON_DIRECT = '💬';
 const ROOM_IMAGE_OFF_PROMPT = '<image_generation_rule>\nWhen the selected messenger-room responder would naturally TAKE A PHOTO with their phone and SEND IT in this room, insert a <pic prompt="image description in Korean for the photo situation"> tag at that point.\nOnly use <pic> for a photo the responder could realistically take and deliberately send.\nDo not generate scene narration, mood illustrations, or impossible third-person shots.\n</image_generation_rule>';
 const ROOM_PIC_TAG_REGEX = /<?pic\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi;
+const ROOM_EMOTICON_ONLY_HTML_REGEX = /^<img\b[^>]*aria-label="[^"]*이모티콘[^"]*"[^>]*>$/i;
+const ROOM_EMOTICON_TOKEN_ONLY_REGEX = /^\s*\[\[\s*emoticon\s*:\s*[^\]]+\s*\]\]\s*$/i;
 const ROOM_DEFAULTS = {
     autoReplyEnabled: true,
     responseProbability: 100,
@@ -195,11 +198,32 @@ function buildRoomMessageHtml(text, senderName) {
     const source = String(text || '');
     const escaped = escapeHtml(source);
     if (!escaped) return '';
-    const lines = escaped.split('\n');
-    const html = lines.length > 1
-        ? `<div class="slm-room-message-lines">${lines.map((line) => `<span>${line || '&nbsp;'}</span>`).join('')}</div>`
-        : escaped;
+    const paragraphs = escaped
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph.trim())
+        .filter(Boolean);
+    const renderParagraph = (paragraph) => paragraph
+        .split('\n')
+        .map((line) => line || '&nbsp;')
+        .join('<br>');
+    const html = paragraphs.length > 1
+        ? `<div class="slm-room-message-segments">${paragraphs.map((paragraph) => `<span class="slm-room-message-segment">${renderParagraph(paragraph)}</span>`).join('')}</div>`
+        : renderParagraph(escaped);
     return replaceAiSelectedEmoticons(html, senderName);
+}
+
+function isSegmentedRoomMessageHtml(html) {
+    return /slm-room-message-segments/.test(String(html || ''));
+}
+
+function isEmoticonOnlyRoomMessageHtml(html) {
+    return ROOM_EMOTICON_ONLY_HTML_REGEX.test(String(html || '').trim());
+}
+
+function getTranslatableRoomMessageText(message) {
+    const text = normalizeRoomGeneratedReplyText(message?.text || '');
+    if (!text || ROOM_EMOTICON_TOKEN_ONLY_REGEX.test(text)) return '';
+    return text;
 }
 
 function getMemberCandidates() {
@@ -713,6 +737,13 @@ async function runRoomAutoReplies(roomId, onUpdate = null) {
                         timestamp: Date.now(),
                         type: 'message',
                     });
+                    const replyPreview = String(reply.text || '').replace(/\s+/g, ' ').trim();
+                    if (replyPreview) {
+                        const roomTitle = getRoomTitle(freshRoom, candidateMap);
+                        const senderLabel = getMemberDisplayLabel(responderKey, candidateMap);
+                        const compactPreview = replyPreview.length > 42 ? `${replyPreview.slice(0, 42)}…` : replyPreview;
+                        showToast(`${roomTitle} · ${senderLabel}: ${compactPreview}`, 'info', 2200);
+                    }
                     latestState.onUpdate?.(freshRoom);
                     const nextResponders = [...usedResponders, responderKey];
                     if (nextResponders.length < maxResponses) {
@@ -758,13 +789,15 @@ function renderRoomMessageBubbleContent(message, bubble) {
     if (!bubble) return;
     if (message?.html) {
         bubble.innerHTML = message.html;
-        bubble.classList.toggle('multiline', /slm-room-message-lines/.test(String(message.html || '')));
+        bubble.classList.toggle('multiline', isSegmentedRoomMessageHtml(message.html));
+        bubble.classList.toggle('emoticon-only', isEmoticonOnlyRoomMessageHtml(message.html));
         return;
     }
     const senderName = String(message?.authorName || getContext()?.name1 || '{{user}}').trim() || '{{user}}';
     const html = buildRoomMessageHtml(String(message?.text || ''), senderName);
     bubble.innerHTML = html;
-    bubble.classList.toggle('multiline', /slm-room-message-lines/.test(html));
+    bubble.classList.toggle('multiline', isSegmentedRoomMessageHtml(html));
+    bubble.classList.toggle('emoticon-only', isEmoticonOnlyRoomMessageHtml(html));
 }
 
 function openRoomMessageEditPopup(roomId, messageId, onBack, onSaved) {
@@ -1125,6 +1158,29 @@ function openMessengerRoomDetail(roomId, onBack) {
     sendBtn.textContent = '전송';
     footer.append(emoticonBtn, input, quickSendBtn, sendBtn);
 
+    const updateComposerState = () => {
+        const hasText = !!normalizeRoomPromptText(input.value);
+        sendBtn.disabled = !hasText;
+        quickSendBtn.disabled = !hasText;
+    };
+
+    const submitRoomMessage = (options = {}) => {
+        const text = normalizeRoomPromptText(input.value);
+        if (!text) {
+            updateComposerState();
+            return;
+        }
+        input.value = '';
+        sendBtn.disabled = true;
+        quickSendBtn.disabled = true;
+        input.disabled = true;
+        appendUserRoomMessage({ text }, options);
+        input.disabled = false;
+        updateComposerState();
+        input.focus();
+        renderMessages();
+    };
+
     function renderMessages() {
         const freshRoom = getMessengerRoomById(roomId);
         messageList.innerHTML = '';
@@ -1161,6 +1217,41 @@ function openMessengerRoomDetail(roomId, onBack) {
             bubbleWrap.append(author, bubble);
             const actions = document.createElement('div');
             actions.className = 'slm-room-message-actions';
+            let translationLine = null;
+            const translatableText = getTranslatableRoomMessageText(message);
+            if (translatableText) {
+                const translateBtn = document.createElement('button');
+                translateBtn.type = 'button';
+                translateBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
+                translateBtn.textContent = '번역';
+                translateBtn.onclick = async () => {
+                    if (translationLine) {
+                        translationLine.remove();
+                        translationLine = null;
+                        translateBtn.textContent = '번역';
+                        return;
+                    }
+                    translateBtn.disabled = true;
+                    try {
+                        const translated = await translateTextToKorean(translatableText);
+                        if (!translated) {
+                            showToast('AI 번역 결과가 비어 있습니다.', 'warn', 1200);
+                            return;
+                        }
+                        translationLine = document.createElement('div');
+                        translationLine.className = 'slm-room-message-translation';
+                        translationLine.textContent = `🇰🇷 ${translated}`.trim();
+                        bubbleWrap.insertBefore(translationLine, actions);
+                        translateBtn.textContent = '원문';
+                    } catch (error) {
+                        console.warn('[ST-LifeSim] 메신저 방 번역 실패:', error);
+                        showToast('번역 실패', 'warn', 1200);
+                    } finally {
+                        translateBtn.disabled = false;
+                    }
+                };
+                actions.appendChild(translateBtn);
+            }
             const messageEditBtn = document.createElement('button');
             messageEditBtn.type = 'button';
             messageEditBtn.className = 'slm-btn slm-btn-ghost slm-btn-sm';
@@ -1206,31 +1297,9 @@ function openMessengerRoomDetail(roomId, onBack) {
         return nextRoom;
     };
 
-    sendBtn.onclick = () => {
-        const text = normalizeRoomPromptText(input.value);
-        if (!text) return;
-        input.value = '';
-        sendBtn.disabled = true;
-        input.disabled = true;
-        appendUserRoomMessage({ text });
-        sendBtn.disabled = false;
-        input.disabled = false;
-        input.focus();
-        renderMessages();
-    };
+    sendBtn.onclick = () => submitRoomMessage();
 
-    quickSendBtn.onclick = () => {
-        const text = normalizeRoomPromptText(input.value);
-        if (!text) return;
-        input.value = '';
-        quickSendBtn.disabled = true;
-        input.disabled = true;
-        appendUserRoomMessage({ text }, { skipAutoReply: true });
-        quickSendBtn.disabled = false;
-        input.disabled = false;
-        input.focus();
-        renderMessages();
-    };
+    quickSendBtn.onclick = () => submitRoomMessage({ skipAutoReply: true });
 
     emoticonBtn.onclick = () => openRoomEmoticonPicker(roomId, () => openMessengerRoomDetail(roomId, onBack), (emoticon) => {
         const userName = String(getContext()?.name1 || '{{user}}').trim() || '{{user}}';
@@ -1241,13 +1310,15 @@ function openMessengerRoomDetail(roomId, onBack) {
     });
 
     input.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' && !event.shiftKey) {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
             event.preventDefault();
             if (!sendBtn.disabled) sendBtn.click();
         }
     });
+    input.addEventListener('input', updateComposerState);
 
     renderMessages();
+    updateComposerState();
     closePopup('messenger-rooms');
     createPopup({
         id: `messenger-room-${roomId}`,

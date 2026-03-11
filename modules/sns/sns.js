@@ -1290,16 +1290,7 @@ function createTranslateButton(text, parent, findExisting, translationClass, com
         }
         btn.disabled = true;
         try {
-            const ctx = getContext();
-            const promptSettings = getSnsPromptSettings();
-            const customPrompt = applyPromptTemplate(
-                promptSettings.koreanTranslationPrompt || 'Translate the following SNS text into natural Korean. Output Korean text only.\n{{text}}',
-                { text: String(text || '') },
-            );
-            let translated = '';
-            if (ctx && (typeof ctx.generateRaw === 'function' || typeof ctx.generateQuietPrompt === 'function')) {
-                translated = await generateSnsText(ctx, customPrompt, 'sns-translation', 'snsTranslation');
-            }
+            const translated = await translateTextToKorean(text);
             if (!translated) {
                 showToast('AI 번역 결과가 비어 있습니다.', 'warn', 1200);
                 return;
@@ -1315,6 +1306,19 @@ function createTranslateButton(text, parent, findExisting, translationClass, com
         }
     };
     return btn;
+}
+
+export async function translateTextToKorean(text) {
+    const sourceText = String(text || '').trim();
+    if (!sourceText) return '';
+    const ctx = getContext();
+    if (!ctx || (typeof ctx.generateRaw !== 'function' && typeof ctx.generateQuietPrompt !== 'function')) return '';
+    const promptSettings = getSnsPromptSettings();
+    const customPrompt = applyPromptTemplate(
+        promptSettings.koreanTranslationPrompt || 'Translate the following SNS text into natural Korean. Output Korean text only.\n{{text}}',
+        { text: sourceText },
+    );
+    return generateSnsText(ctx, customPrompt, 'sns-translation', 'snsTranslation');
 }
 
 /**
