@@ -124,6 +124,8 @@ export async function slashGen(prompt, name = null) {
         const generated = await generateQuietText(prompt, name);
         if (generated) {
             await slashSendAs(name, generated);
+        } else {
+            console.warn('[ST-LifeSim] slashGen 생성 결과가 비어 메시지 전송을 건너뜁니다:', name);
         }
     } else {
         const ctx = getContext();
@@ -131,6 +133,8 @@ export async function slashGen(prompt, name = null) {
         const generated = await generateQuietText(prompt, charName);
         if (generated) {
             await slashSendAs(charName, generated);
+        } else {
+            console.warn('[ST-LifeSim] slashGen 생성 결과가 비어 기본 캐릭터 전송을 건너뜁니다.');
         }
     }
 }

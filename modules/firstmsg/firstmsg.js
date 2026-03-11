@@ -45,6 +45,8 @@ export function startFirstMsgTimer(fmSettings) {
                     });
                     if (generated) {
                         await slashSendAs(charName, generated);
+                    } else {
+                        console.warn('[ST-LifeSim] 선톡 생성 결과가 비어 전송을 건너뜁니다:', charName);
                     }
                 } catch (e) {
                     console.error('[ST-LifeSim] 선톡 오류:', e);

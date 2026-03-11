@@ -576,6 +576,8 @@ async function showIncomingCallDialog(charName) {
         });
         if (openingLine) {
             await slashSendAs(charName, openingLine);
+        } else {
+            console.warn('[ST-LifeSim] 통화 수락 후 오프닝 생성이 비어 전송을 건너뜁니다:', charName);
         }
     };
 
@@ -589,6 +591,8 @@ async function showIncomingCallDialog(charName) {
         });
         if (rejectReaction) {
             await slashSendAs(charName, rejectReaction);
+        } else {
+            console.warn('[ST-LifeSim] 통화 거절 후 반응 생성이 비어 전송을 건너뜁니다:', charName);
         }
     };
 
@@ -602,6 +606,8 @@ async function showIncomingCallDialog(charName) {
         });
         if (missedReaction) {
             await slashSendAs(charName, missedReaction);
+        } else {
+            console.warn('[ST-LifeSim] 부재중 전화 후 반응 생성이 비어 전송을 건너뜁니다:', charName);
         }
     };
 
