@@ -3399,7 +3399,7 @@ const MSG_IMAGE_INJECT_TAG = 'st-lifesim-msg-image';
 //   다양한 공백, 인용부호, HTML 엔티티 변형
 const PIC_TAG_ATTRIBUTE_FRAGMENT = String.raw`\s+[^\s=/>]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>]+))?`;
 const PIC_TAG_REGEX = new RegExp(
-    String.raw`<?(?:pic|img)\b(?:${PIC_TAG_ATTRIBUTE_FRAGMENT})*?\s+prompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:${PIC_TAG_ATTRIBUTE_FRAGMENT})*(?:\s*\/?\s*>)?`,
+    String.raw`<?(?:pic|img)\b(?:${PIC_TAG_ATTRIBUTE_FRAGMENT})*\s+prompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:${PIC_TAG_ATTRIBUTE_FRAGMENT})*(?:\s*\/?\s*>)?`,
     'gi',
 );
 
