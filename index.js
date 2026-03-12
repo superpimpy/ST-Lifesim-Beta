@@ -3555,7 +3555,7 @@ function getRenderedMessageTextElement(msgIdx) {
 function buildCharacterMessageRichHtml(text, senderName = '{{char}}') {
     const mediaPlaceholders = new Map();
     let mediaCounter = 0;
-    const source = String(text || '').replace(/<img\b(?=[^>]*(?:data-slm-pic-id|data-slm-emoticon))[^>]*>/gi, (match) => {
+    const source = String(text || '').replace(/<img\b[^>]*(?:data-slm-pic-id|data-slm-emoticon)[^>]*>/gi, (match) => {
         const placeholder = `__SLM_MEDIA_${mediaCounter++}__`;
         mediaPlaceholders.set(placeholder, match);
         return placeholder;
@@ -3580,6 +3580,16 @@ function replaceRenderedPicTag(renderedHtml, fullTag, replacementHtml) {
         updated = updated.replace(new RegExp(escapeRegex(candidate), 'g'), replacementHtml);
     });
     return updated;
+}
+
+function getExistingOrBuiltRenderedHtml(msgIdx, text, senderName = '{{char}}') {
+    return getRenderedMessageTextElement(msgIdx)?.innerHTML || buildCharacterMessageRichHtml(text, senderName);
+}
+
+function usePatchedRenderedHtml(patchedRenderedHtml, previousRenderedHtml, text, senderName = '{{char}}') {
+    return patchedRenderedHtml !== previousRenderedHtml
+        ? patchedRenderedHtml
+        : buildCharacterMessageRichHtml(text, senderName);
 }
 
 function getNativeUpdateMessageBlock() {
@@ -3690,7 +3700,7 @@ async function applyCharacterImageDisplayMode() {
 
             // 순차적 처리: 각 이미지를 생성할 때마다 즉시 메시지와 UI를 업데이트한다
             let currentMes = mes;
-            let renderedHtml = getRenderedMessageTextElement(msgIdx)?.innerHTML || buildCharacterMessageRichHtml(mes, charName);
+            let renderedHtml = getExistingOrBuiltRenderedHtml(msgIdx, mes, charName);
             let offset = 0; // 이전 치환으로 인한 누적 인덱스 오프셋
             let generatedCount = 0;
 
@@ -3735,13 +3745,11 @@ async function applyCharacterImageDisplayMode() {
                 // 즉시 치환 적용 및 오프셋 갱신
                 currentMes = currentMes.slice(0, adjustedIndex) + replacement + currentMes.slice(adjustedIndex + fullTag.length);
                 offset += replacement.length - fullTag.length;
-                const renderedReplacement = replacement.includes('<img')
+                const renderedReplacement = /^\s*<img\b/i.test(replacement)
                     ? replacement
                     : escapeHtml(replacement).replace(/\n/g, '<br>');
                 const patchedRenderedHtml = replaceRenderedPicTag(renderedHtml, fullTag, renderedReplacement);
-                renderedHtml = patchedRenderedHtml !== renderedHtml
-                    ? patchedRenderedHtml
-                    : buildCharacterMessageRichHtml(currentMes, charName);
+                renderedHtml = usePatchedRenderedHtml(patchedRenderedHtml, renderedHtml, currentMes, charName);
 
                 // 매 생성마다 메시지 데이터 + UI를 즉시 업데이트하여 순차적으로 결과가 표시되도록 한다
                 lastMsg.mes = currentMes;
@@ -3776,7 +3784,7 @@ async function applyCharacterImageDisplayMode() {
 
             // 역순으로 치환하여 인덱스 오프셋 문제를 방지한다
             let updatedMes = mes;
-            let renderedHtml = getRenderedMessageTextElement(msgIdx)?.innerHTML || buildCharacterMessageRichHtml(mes, charName);
+            let renderedHtml = getExistingOrBuiltRenderedHtml(msgIdx, mes, charName);
             for (let i = replacements.length - 1; i >= 0; i--) {
                 const { index, length, replacement } = replacements[i];
                 const fullTag = mes.slice(index, index + length);
@@ -3786,9 +3794,7 @@ async function applyCharacterImageDisplayMode() {
                     fullTag,
                     escapeHtml(replacement).replace(/\n/g, '<br>'),
                 );
-                renderedHtml = patchedRenderedHtml !== renderedHtml
-                    ? patchedRenderedHtml
-                    : buildCharacterMessageRichHtml(updatedMes, charName);
+                renderedHtml = usePatchedRenderedHtml(patchedRenderedHtml, renderedHtml, updatedMes, charName);
             }
 
             if (updatedMes !== mes) {
@@ -3830,8 +3836,8 @@ async function applyCharacterEmoticonDisplayMode() {
     const msgIdx = Number(ctx.chat.length - 1);
     const renderedMessageEl = getRenderedMessageTextElement(msgIdx);
     const renderedHtml = renderedMessageEl?.innerHTML
-        ? replaceAiSelectedEmoticons(renderedMessageEl.innerHTML || '', senderName)
-        : buildCharacterMessageRichHtml(updatedMes, senderName);
+        ? replaceAiSelectedEmoticons(renderedMessageEl.innerHTML, senderName)
+        : getExistingOrBuiltRenderedHtml(msgIdx, updatedMes, senderName);
     lastMsg.mes = updatedMes;
     await refreshRenderedMessage(msgIdx, lastMsg, renderedHtml, '이모티콘');
     if (typeof ctx.saveChat === 'function') {
