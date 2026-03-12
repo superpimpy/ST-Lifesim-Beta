@@ -1264,6 +1264,7 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
         text: finalText,
         html,
         extra,
+        rawText: normalizedSource,
     };
 }
 
@@ -1434,6 +1435,7 @@ async function executePlannedGroupChatTurn(plan) {
             text: reply.text || '',
             html: reply.html || '',
             extra: reply.extra,
+            rawText: reply.rawText || reply.text || '',
         });
     }
 }
@@ -3631,18 +3633,35 @@ function buildInlineMessageMediaHtml(extra, senderName) {
 
 function buildInlineDisplayHtml(text, senderName, extra = {}) {
     const normalizedExtra = normalizeInlineMessageExtra(extra);
-    const emoticonExtract = extractAiSelectedEmoticonMedia(String(text || ''), senderName);
-    const strippedText = stripPicTagsForDisplay(emoticonExtract.text);
-    const textHtml = strippedText ? escapeHtml(strippedText).replace(/\n/g, '<br>') : '';
-    const mediaExtra = normalizeInlineMessageExtra({
-        ...normalizedExtra,
-        emoticon_images: normalizedExtra.emoticon_images.length > 0 ? normalizedExtra.emoticon_images : emoticonExtract.emoticons,
-    });
-    const mediaHtml = buildInlineMessageMediaHtml(mediaExtra, senderName);
-    if (!mediaHtml) {
-        return replaceAiSelectedEmoticons(escapeHtml(String(text || '')).replace(/\n/g, '<br>'), senderName);
+    const sourceText = normalizeQuotesForPicTag(String(text || ''));
+    const htmlParts = [];
+    let lastIndex = 0;
+    let usedImageCount = 0;
+
+    PIC_TAG_REGEX.lastIndex = 0;
+    for (const match of sourceText.matchAll(PIC_TAG_REGEX)) {
+        const matchIndex = Number(match.index);
+        htmlParts.push(escapeHtml(sourceText.slice(lastIndex, matchIndex)));
+        if (usedImageCount < normalizedExtra.image_swipes.length) {
+            const imageUrl = normalizedExtra.image_swipes[usedImageCount];
+            const safeUrl = escapeHtml(imageUrl);
+            const safePrompt = escapeHtml(normalizedExtra.title || `generated-image-${usedImageCount + 1}`);
+            htmlParts.push(`<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image">`);
+            usedImageCount += 1;
+        }
+        lastIndex = matchIndex + match[0].length;
     }
-    return `<div class="slm-message-rich-content">${textHtml}${mediaHtml}</div>`;
+    htmlParts.push(escapeHtml(sourceText.slice(lastIndex)));
+
+    let html = replaceAiSelectedEmoticons(htmlParts.join('').replace(/\n/g, '<br>'), senderName);
+    const trailingMediaHtml = buildInlineMessageMediaHtml({
+        ...normalizedExtra,
+        image_swipes: normalizedExtra.image_swipes.slice(usedImageCount),
+    }, senderName);
+    if (trailingMediaHtml) {
+        html = `${html}${html ? '<br>' : ''}${trailingMediaHtml}`;
+    }
+    return html;
 }
 
 async function updateRenderedMessageHtml(msgIdx, html, logLabel = '메시지') {

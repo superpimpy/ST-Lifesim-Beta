@@ -449,6 +449,39 @@ function buildRoomInlineMediaHtml(extra, senderName) {
     return `<div class="slm-room-message-inline-media">${mediaHtml}</div>`;
 }
 
+function buildRoomInlineMessageHtml(message, senderName) {
+    const normalizedExtra = normalizeRoomMessageExtra(message?.extra);
+    const sourceText = normalizeQuotesForRoomPicTag(String(message?.rawText || message?.text || ''));
+    const htmlParts = [];
+    let lastIndex = 0;
+    let usedImageCount = 0;
+
+    ROOM_PIC_TAG_REGEX.lastIndex = 0;
+    for (const match of sourceText.matchAll(ROOM_PIC_TAG_REGEX)) {
+        const matchIndex = Number(match.index);
+        htmlParts.push(escapeHtml(sourceText.slice(lastIndex, matchIndex)));
+        if (usedImageCount < normalizedExtra.image_swipes.length) {
+            const imageUrl = normalizedExtra.image_swipes[usedImageCount];
+            const safeUrl = escapeHtml(imageUrl);
+            const safePrompt = escapeHtml(normalizedExtra.title || `generated-image-${usedImageCount + 1}`);
+            htmlParts.push(`<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image">`);
+            usedImageCount += 1;
+        }
+        lastIndex = matchIndex + match[0].length;
+    }
+    htmlParts.push(escapeHtml(sourceText.slice(lastIndex)));
+
+    let html = replaceAiSelectedEmoticons(htmlParts.join('').replace(/\n/g, '<br>'), senderName);
+    const trailingMediaHtml = buildRoomInlineMediaHtml({
+        ...normalizedExtra,
+        image_swipes: normalizedExtra.image_swipes.slice(usedImageCount),
+    }, senderName);
+    if (trailingMediaHtml) {
+        html = `${html}${html ? '<br>' : ''}${trailingMediaHtml}`;
+    }
+    return html;
+}
+
 function isSegmentedRoomMessageHtml(html) {
     return /slm-room-message-segments/.test(String(html || ''));
 }
@@ -1309,11 +1342,10 @@ function renderRoomMessageBubbleContent(message, bubble) {
     const senderName = String(message?.authorName || getContext()?.name1 || '{{user}}').trim() || '{{user}}';
     const extra = normalizeRoomMessageExtra(message?.extra);
     if (hasRoomInlineMedia({ extra })) {
-        const textHtml = buildRoomMessageHtml(String(message?.text || ''), senderName);
-        const mediaHtml = buildRoomInlineMediaHtml(extra, senderName);
-        bubble.innerHTML = `<div class="slm-room-message-rich-content">${textHtml}${mediaHtml}</div>`;
-        bubble.classList.toggle('multiline', isSegmentedRoomMessageHtml(textHtml));
-        bubble.classList.toggle('emoticon-only', !textHtml && extra.emoticon_images.length > 0 && extra.image_swipes.length === 0);
+        const inlineHtml = buildRoomInlineMessageHtml(message, senderName);
+        bubble.innerHTML = inlineHtml;
+        bubble.classList.toggle('multiline', /<br\s*\/?>/i.test(inlineHtml) || isSegmentedRoomMessageHtml(inlineHtml));
+        bubble.classList.toggle('emoticon-only', isEmoticonOnlyRoomMessageHtml(inlineHtml));
         return;
     }
     if (message?.html) {
@@ -2154,10 +2186,10 @@ function buildRoomListContent(onBack, initialRoomId = null) {
  * 외부(index.js 등)에서 특정 방에 메시지를 추가한다.
  * 채팅창(/sendas)을 거치지 않고 방 데이터에만 저장하여 채팅창 노출을 방지한다.
  * @param {string} roomId
- * @param {{ authorName: string, text: string, html?: string, extra?: object }} payload
+ * @param {{ authorName: string, text: string, html?: string, extra?: object, rawText?: string }} payload
  * @returns {Object|null} 갱신된 방 객체
  */
-export function appendExternalRoomMessage(roomId, { authorName, text, html = '', extra = null }) {
+export function appendExternalRoomMessage(roomId, { authorName, text, html = '', extra = null, rawText = '' }) {
     const room = getMessengerRoomById(roomId);
     if (!room) return null;
     const candidateMap = getCandidateMap();
@@ -2174,6 +2206,7 @@ export function appendExternalRoomMessage(roomId, { authorName, text, html = '',
         text: String(text || '').trim(),
         html: String(html || '').trim(),
         extra,
+        rawText: String(rawText || text || '').trim(),
         timestamp: Date.now(),
         type: 'message',
     });
