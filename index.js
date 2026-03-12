@@ -1233,7 +1233,7 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
     });
     const html = hasInlineMessageMedia(extra)
         ? ''
-        : wrapRichMessageHtml(buildInlineDisplayHtml(finalText, senderName, extra));
+        : wrapRichMessageHtml(buildInlineDisplayHtml(finalText, senderName));
     return {
         text: finalText,
         html,
@@ -3532,8 +3532,19 @@ function wrapRichMessageHtml(html) {
     return String(html || '');
 }
 
+function isAllowedGeneratedImageUrl(url) {
+    const normalized = String(url || '').trim();
+    if (!normalized) return false;
+    const lower = normalized.toLowerCase();
+    return /^https?:\/\//.test(lower)
+        || /^blob:/.test(lower)
+        || /^data:image\//.test(lower);
+}
+
 function buildMessengerGeneratedImageTag(imageUrl, prompt = '') {
-    const safeUrl = escapeHtml(String(imageUrl || '').trim());
+    const normalizedUrl = String(imageUrl || '').trim();
+    if (!isAllowedGeneratedImageUrl(normalizedUrl)) return '';
+    const safeUrl = escapeHtml(normalizedUrl);
     if (!safeUrl) return '';
     const safePrompt = escapeHtml(String(prompt || '').trim() || 'generated-image');
     return `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image">`;
@@ -3630,7 +3641,7 @@ function buildInlineMessageMediaHtml(extra, senderName) {
     return `<div class="slm-message-inline-media">${mediaHtml}</div>`;
 }
 
-function buildInlineDisplayHtml(text, senderName, extra = {}) {
+function buildInlineDisplayHtml(text, senderName) {
     const sourceText = normalizeQuotesForPicTag(String(text || ''));
     const tagReplacementMap = buildMessengerImageTagReplacementMap(sourceText);
     const escapedText = escapeHtml(sourceText).replace(/\n/g, '<br>');
@@ -3700,17 +3711,16 @@ async function applyCharacterImageDisplayMode() {
         if (allowAutoImageGeneration) {
             // ── ON 모드: 이미지 생성 API로 실제 이미지 생성 (순차적 UI 업데이트) ──
             // 응답 내 <pic prompt="...">의 직접 이미지 프롬프트를 추적해 Image API로 생성
-            const unprocessedPicMatches = picMatches.filter((match) => {
+            const validPicMatches = picMatches.filter((match) => {
                 const rawPrompt = (match[1] || match[2] || '').trim();
-                if (!rawPrompt) return false;
-                return true;
+                return Boolean(rawPrompt);
             });
-            if (unprocessedPicMatches.length === 0) {
+            if (validPicMatches.length === 0) {
                 return;
             }
             // 최대 이미지 수 제한
-            const limitedPicMatches = unprocessedPicMatches.slice(0, MAX_MESSENGER_IMAGES_PER_RESPONSE);
-            if (unprocessedPicMatches.length > MAX_MESSENGER_IMAGES_PER_RESPONSE) {
+            const limitedPicMatches = validPicMatches.slice(0, MAX_MESSENGER_IMAGES_PER_RESPONSE);
+            if (validPicMatches.length > MAX_MESSENGER_IMAGES_PER_RESPONSE) {
                 showToast(`📷 이미지 최대 ${MAX_MESSENGER_IMAGES_PER_RESPONSE}장까지 생성 가능합니다.`, 'warn', 2000);
             }
             showToast(`📷 ${limitedPicMatches.length}개 이미지 생성 중...`, 'info', 2000);
@@ -3740,6 +3750,10 @@ async function applyCharacterImageDisplayMode() {
                     });
                     if (result.imageUrl) {
                         replacement = buildMessengerGeneratedImageTag(result.imageUrl, rawPrompt);
+                        if (!replacement) {
+                            console.warn('[ST-LifeSim] 메신저 이미지 URL 형식 거부됨:', String(result.imageUrl).slice(0, 120));
+                            replacement = result.fallbackText;
+                        }
                     } else {
                         replacement = result.fallbackText;
                     }
@@ -3760,7 +3774,7 @@ async function applyCharacterImageDisplayMode() {
                     inline_image: false,
                     processed_pic_tags: [],
                 });
-                await updateRenderedMessageHtml(msgIdx, buildInlineDisplayHtml(currentMes, charName, lastMsg.extra), '이미지');
+                await updateRenderedMessageHtml(msgIdx, buildInlineDisplayHtml(currentMes, charName), '이미지');
             }
 
             // 모든 이미지 처리 완료 후 채팅 저장
@@ -3808,7 +3822,7 @@ async function applyCharacterImageDisplayMode() {
                     inline_image: false,
                     processed_pic_tags: [],
                 });
-                await updateRenderedMessageHtml(msgIdx, buildInlineDisplayHtml(updatedMes, charName, lastMsg.extra), '이미지 텍스트');
+                await updateRenderedMessageHtml(msgIdx, buildInlineDisplayHtml(updatedMes, charName), '이미지 텍스트');
                 if (typeof ctx.saveChat === 'function') {
                     await ctx.saveChat();
                 }
@@ -3846,7 +3860,7 @@ async function applyCharacterEmoticonDisplayMode() {
     });
     // DOM mesid는 숫자 인덱스를 사용하므로 lastMsg 참조와 별개로 마지막 메시지 인덱스를 구한다.
     const msgIdx = Number(ctx.chat.length - 1);
-    await updateRenderedMessageHtml(msgIdx, buildInlineDisplayHtml(mes, senderName, lastMsg.extra), '이모티콘');
+    await updateRenderedMessageHtml(msgIdx, buildInlineDisplayHtml(mes, senderName), '이모티콘');
     if (typeof ctx.saveChat === 'function') {
         await ctx.saveChat();
     }

@@ -434,8 +434,19 @@ function buildRoomMessageHtml(text, senderName, tagReplacementMap = null) {
     return replaceAiSelectedEmoticons(html, senderName, tagReplacementMap);
 }
 
+function isAllowedRoomGeneratedImageUrl(url) {
+    const normalized = String(url || '').trim();
+    if (!normalized) return false;
+    const lower = normalized.toLowerCase();
+    return /^https?:\/\//.test(lower)
+        || /^blob:/.test(lower)
+        || /^data:image\//.test(lower);
+}
+
 function buildRoomGeneratedImageTag(imageUrl, prompt = '') {
-    const safeUrl = escapeHtml(String(imageUrl || '').trim());
+    const normalizedUrl = String(imageUrl || '').trim();
+    if (!isAllowedRoomGeneratedImageUrl(normalizedUrl)) return '';
+    const safeUrl = escapeHtml(normalizedUrl);
     if (!safeUrl) return '';
     const safePrompt = escapeHtml(String(prompt || '').trim() || 'generated-image');
     return `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image">`;
@@ -1086,6 +1097,14 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
                     const imageUrl = await generateRoomMessageImageViaApi(rawPrompt);
                     if (imageUrl) {
                         replacement = buildRoomGeneratedImageTag(imageUrl, rawPrompt);
+                        if (!replacement) {
+                            console.warn('[ST-LifeSim] 메신저 방 이미지 URL 형식 거부됨:', String(imageUrl).slice(0, 120));
+                        }
+                    } else {
+                        console.warn('[ST-LifeSim] 메신저 방 이미지 생성 실패:', {
+                            senderName,
+                            rawPrompt: String(rawPrompt).slice(0, 120),
+                        });
                     }
                 }
                 if (!replacement) {
