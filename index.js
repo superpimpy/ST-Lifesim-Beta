@@ -32,6 +32,7 @@ import { openMessengerRoomsPopup, appendExternalRoomMessage, buildRoomTranscript
 import { buildDirectImagePrompt } from './utils/image-tag-generator.js';
 import { generateBackendText } from './utils/backend-generation.js';
 import { runSdImageGeneration } from './utils/slash.js';
+import { scheduleChatCssRecovery } from './utils/chat-css-recovery.js';
 
 // 설정 키
 const SETTINGS_KEY = 'st-lifesim';
@@ -3552,6 +3553,7 @@ async function updateRenderedMessageHtml(msgIdx, html, logLabel = '메시지') {
                 .find(Boolean);
             if (mesTextEl) {
                 mesTextEl.innerHTML = wrapRichMessageHtml(html);
+                scheduleChatCssRecovery(msgIdx);
                 return true;
             }
         } catch (uiErr) {
