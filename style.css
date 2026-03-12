@@ -1555,6 +1555,18 @@ body[data-theme="dark"],
   width: min(100%, 240px);
 }
 
+.slm-generated-image-wrapper {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 10px auto;
+}
+
+.slm-generated-image-wrapper img[data-slm-pic-id] {
+  margin: 0;
+}
+
 .slm-room-member-row {
   display: flex;
   align-items: center;

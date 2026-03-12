@@ -3544,6 +3544,11 @@ const MESSAGE_RENDER_WAIT_ATTEMPTS = 6;
 const MESSAGE_RENDER_RETRY_DELAY_FAST = 50;
 const MESSAGE_RENDER_RETRY_DELAY_SLOW = 120;
 const GENERATED_INLINE_MEDIA_TAG_REGEX_SOURCE = '<img\\b[^>]*(?:data-slm-pic-id|data-slm-emoticon)[^>]*>';
+// Delay to allow the DOM to settle after MESSAGE_RENDERED / MESSAGE_UPDATED before post-processing (ms).
+const GENERATED_IMAGE_POST_PROCESSING_DELAY_MS = 120;
+// Re-apply post-processing only to the most recent N messages on chat/character entry to limit overhead.
+const RECENT_GENERATED_IMAGE_POST_PROCESSING_WINDOW = 12;
+const GENERATED_MESSAGE_IMAGE_WRAPPER_CLASS = 'slm-generated-image-wrapper';
 
 function createGeneratedInlineMediaTagRegex() {
     return new RegExp(GENERATED_INLINE_MEDIA_TAG_REGEX_SOURCE, 'gi');
@@ -3566,6 +3571,18 @@ function getRenderedMessageTextElement(msgIdx) {
         `.mes[mesid="${msgIdx}"] .mes_text`,
         `div.mes[mesid="${msgIdx}"] .mes_text`,
         `#chat .mes[mesid="${msgIdx}"] .mes_text`,
+    ];
+    return selectors
+        .map(selector => document.querySelector(selector))
+        .find(Boolean) || null;
+}
+
+function getRenderedMessageElement(msgIdx) {
+    if (!Number.isFinite(msgIdx) || msgIdx < 0) return null;
+    const selectors = [
+        `.mes[mesid="${msgIdx}"]`,
+        `div.mes[mesid="${msgIdx}"]`,
+        `#chat .mes[mesid="${msgIdx}"]`,
     ];
     return selectors
         .map(selector => document.querySelector(selector))
@@ -3744,6 +3761,54 @@ async function syncEscapedGeneratedMedia(msgIdx, logLabel = '메시지') {
     }
     console.warn(`[ST-LifeSim] ${logLabel} 미디어 DOM 동기화 대상 요소를 찾지 못했습니다.`, { msgIdx });
     return false;
+}
+
+function attachGeneratedMessageImagePostProcessing(msgIdx) {
+    const numericMsgIdx = Number(msgIdx);
+    if (!Number.isFinite(numericMsgIdx) || numericMsgIdx < 0) return false;
+    const ctx = getContext();
+    const message = ctx?.chat?.[numericMsgIdx];
+    if (!message || message.is_user) return false;
+
+    const messageElement = getRenderedMessageElement(numericMsgIdx);
+    const messageTextElement = messageElement?.querySelector('.mes_text');
+    if (!messageElement || !messageTextElement) return false;
+
+    const generatedImages = messageTextElement.querySelectorAll('img[data-slm-pic-id]');
+    let attachedCount = 0;
+    generatedImages.forEach((image) => {
+        if (image.closest(`.${GENERATED_MESSAGE_IMAGE_WRAPPER_CLASS}`)) return;
+        const src = String(image.getAttribute('src') || '').trim();
+        if (!isSafeGeneratedMediaSrc(src)) return;
+
+        const wrapper = document.createElement('div');
+        wrapper.className = GENERATED_MESSAGE_IMAGE_WRAPPER_CLASS;
+        image.parentNode?.insertBefore(wrapper, image);
+        wrapper.appendChild(image);
+        attachedCount += 1;
+    });
+    return attachedCount > 0;
+}
+
+function scheduleGeneratedMessageImagePostProcessing(msgIdx) {
+    const numericMsgIdx = Number(msgIdx);
+    if (!Number.isFinite(numericMsgIdx) || numericMsgIdx < 0) return;
+    setTimeout(() => {
+        try {
+            attachGeneratedMessageImagePostProcessing(numericMsgIdx);
+        } catch (err) {
+            console.error('[ST-LifeSim] Generated image post-processing error:', err);
+        }
+    }, GENERATED_IMAGE_POST_PROCESSING_DELAY_MS);
+}
+
+function initializeRecentGeneratedMessageImagePostProcessing() {
+    const ctx = getContext();
+    const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
+    const startIndex = Math.max(0, chat.length - RECENT_GENERATED_IMAGE_POST_PROCESSING_WINDOW);
+    for (let i = startIndex; i < chat.length; i++) {
+        scheduleGeneratedMessageImagePostProcessing(i);
+    }
 }
 
 async function waitForRenderedMessageTextElement(msgIdx, logLabel = '메시지') {
@@ -4180,6 +4245,20 @@ async function init() {
     }
     scheduleRefreshContextAndInjection();
 
+    if (evSrc && eventTypes?.MESSAGE_RENDERED) {
+        evSrc.on(eventTypes.MESSAGE_RENDERED, scheduleGeneratedMessageImagePostProcessing);
+    }
+    if (evSrc && eventTypes?.MESSAGE_UPDATED) {
+        evSrc.on(eventTypes.MESSAGE_UPDATED, scheduleGeneratedMessageImagePostProcessing);
+    }
+    if (evSrc && eventTypes?.CHAT_CHANGED) {
+        evSrc.on(eventTypes.CHAT_CHANGED, initializeRecentGeneratedMessageImagePostProcessing);
+    }
+    if (evSrc && eventTypes?.CHARACTER_SELECTED) {
+        evSrc.on(eventTypes.CHARACTER_SELECTED, initializeRecentGeneratedMessageImagePostProcessing);
+    }
+    initializeRecentGeneratedMessageImagePostProcessing();
+
     // 유저 메시지 전송 시 설정된 확률로 SNS 포스팅 트리거
     if (evSrc && eventTypes?.MESSAGE_SENT) {
         let snsTriggerInFlight = false;
@@ -4240,7 +4319,7 @@ async function initIfNeeded() {
     if (initialized || initializing) return;
     initializing = true;
     try { initialized = await init(); } catch (e) { console.error('[ST-LifeSim] 초기화 오류:', e); } finally { initializing = false; }
-}
+});
 
 // SillyTavern APP_READY 이벤트에서 초기화 실행 (호환성 위해 즉시 시도도 함께 수행)
 try {
