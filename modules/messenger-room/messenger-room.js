@@ -1075,8 +1075,9 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
     // INLINE 성공 케이스는 본문에 [사진] 텍스트를 남기지 않고 태그만 제거한다.
     // (실제 이미지는 extra.image_swipes 기반으로 버블 내부에 렌더링)
     const picStrippedText = processedText.replace(/<?pic\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi, ' ');
-    const emoticonMedia = extractAiSelectedEmoticonMedia(picStrippedText || normalizeRoomPromptText(rawText), senderName);
-    const plainText = String(emoticonMedia.text || (picStrippedText || normalizeRoomPromptText(rawText)))
+    const fallbackText = picStrippedText || normalizeRoomPromptText(rawText);
+    const emoticonMedia = extractAiSelectedEmoticonMedia(fallbackText, senderName);
+    const plainText = String(emoticonMedia.text || fallbackText)
         .split('\n')
         .map((line) => line.replace(/\s+/g, ' ').trim())
         .join('\n')
