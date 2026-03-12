@@ -3543,6 +3543,22 @@ function wrapRichMessageHtml(html) {
 const MESSAGE_RENDER_WAIT_ATTEMPTS = 6;
 const MESSAGE_RENDER_RETRY_DELAY_FAST = 50;
 const MESSAGE_RENDER_RETRY_DELAY_SLOW = 120;
+const GENERATED_INLINE_MEDIA_TAG_REGEX_SOURCE = '<img\\b[^>]*(?:data-slm-pic-id|data-slm-emoticon)[^>]*>';
+
+function createGeneratedInlineMediaTagRegex() {
+    return new RegExp(GENERATED_INLINE_MEDIA_TAG_REGEX_SOURCE, 'gi');
+}
+
+const ALLOWED_GENERATED_MEDIA_ATTRS = new Set([
+    'src',
+    'title',
+    'alt',
+    'class',
+    'data-slm-pic-id',
+    'data-slm-emoticon',
+    'aria-label',
+    'style',
+]);
 
 function getRenderedMessageTextElement(msgIdx) {
     if (!Number.isFinite(msgIdx) || msgIdx < 0) return null;
@@ -3559,7 +3575,7 @@ function getRenderedMessageTextElement(msgIdx) {
 function buildCharacterMessageRichHtml(text, senderName = '{{char}}') {
     const mediaPlaceholders = new Map();
     let mediaCounter = 0;
-    const source = String(text || '').replace(/<img\b[^>]*(?:data-slm-pic-id|data-slm-emoticon)[^>]*>/gi, (match) => {
+    const source = String(text || '').replace(createGeneratedInlineMediaTagRegex(), (match) => {
         const placeholder = `__SLM_MEDIA_${mediaCounter++}__`;
         mediaPlaceholders.set(placeholder, match);
         return placeholder;
@@ -3614,6 +3630,122 @@ async function updateRenderedMessageHtml(msgIdx, html, logLabel = '메시지') {
     return false;
 }
 
+function isSafeGeneratedMediaSrc(src) {
+    const value = String(src || '').trim();
+    if (!value) return false;
+    return /^(https?:\/\/|data:image\/|blob:|\/)/i.test(value);
+}
+
+/**
+ * 생성 미디어 img 태그 문자열을 검증된 DOM 조각으로 복원한다.
+ * @param {string} html
+ * @returns {DocumentFragment|null}
+ */
+function createGeneratedMediaFragment(html) {
+    const template = document.createElement('template');
+    template.innerHTML = wrapRichMessageHtml(html);
+    const element = template.content.firstElementChild;
+    if (!element || element.tagName !== 'IMG') return null;
+
+    const attributes = Array.from(element.attributes || []);
+    if (attributes.some(({ name }) => !ALLOWED_GENERATED_MEDIA_ATTRS.has(name))) {
+        return null;
+    }
+
+    const hasKnownGeneratedMediaMarker = element.hasAttribute('data-slm-pic-id') || element.hasAttribute('data-slm-emoticon');
+    if (!hasKnownGeneratedMediaMarker || !isSafeGeneratedMediaSrc(element.getAttribute('src'))) {
+        return null;
+    }
+
+    const safeImage = document.createElement('img');
+    for (const { name, value } of attributes) {
+        safeImage.setAttribute(name, value);
+    }
+
+    const fragment = document.createDocumentFragment();
+    fragment.append(safeImage);
+    return fragment;
+}
+
+/**
+ * 이미 렌더된 메시지 DOM을 순회하며 텍스트로 남아 있는 생성 미디어 태그를 실제 노드로 하이드레이트한다.
+ * @param {Element} element
+ * @returns {boolean}
+ */
+function hydrateEscapedGeneratedMediaInElement(element) {
+    if (!element || !document?.createTreeWalker || !document?.createElement) return false;
+    const detectionRegex = createGeneratedInlineMediaTagRegex();
+    const walker = document.createTreeWalker(
+        element,
+        globalThis.NodeFilter?.SHOW_TEXT ?? 4,
+    );
+    const textNodes = [];
+    let currentNode = walker.nextNode();
+    while (currentNode) {
+        if (detectionRegex.test(currentNode.nodeValue || '')) {
+            textNodes.push(currentNode);
+        }
+        detectionRegex.lastIndex = 0;
+        currentNode = walker.nextNode();
+    }
+
+    let changed = false;
+    for (const textNode of textNodes) {
+        const source = String(textNode.nodeValue || '');
+        const replacementRegex = createGeneratedInlineMediaTagRegex();
+        let lastIndex = 0;
+        let match;
+        let hasLocalChange = false;
+        const fragment = document.createDocumentFragment();
+
+        while ((match = replacementRegex.exec(source)) !== null) {
+            hasLocalChange = true;
+            if (match.index > lastIndex) {
+                fragment.append(source.slice(lastIndex, match.index));
+            }
+            const mediaFragment = createGeneratedMediaFragment(match[0]);
+            if (mediaFragment) {
+                fragment.append(mediaFragment);
+            } else {
+                fragment.append(match[0]);
+            }
+            lastIndex = match.index + match[0].length;
+        }
+
+        if (!hasLocalChange) continue;
+        if (lastIndex < source.length) {
+            fragment.append(source.slice(lastIndex));
+        }
+        textNode.parentNode?.replaceChild(fragment, textNode);
+        changed = true;
+    }
+    return changed;
+}
+
+/**
+ * 기본 렌더러가 이스케이프한 생성 이미지/이모티콘 태그만 기존 메시지 DOM 안에서 복원한다.
+ * @param {number} msgIdx
+ * @param {string} [logLabel='메시지']
+ * @returns {Promise<boolean>}
+ */
+async function syncEscapedGeneratedMedia(msgIdx, logLabel = '메시지') {
+    if (!Number.isFinite(msgIdx) || msgIdx < 0) return false;
+    for (let attempt = 0; attempt < MESSAGE_RENDER_WAIT_ATTEMPTS; attempt++) {
+        try {
+            const mesTextEl = getRenderedMessageTextElement(msgIdx);
+            if (mesTextEl) {
+                return hydrateEscapedGeneratedMediaInElement(mesTextEl);
+            }
+        } catch (uiErr) {
+            console.warn(`[ST-LifeSim] ${logLabel} 미디어 DOM 동기화 실패:`, uiErr);
+            return false;
+        }
+        await waitForDelay(attempt < 2 ? MESSAGE_RENDER_RETRY_DELAY_FAST : MESSAGE_RENDER_RETRY_DELAY_SLOW);
+    }
+    console.warn(`[ST-LifeSim] ${logLabel} 미디어 DOM 동기화 대상 요소를 찾지 못했습니다.`, { msgIdx });
+    return false;
+}
+
 async function waitForRenderedMessageTextElement(msgIdx, logLabel = '메시지') {
     if (!Number.isFinite(msgIdx) || msgIdx < 0) return false;
     for (let attempt = 0; attempt < MESSAGE_RENDER_WAIT_ATTEMPTS; attempt++) {
@@ -3627,7 +3759,7 @@ async function waitForRenderedMessageTextElement(msgIdx, logLabel = '메시지')
 }
 
 async function refreshRenderedMessage(msgIdx, message, html, logLabel = '메시지', options = {}) {
-    const { skipDirectHtmlSync = false } = options;
+    const { skipDirectHtmlSync = false, syncEscapedMediaOnly = false } = options;
     const nativeUpdateFn = getNativeUpdateMessageBlock();
     let nativeUpdated = false;
     if (nativeUpdateFn && message) {
@@ -3638,9 +3770,14 @@ async function refreshRenderedMessage(msgIdx, message, html, logLabel = '메시�
             console.warn(`[ST-LifeSim] ${logLabel} 기본 렌더러 갱신 실패, 직접 DOM 갱신으로 대체합니다:`, err);
         }
     }
-    const domUpdated = skipDirectHtmlSync
-        ? await waitForRenderedMessageTextElement(msgIdx, logLabel)
-        : await updateRenderedMessageHtml(msgIdx, html, logLabel);
+    let domUpdated;
+    if (skipDirectHtmlSync) {
+        domUpdated = await waitForRenderedMessageTextElement(msgIdx, logLabel);
+    } else if (syncEscapedMediaOnly) {
+        domUpdated = await syncEscapedGeneratedMedia(msgIdx, logLabel);
+    } else {
+        domUpdated = await updateRenderedMessageHtml(msgIdx, html, logLabel);
+    }
     return nativeUpdated || domUpdated;
 }
 
@@ -3746,8 +3883,8 @@ async function applyCharacterImageDisplayMode() {
                 // 매 생성마다 메시지 데이터와 렌더링 HTML을 즉시 갱신해
                 // 생성 직후 새 이미지가 화면에 바로 반영되도록 한다.
                 lastMsg.mes = currentMes;
-                const renderedHtml = buildCharacterMessageRichHtml(currentMes, charName);
-                await refreshRenderedMessage(msgIdx, lastMsg, renderedHtml, '이미지');
+                // html 인자는 사용하지 않고, 기본 렌더러가 이스케이프한 생성 이미지 태그만 기존 DOM에서 복원한다.
+                await refreshRenderedMessage(msgIdx, lastMsg, null, '이미지', { syncEscapedMediaOnly: true });
                 if (typeof ctx.saveChat === 'function') {
                     await ctx.saveChat();
                 }
@@ -3785,8 +3922,7 @@ async function applyCharacterImageDisplayMode() {
 
             if (updatedMes !== mes) {
                 lastMsg.mes = updatedMes;
-                const renderedHtml = buildCharacterMessageRichHtml(updatedMes, charName);
-                await refreshRenderedMessage(msgIdx, lastMsg, renderedHtml, '이미지 텍스트');
+                await refreshRenderedMessage(msgIdx, lastMsg, null, '이미지 텍스트', { skipDirectHtmlSync: true });
                 if (typeof ctx.saveChat === 'function') {
                     await ctx.saveChat();
                 }
