@@ -3395,8 +3395,10 @@ const MSG_IMAGE_INJECT_TAG = 'st-lifesim-msg-image';
 //   <pic prompt="...">  /  <pic prompt="..." />  /  <pic prompt='...'>
 //   pic prompt="..."  (앵글 브래킷 없음)
 //   <pic prompt="..." (닫는 브래킷 누락)
+//   <pic class="..." prompt="..." data-x="..."> 처럼 prompt 앞뒤에 추가 속성이 있는 변형
 //   다양한 공백, 인용부호, HTML 엔티티 변형
-const PIC_TAG_REGEX = /<?(?:pic|img)\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi;
+// 태그명 → prompt 이전 속성들 → prompt 캡처 → prompt 이후 속성들 → 선택적 닫는 브래킷 순서로 매칭
+const PIC_TAG_REGEX = /<?(?:pic|img)\b(?:\s+[^\s=/>]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>]+))?)*\s+prompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s+[^\s=/>]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>]+))?)*(?:\s*\/?\s*>)?/gi;
 
 /**
  * AI 모델이 종종 출력하는 유니코드 스마트/커리 인용부호를 ASCII 인용부호로 정규화한다.
@@ -4319,7 +4321,7 @@ async function initIfNeeded() {
     if (initialized || initializing) return;
     initializing = true;
     try { initialized = await init(); } catch (e) { console.error('[ST-LifeSim] 초기화 오류:', e); } finally { initializing = false; }
-});
+}
 
 // SillyTavern APP_READY 이벤트에서 초기화 실행 (호환성 위해 즉시 시도도 함께 수행)
 try {
