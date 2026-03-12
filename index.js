@@ -3540,6 +3540,10 @@ function wrapRichMessageHtml(html) {
     return String(html || '');
 }
 
+const MESSAGE_RENDER_WAIT_ATTEMPTS = 6;
+const MESSAGE_RENDER_RETRY_DELAY_FAST = 50;
+const MESSAGE_RENDER_RETRY_DELAY_SLOW = 120;
+
 function getRenderedMessageTextElement(msgIdx) {
     if (!Number.isFinite(msgIdx) || msgIdx < 0) return null;
     const selectors = [
@@ -3593,7 +3597,7 @@ async function emitMessageRenderLifecycle(ctx, msgIdx) {
 
 async function updateRenderedMessageHtml(msgIdx, html, logLabel = '메시지') {
     if (!Number.isFinite(msgIdx) || msgIdx < 0) return false;
-    for (let attempt = 0; attempt < 6; attempt++) {
+    for (let attempt = 0; attempt < MESSAGE_RENDER_WAIT_ATTEMPTS; attempt++) {
         try {
             const mesTextEl = getRenderedMessageTextElement(msgIdx);
             if (mesTextEl) {
@@ -3604,7 +3608,7 @@ async function updateRenderedMessageHtml(msgIdx, html, logLabel = '메시지') {
             console.warn(`[ST-LifeSim] ${logLabel} UI 업데이트 실패:`, uiErr);
             return false;
         }
-        await waitForDelay(attempt < 2 ? 50 : 120);
+        await waitForDelay(attempt < 2 ? MESSAGE_RENDER_RETRY_DELAY_FAST : MESSAGE_RENDER_RETRY_DELAY_SLOW);
     }
     console.warn(`[ST-LifeSim] ${logLabel} UI 업데이트 대상 요소를 찾지 못했습니다.`, { msgIdx });
     return false;
@@ -3612,11 +3616,11 @@ async function updateRenderedMessageHtml(msgIdx, html, logLabel = '메시지') {
 
 async function waitForRenderedMessageTextElement(msgIdx, logLabel = '메시지') {
     if (!Number.isFinite(msgIdx) || msgIdx < 0) return false;
-    for (let attempt = 0; attempt < 6; attempt++) {
+    for (let attempt = 0; attempt < MESSAGE_RENDER_WAIT_ATTEMPTS; attempt++) {
         if (getRenderedMessageTextElement(msgIdx)) {
             return true;
         }
-        await waitForDelay(attempt < 2 ? 50 : 120);
+        await waitForDelay(attempt < 2 ? MESSAGE_RENDER_RETRY_DELAY_FAST : MESSAGE_RENDER_RETRY_DELAY_SLOW);
     }
     console.warn(`[ST-LifeSim] ${logLabel} 렌더링 대상 요소를 찾지 못했습니다.`, { msgIdx });
     return false;
