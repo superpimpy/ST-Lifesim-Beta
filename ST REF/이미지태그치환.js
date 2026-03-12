@@ -1393,6 +1393,19 @@ function attachSwipeRerollListeners(mesId) {
 
     });
 }
+/**
+ * 이미지 재생성 처리.
+ *
+ * INLINE 계열 모드의 핵심은 "본문(message.mes)을 치환하지 않고"
+ * 이미 생성된/새로 생성된 이미지를 message.extra 쪽 갤러리 데이터로만
+ * 교체 또는 추가하는 것이다.
+ *
+ * - 생성 결과 URL은 message.extra.image_swipes 에 반영
+ * - 마지막 생성본은 message.extra.image / title / inline_image 에 동기화
+ * - 이후 appendMediaToMessage → updateMessageBlock → saveChat →
+ *   MESSAGE_UPDATED / MESSAGE_RENDERED 순으로 후처리하여
+ *   UI, 메시지 상태, 저장 데이터를 함께 갱신한다.
+ */
 async function handleReroll(mesId, currentPrompt) {
     if (!SlashCommandParser.commands['sd']) {
         toastr.error("Stable Diffusion extension not loaded.");
@@ -1564,6 +1577,21 @@ function applyTheme(theme) {
     container.removeClass('theme-dark theme-light theme-pink');
     container.addClass(`theme-${theme}`);
 }
+/**
+ * AI 메시지 수신 후 <pic prompt="..."> 태그를 실제 이미지로 치환/적용한다.
+ *
+ * INLINE 모드 처리 순서 요약:
+ * 1) message.mes 에서 <pic> 태그와 prompt 를 추출한다.
+ * 2) prompt 별로 /sd 생성(sdCallWithRescale)을 호출한다.
+ * 3) 결과 이미지는 본문에 <img> 로 박지 않고 message.extra.image_swipes 에 누적한다.
+ * 4) 마지막 결과를 message.extra.image, message.extra.title,
+ *    message.extra.inline_image 에 기록해 "이 메시지에 인라인 이미지가 있음"을 표시한다.
+ * 5) appendMediaToMessage 로 DOM 갤러리를 다시 그린 뒤,
+ *    updateMessageBlock / saveChat / MESSAGE_UPDATED / MESSAGE_RENDERED 로
+ *    상태 저장 및 후처리를 마무리한다.
+ *
+ * 즉 INLINE 모드는 본문 치환보다 "extra 기반 미디어 렌더링 + 저장 후 이벤트 갱신"이 핵심이다.
+ */
 eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
     if (!extension_settings[extensionName] || extension_settings[extensionName].insertType === INSERT_TYPE.DISABLED) return;
 

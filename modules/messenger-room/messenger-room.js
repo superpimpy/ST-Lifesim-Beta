@@ -4,7 +4,7 @@ import { injectContext, registerContextBuilder } from '../../utils/context-injec
 import { createPopup, closePopup } from '../../utils/popup.js';
 import { getAllContacts, getAppearanceTagsByName, getContacts } from '../contacts/contacts.js';
 import { generateBackendText } from '../../utils/backend-generation.js';
-import { buildAiEmoticonContext, replaceAiSelectedEmoticons, buildEmoticonMessageHtml, buildEmoticonPickerContent } from '../emoticon/emoticon.js';
+import { buildAiEmoticonContext, replaceAiSelectedEmoticons, buildEmoticonMessageHtml, buildEmoticonPickerContent, extractAiSelectedEmoticonMedia } from '../emoticon/emoticon.js';
 import { translateTextToKorean } from '../sns/sns.js';
 import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
 import { runSdImageGeneration } from '../../utils/slash.js';
@@ -45,6 +45,35 @@ const roomAutoReplyState = new Map();
 const roomAutonomyState = new Map();
 /** 방 목록 팝업이 열려 있을 때 실시간 갱신용 렌더러 참조 */
 let _activeRoomListRenderer = null;
+
+function normalizeRoomMessageExtra(extra = {}) {
+    const source = extra && typeof extra === 'object' ? extra : {};
+    const imageSwipes = Array.isArray(source.image_swipes)
+        ? source.image_swipes.map((url) => String(url || '').trim()).filter(Boolean)
+        : [];
+    const emoticonImages = Array.isArray(source.emoticon_images)
+        ? source.emoticon_images
+            .map((item) => ({
+                name: String(item?.name || '').trim(),
+                url: String(item?.url || '').trim(),
+            }))
+            .filter((item) => item.name && item.url)
+        : [];
+    const title = String(source.title || '').trim();
+    return {
+        ...source,
+        image_swipes: imageSwipes,
+        image: String(source.image || imageSwipes[imageSwipes.length - 1] || '').trim(),
+        title,
+        inline_image: source.inline_image === true || imageSwipes.length > 0,
+        emoticon_images: emoticonImages,
+    };
+}
+
+function hasRoomInlineMedia(message) {
+    const extra = normalizeRoomMessageExtra(message?.extra);
+    return extra.inline_image || extra.emoticon_images.length > 0;
+}
 
 function normalizeRoomBinding(binding) {
     return binding === 'character' ? 'character' : 'chat';
@@ -185,9 +214,10 @@ export function normalizeMessengerRooms(rooms = [], binding = 'chat') {
                     authorName: String(message?.authorName || '').trim(),
                     text: String(message?.text || '').trim(),
                     html: String(message?.html || '').trim(),
+                    extra: normalizeRoomMessageExtra(message?.extra),
                     timestamp: Number(message?.timestamp) || Date.now(),
                     type: String(message?.type || 'message').trim() || 'message',
-                })).filter((message) => message.text)
+                })).filter((message) => message.text || message.html || hasRoomInlineMedia(message))
                 : [];
             const name = String(room?.name || '').trim();
             const createdAt = Number(room?.createdAt) || Date.now();
@@ -380,7 +410,7 @@ function sanitizeRoomReply(text, responderName, memberLabels = []) {
     return cleaned.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
 }
 
-function buildRoomMessageHtml(text, senderName, tagReplacementMap = null) {
+function buildRoomPlainMessageHtml(text) {
     const source = String(text || '');
     const escaped = escapeHtml(source);
     if (!escaped) return '';
@@ -392,10 +422,31 @@ function buildRoomMessageHtml(text, senderName, tagReplacementMap = null) {
         .split('\n')
         .map((line) => line || '&nbsp;')
         .join('<br>');
-    const html = paragraphs.length > 1
+    return paragraphs.length > 1
         ? `<div class="slm-room-message-segments">${paragraphs.map((paragraph) => `<span class="slm-room-message-segment">${renderParagraph(paragraph)}</span>`).join('')}</div>`
         : renderParagraph(escaped);
+}
+
+function buildRoomMessageHtml(text, senderName, tagReplacementMap = null) {
+    const html = buildRoomPlainMessageHtml(text);
+    if (!html) return '';
     return replaceAiSelectedEmoticons(html, senderName, tagReplacementMap);
+}
+
+function buildRoomInlineMediaHtml(extra, senderName) {
+    const normalizedExtra = normalizeRoomMessageExtra(extra);
+    const imageHtml = normalizedExtra.image_swipes.map((url, index) => {
+        const safeUrl = escapeHtml(url);
+        const safePrompt = escapeHtml(normalizedExtra.title || `generated-image-${index + 1}`);
+        return `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image">`;
+    }).join('');
+    const emoticonHtml = normalizedExtra.emoticon_images
+        .map((emoticon) => buildEmoticonMessageHtml(emoticon, senderName))
+        .filter(Boolean)
+        .join('');
+    const mediaHtml = `${imageHtml}${emoticonHtml}`.trim();
+    if (!mediaHtml) return '';
+    return `<div class="slm-room-message-inline-media">${mediaHtml}</div>`;
 }
 
 function isSegmentedRoomMessageHtml(html) {
@@ -452,7 +503,10 @@ function formatRelativeTime(timestamp) {
 function appendRoomMessage(room, message) {
     const nextRoom = {
         ...room,
-        messages: [...room.messages, message].slice(-ROOM_MESSAGE_STORAGE_LIMIT),
+        messages: [...room.messages, {
+            ...message,
+            extra: normalizeRoomMessageExtra(message?.extra),
+        }].slice(-ROOM_MESSAGE_STORAGE_LIMIT),
         updatedAt: Number(message?.timestamp) || Date.now(),
     };
     return upsertMessengerRoom(nextRoom);
@@ -469,6 +523,7 @@ function replaceRoomMessage(roomId, messageId, updater) {
         return {
             ...message,
             ...(updated && typeof updated === 'object' ? updated : {}),
+            extra: normalizeRoomMessageExtra((updated && typeof updated === 'object' && 'extra' in updated) ? updated.extra : message?.extra),
         };
     });
     return upsertMessengerRoom({
@@ -969,9 +1024,10 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
     const allContactsList = getAllContacts();
     const normalizedSource = normalizeQuotesForRoomPicTag(String(rawText || ''));
     let processedText = normalizedSource;
-    const imageTagReplacementEntries = [];
     const transcript = buildRoomTranscript(room, candidateMap);
     const userName = String(getContext()?.name1 || '').trim();
+    const inlineImages = [];
+    let lastPromptUsed = '';
     ROOM_PIC_TAG_REGEX.lastIndex = 0;
     const picMatches = [...normalizedSource.matchAll(ROOM_PIC_TAG_REGEX)];
     if (picMatches.length > 0) {
@@ -996,9 +1052,8 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
                     });
                     const imageUrl = tagResult.finalPrompt ? await generateRoomMessageImageViaApi(tagResult.finalPrompt) : '';
                     if (imageUrl) {
-                        const safeUrl = escapeHtml(imageUrl);
-                        const safePrompt = escapeHtml(rawPrompt);
-                        imageTagReplacementEntries.push([fullTag, `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`]);
+                        inlineImages.push(imageUrl);
+                        lastPromptUsed = rawPrompt;
                         replacement = fullTag;
                     }
                 }
@@ -1017,16 +1072,29 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
             });
         }
     }
-    const html = buildRoomMessageHtml(processedText, senderName, imageTagReplacementEntries);
     const plainText = processedText
         .replace(/<?pic\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi, ' [사진] ')
         .split('\n')
         .map((line) => line.replace(/\s+/g, ' ').trim())
         .join('\n')
         .trim();
+    const emoticonMedia = extractAiSelectedEmoticonMedia(plainText || normalizeRoomPromptText(rawText), senderName);
+    const extra = normalizeRoomMessageExtra({
+        image_swipes: inlineImages,
+        image: inlineImages[inlineImages.length - 1] || '',
+        title: lastPromptUsed,
+        inline_image: inlineImages.length > 0,
+        emoticon_images: emoticonMedia.emoticons,
+    });
+    const hasInlineMedia = hasRoomInlineMedia({ extra });
+    const normalizedText = emoticonMedia.text || (plainText || normalizeRoomPromptText(rawText));
+    // inline 미디어가 있으면 HTML 문자열을 저장하지 않고,
+    // renderRoomMessageBubbleContent가 text + extra 메타데이터로 다시 렌더링한다.
+    const html = hasInlineMedia ? '' : buildRoomMessageHtml(normalizedText, senderName);
     return {
-        text: plainText || normalizeRoomPromptText(rawText),
-        html: html !== plainText ? html : '',
+        text: normalizedText,
+        html: html !== normalizedText ? html : '',
+        extra,
     };
 }
 
@@ -1179,6 +1247,7 @@ async function runRoomAutoReplies(roomId, onUpdate = null, options = {}) {
                         authorName: getMemberDisplayLabel(responderKey, candidateMap),
                         text: reply.text,
                         html: reply.html || '',
+                        extra: reply.extra,
                         timestamp: Date.now(),
                         type: 'message',
                     });
@@ -1232,13 +1301,22 @@ function buildAvatarElement(memberKey, candidateMap) {
 
 function renderRoomMessageBubbleContent(message, bubble) {
     if (!bubble) return;
+    const senderName = String(message?.authorName || getContext()?.name1 || '{{user}}').trim() || '{{user}}';
+    const extra = normalizeRoomMessageExtra(message?.extra);
+    if (hasRoomInlineMedia({ extra })) {
+        const textHtml = buildRoomPlainMessageHtml(String(message?.text || ''));
+        const mediaHtml = buildRoomInlineMediaHtml(extra, senderName);
+        bubble.innerHTML = `${textHtml}${mediaHtml}`;
+        bubble.classList.toggle('multiline', Boolean(textHtml) && isSegmentedRoomMessageHtml(textHtml));
+        bubble.classList.toggle('emoticon-only', !textHtml && extra.emoticon_images.length > 0 && extra.image_swipes.length === 0);
+        return;
+    }
     if (message?.html) {
         bubble.innerHTML = message.html;
         bubble.classList.toggle('multiline', isSegmentedRoomMessageHtml(message.html));
         bubble.classList.toggle('emoticon-only', isEmoticonOnlyRoomMessageHtml(message.html));
         return;
     }
-    const senderName = String(message?.authorName || getContext()?.name1 || '{{user}}').trim() || '{{user}}';
     const html = buildRoomMessageHtml(String(message?.text || ''), senderName);
     bubble.innerHTML = html;
     bubble.classList.toggle('multiline', isSegmentedRoomMessageHtml(html));
@@ -1295,6 +1373,7 @@ function openRoomMessageEditPopup(roomId, messageId, onBack, onSaved) {
             replaceRoomMessage(roomId, messageId, {
                 text: enriched?.text || nextText,
                 html: enriched?.html || '',
+                extra: enriched?.extra,
             });
             close();
             onSaved?.();
@@ -1819,6 +1898,7 @@ function openMessengerRoomDetail(roomId, onBack) {
             authorName: String(getContext()?.name1 || '{{user}}').trim() || '{{user}}',
             text: String(payload?.text || '').trim(),
             html: String(payload?.html || '').trim(),
+            extra: payload?.extra,
             timestamp: Date.now(),
             type: 'message',
         });
@@ -2068,10 +2148,10 @@ function buildRoomListContent(onBack, initialRoomId = null) {
  * 외부(index.js 등)에서 특정 방에 메시지를 추가한다.
  * 채팅창(/sendas)을 거치지 않고 방 데이터에만 저장하여 채팅창 노출을 방지한다.
  * @param {string} roomId
- * @param {{ authorName: string, text: string, html?: string }} payload
+ * @param {{ authorName: string, text: string, html?: string, extra?: object }} payload
  * @returns {Object|null} 갱신된 방 객체
  */
-export function appendExternalRoomMessage(roomId, { authorName, text, html = '' }) {
+export function appendExternalRoomMessage(roomId, { authorName, text, html = '', extra = null }) {
     const room = getMessengerRoomById(roomId);
     if (!room) return null;
     const candidateMap = getCandidateMap();
@@ -2087,6 +2167,7 @@ export function appendExternalRoomMessage(roomId, { authorName, text, html = '' 
         authorName: trimmedAuthor,
         text: String(text || '').trim(),
         html: String(html || '').trim(),
+        extra,
         timestamp: Date.now(),
         type: 'message',
     });

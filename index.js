@@ -21,7 +21,7 @@ import { showToast, showConfirm, escapeHtml } from './utils/ui.js';
 import { exportAllData, importAllData, clearAllData } from './utils/storage.js';
 import { renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEventGeneratorUI, renderVoiceMemoUI, triggerQuickSend, triggerReadReceipt, triggerNoContact, triggerUserImageGenerationAndSendInBackground, triggerVoiceMemoInsertion, triggerDeletedMessage } from './modules/quick-tools/quick-tools.js';
 import { startFirstMsgTimer, renderFirstMsgSettingsUI } from './modules/firstmsg/firstmsg.js';
-import { buildAiEmoticonContext, initEmoticon, openEmoticonPopup, replaceAiSelectedEmoticons } from './modules/emoticon/emoticon.js';
+import { buildAiEmoticonContext, initEmoticon, openEmoticonPopup, replaceAiSelectedEmoticons, buildEmoticonMessageHtml, extractAiSelectedEmoticonMedia } from './modules/emoticon/emoticon.js';
 import { initContacts, openContactsPopup, getContacts, getAppearanceTagsByName, buildAppearanceTagVariableMap, resolveAppearanceTagVariables } from './modules/contacts/contacts.js';
 import { initCall, isCallActive, onCharacterMessageRenderedForProactiveCall, openCallLogsPopup, triggerProactiveIncomingCall, requestActiveCharacterCall } from './modules/call/call.js';
 import { initWallet, openWalletPopup } from './modules/wallet/wallet.js';
@@ -1198,7 +1198,8 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
     PIC_TAG_REGEX.lastIndex = 0;
     const picMatches = [...normalizedSource.matchAll(PIC_TAG_REGEX)];
     let currentMes = normalizedSource;
-    const imageTagReplacementEntries = [];
+    const inlineImages = [];
+    let lastPromptUsed = '';
     if (picMatches.length > 0) {
         const limitedPicMatches = picMatches.slice(0, MAX_MESSENGER_IMAGES_PER_RESPONSE);
         const limitedSet = new Set(limitedPicMatches.map((match) => match.index));
@@ -1226,9 +1227,8 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
                         settings,
                     });
                     if (result.imageUrl) {
-                        const safeUrl = escapeHtml(result.imageUrl);
-                        const safePrompt = escapeHtml(rawPrompt);
-                        imageTagReplacementEntries.push([fullTag, `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`]);
+                        inlineImages.push(result.imageUrl);
+                        lastPromptUsed = rawPrompt;
                         replacement = fullTag;
                     } else {
                         replacement = result.fallbackText;
@@ -1242,8 +1242,29 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
             offset += replacement.length - fullTag.length;
         }
     }
-    const richHtml = replaceAiSelectedEmoticons(escapeHtml(currentMes).replace(/\n/g, '<br>'), senderName, imageTagReplacementEntries);
-    return wrapRichMessageHtml(richHtml);
+    const plainText = currentMes
+        .replace(PIC_TAG_REGEX, ' [사진] ')
+        .split('\n')
+        .map((line) => line.replace(/\s+/g, ' ').trim())
+        .join('\n')
+        .trim();
+    const emoticonMedia = extractAiSelectedEmoticonMedia(plainText || text, senderName);
+    const finalText = emoticonMedia.text || plainText || String(text || '').trim();
+    const extra = normalizeInlineMessageExtra({
+        image_swipes: inlineImages,
+        image: inlineImages[inlineImages.length - 1] || '',
+        title: lastPromptUsed,
+        inline_image: inlineImages.length > 0,
+        emoticon_images: emoticonMedia.emoticons,
+    });
+    const html = hasInlineMessageMedia(extra)
+        ? ''
+        : wrapRichMessageHtml(replaceAiSelectedEmoticons(escapeHtml(finalText).replace(/\n/g, '<br>'), senderName));
+    return {
+        text: finalText,
+        html,
+        extra,
+    };
 }
 
 async function generateGroupChatReply(responder, roster, transcriptOverride = null) {
@@ -1410,7 +1431,9 @@ async function executePlannedGroupChatTurn(plan) {
         if (!reply) continue;
         appendExternalRoomMessage(plan.roomId, {
             authorName: responder.displayName || responder.name,
-            text: reply,
+            text: reply.text || '',
+            html: reply.html || '',
+            extra: reply.extra,
         });
     }
 }
@@ -3534,6 +3557,90 @@ function wrapRichMessageHtml(html) {
     return String(html || '');
 }
 
+function normalizeInlineMessageExtra(extra = {}) {
+    const source = extra && typeof extra === 'object' ? extra : {};
+    const imageSwipes = Array.isArray(source.image_swipes)
+        ? source.image_swipes.map((url) => String(url || '').trim()).filter(Boolean)
+        : [];
+    const emoticonImages = Array.isArray(source.emoticon_images)
+        ? source.emoticon_images
+            .map((item) => ({
+                name: String(item?.name || '').trim(),
+                url: String(item?.url || '').trim(),
+            }))
+            .filter((item) => item.name && item.url)
+        : [];
+    const processedPicTags = Array.isArray(source.processed_pic_tags)
+        ? source.processed_pic_tags.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+    return {
+        ...source,
+        image_swipes: imageSwipes,
+        image: String(source.image || imageSwipes[imageSwipes.length - 1] || '').trim(),
+        title: String(source.title || '').trim(),
+        inline_image: source.inline_image === true || imageSwipes.length > 0,
+        emoticon_images: emoticonImages,
+        processed_pic_tags: processedPicTags,
+    };
+}
+
+function hasInlineMessageMedia(extra = {}) {
+    const normalized = normalizeInlineMessageExtra(extra);
+    return normalized.inline_image || normalized.emoticon_images.length > 0;
+}
+
+function didInlineMessageExtraChange(beforeExtra = {}, afterExtra = {}) {
+    const before = normalizeInlineMessageExtra(beforeExtra);
+    const after = normalizeInlineMessageExtra(afterExtra);
+    return before.inline_image !== after.inline_image
+        || before.image !== after.image
+        || before.title !== after.title
+        || before.image_swipes.join('\n') !== after.image_swipes.join('\n')
+        || before.processed_pic_tags.join('\n') !== after.processed_pic_tags.join('\n')
+        || before.emoticon_images.map((item) => `${item.name}::${item.url}`).join('\n')
+            !== after.emoticon_images.map((item) => `${item.name}::${item.url}`).join('\n');
+}
+
+function stripPicTagsForDisplay(text) {
+    return normalizeQuotesForPicTag(String(text || ''))
+        .replace(PIC_TAG_REGEX, ' ')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function buildInlineMessageMediaHtml(extra, senderName) {
+    const normalized = normalizeInlineMessageExtra(extra);
+    const imageHtml = normalized.image_swipes.map((url, index) => {
+        const safeUrl = escapeHtml(url);
+        const safePrompt = escapeHtml(normalized.title || `generated-image-${index + 1}`);
+        return `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image">`;
+    }).join('');
+    const emoticonHtml = normalized.emoticon_images
+        .map((emoticon) => buildEmoticonMessageHtml(emoticon, senderName))
+        .filter(Boolean)
+        .join('');
+    const mediaHtml = `${imageHtml}${emoticonHtml}`.trim();
+    if (!mediaHtml) return '';
+    return `<div class="slm-message-inline-media">${mediaHtml}</div>`;
+}
+
+function buildInlineDisplayHtml(text, senderName, extra = {}) {
+    const normalizedExtra = normalizeInlineMessageExtra(extra);
+    const emoticonExtract = extractAiSelectedEmoticonMedia(String(text || ''), senderName);
+    const strippedText = stripPicTagsForDisplay(emoticonExtract.text);
+    const textHtml = strippedText ? escapeHtml(strippedText).replace(/\n/g, '<br>') : '';
+    const mediaExtra = normalizeInlineMessageExtra({
+        ...normalizedExtra,
+        emoticon_images: normalizedExtra.emoticon_images.length > 0 ? normalizedExtra.emoticon_images : emoticonExtract.emoticons,
+    });
+    const mediaHtml = buildInlineMessageMediaHtml(mediaExtra, senderName);
+    if (!mediaHtml) {
+        return replaceAiSelectedEmoticons(escapeHtml(String(text || '')).replace(/\n/g, '<br>'), senderName);
+    }
+    return `${textHtml}${mediaHtml}`;
+}
+
 async function updateRenderedMessageHtml(msgIdx, html, logLabel = '메시지') {
     if (!Number.isFinite(msgIdx) || msgIdx < 0) return false;
     const selectors = [
@@ -3590,6 +3697,9 @@ async function applyCharacterImageDisplayMode() {
 
         const charName = String(lastMsg.name || ctx?.name2 || '{{char}}');
         const msgIdx = Number(ctx.chat.length - 1);
+        const nextExtra = normalizeInlineMessageExtra(lastMsg.extra);
+        const processedPicTags = new Set(nextExtra.processed_pic_tags || []);
+        const originalExtra = normalizeInlineMessageExtra(nextExtra);
 
         // char의 응답에 <pic prompt="..."> 태그가 포함되어 있으면 그 자체가 이미지 생성 의도이므로,
         // 유저의 명시적 지시("사진 보내줘" 등) 없이도 이미지를 생성한다.
@@ -3622,10 +3732,15 @@ async function applyCharacterImageDisplayMode() {
                 const fullTag = match[0];
                 const rawPrompt = (match[1] || match[2] || '').trim();
                 const adjustedIndex = match.index + offset;
+                const picTagKey = `${rawPrompt}::${fullTag}`;
 
                 let replacement;
                 if (!rawPrompt) {
                     replacement = '';
+                } else if (processedPicTags.has(picTagKey)) {
+                    // 이미 inline extra에 반영된 <pic> 태그는 그대로 두어
+                    // CHARACTER_MESSAGE_RENDERED 재호출 시 중복 이미지 생성되지 않게 막는다.
+                    replacement = fullTag;
                 } else if (!limitedSet.has(match.index)) {
                     // 최대 이미지 수를 초과한 매치는 텍스트 폴백
                     const template = settings.messageImageTextTemplate || DEFAULT_SETTINGS.messageImageTextTemplate;
@@ -3647,9 +3762,13 @@ async function applyCharacterImageDisplayMode() {
                         settings,
                     });
                     if (result.imageUrl) {
-                        const safeUrl = escapeHtml(result.imageUrl);
-                        const safePrompt = escapeHtml(rawPrompt);
-                        replacement = `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`;
+                        nextExtra.image_swipes.push(result.imageUrl);
+                        nextExtra.image = result.imageUrl;
+                        nextExtra.title = rawPrompt;
+                        nextExtra.inline_image = true;
+                        processedPicTags.add(picTagKey);
+                        nextExtra.processed_pic_tags = [...processedPicTags];
+                        replacement = fullTag;
                     } else {
                         replacement = result.fallbackText;
                     }
@@ -3661,12 +3780,13 @@ async function applyCharacterImageDisplayMode() {
                 offset += replacement.length - fullTag.length;
 
                 // 매 생성마다 메시지 데이터 + UI를 즉시 업데이트하여 순차적으로 결과가 표시되도록 한다
-                lastMsg.mes = wrapRichMessageHtml(currentMes);
-                await updateRenderedMessageHtml(msgIdx, currentMes, '이미지');
+                lastMsg.mes = currentMes;
+                lastMsg.extra = normalizeInlineMessageExtra(nextExtra);
+                await updateRenderedMessageHtml(msgIdx, buildInlineDisplayHtml(currentMes, charName, lastMsg.extra), '이미지');
             }
 
             // 모든 이미지 처리 완료 후 채팅 저장
-            if (currentMes !== mes) {
+            if (currentMes !== mes || generatedCount > 0 || didInlineMessageExtraChange(originalExtra, nextExtra)) {
                 if (typeof ctx.saveChat === 'function') {
                     await ctx.saveChat();
                 }
@@ -3701,8 +3821,16 @@ async function applyCharacterImageDisplayMode() {
             }
 
             if (updatedMes !== mes) {
-                lastMsg.mes = wrapRichMessageHtml(updatedMes);
-                await updateRenderedMessageHtml(msgIdx, updatedMes, '이미지 텍스트');
+                lastMsg.mes = updatedMes;
+                lastMsg.extra = normalizeInlineMessageExtra({
+                    ...nextExtra,
+                    image_swipes: [],
+                    image: '',
+                    title: '',
+                    inline_image: false,
+                    processed_pic_tags: [],
+                });
+                await updateRenderedMessageHtml(msgIdx, buildInlineDisplayHtml(updatedMes, charName, lastMsg.extra), '이미지 텍스트');
                 if (typeof ctx.saveChat === 'function') {
                     await ctx.saveChat();
                 }
@@ -3731,13 +3859,16 @@ async function applyCharacterEmoticonDisplayMode() {
 
     const mes = String(lastMsg.mes || '');
     const senderName = String(lastMsg.name || ctx?.name2 || '{{char}}');
-    const updatedMes = replaceAiSelectedEmoticons(mes, senderName);
-    if (updatedMes === mes) return;
+    const extracted = extractAiSelectedEmoticonMedia(mes, senderName);
+    if (extracted.emoticons.length === 0) return;
 
-    lastMsg.mes = wrapRichMessageHtml(updatedMes);
+    lastMsg.extra = normalizeInlineMessageExtra({
+        ...lastMsg.extra,
+        emoticon_images: extracted.emoticons,
+    });
     // DOM mesid는 숫자 인덱스를 사용하므로 lastMsg 참조와 별개로 마지막 메시지 인덱스를 구한다.
     const msgIdx = Number(ctx.chat.length - 1);
-    await updateRenderedMessageHtml(msgIdx, updatedMes, '이모티콘');
+    await updateRenderedMessageHtml(msgIdx, buildInlineDisplayHtml(mes, senderName, lastMsg.extra), '이모티콘');
     if (typeof ctx.saveChat === 'function') {
         await ctx.saveChat();
     }
