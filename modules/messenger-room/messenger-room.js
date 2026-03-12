@@ -1306,8 +1306,8 @@ function renderRoomMessageBubbleContent(message, bubble) {
     if (hasRoomInlineMedia({ extra })) {
         const textHtml = buildRoomPlainMessageHtml(String(message?.text || ''));
         const mediaHtml = buildRoomInlineMediaHtml(extra, senderName);
-        bubble.innerHTML = `${textHtml}${mediaHtml}`;
-        bubble.classList.toggle('multiline', Boolean(textHtml) && isSegmentedRoomMessageHtml(textHtml));
+        bubble.innerHTML = `<div class="slm-room-message-rich-content">${textHtml}${mediaHtml}</div>`;
+        bubble.classList.toggle('multiline', false);
         bubble.classList.toggle('emoticon-only', !textHtml && extra.emoticon_images.length > 0 && extra.image_swipes.length === 0);
         return;
     }

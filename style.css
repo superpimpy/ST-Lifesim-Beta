@@ -1537,6 +1537,12 @@ body[data-theme="dark"],
   gap: 4px;
 }
 
+.slm-room-message-rich-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .slm-message-inline-media,
 .slm-room-message-inline-media {
   display: flex;
