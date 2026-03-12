@@ -3793,8 +3793,8 @@ function attachGeneratedMessageImagePostProcessing(msgIdx) {
 }
 
 /**
- * 태그 치환 직후 깨질 수 있는 .mes / .mes_text 레이아웃 스타일을
- * 대상 메시지 DOM에 한정해 다시 계산하도록 유도한다.
+ * 태그/이미지 치환 직후 .mes / .mes_text 레이아웃 스타일이
+ * 깨졌는지와 무관하게 대상 메시지 DOM에 한정해 다시 계산하도록 유도한다.
  * @param {number} msgIdx
  * @returns {boolean}
  */
@@ -3804,7 +3804,6 @@ function refreshRenderedMessageCss(msgIdx) {
     const messageElement = getRenderedMessageElement(numericMsgIdx);
     const messageTextElement = messageElement?.querySelector('.mes_text');
     if (!messageElement || !messageTextElement) return false;
-    if (!messageTextElement.querySelector('img[data-slm-pic-id]')) return false;
 
     const parentNode = messageTextElement.parentNode;
     if (!parentNode) return false;
