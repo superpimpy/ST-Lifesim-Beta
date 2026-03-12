@@ -1198,8 +1198,7 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
     PIC_TAG_REGEX.lastIndex = 0;
     const picMatches = [...normalizedSource.matchAll(PIC_TAG_REGEX)];
     let currentMes = normalizedSource;
-    const imagePlaceholders = new Map();
-    let imageCounter = 0;
+    const imageTagReplacementEntries = [];
     if (picMatches.length > 0) {
         const limitedPicMatches = picMatches.slice(0, MAX_MESSENGER_IMAGES_PER_RESPONSE);
         const limitedSet = new Set(limitedPicMatches.map((match) => match.index));
@@ -1229,9 +1228,8 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
                     if (result.imageUrl) {
                         const safeUrl = escapeHtml(result.imageUrl);
                         const safePrompt = escapeHtml(rawPrompt);
-                        const placeholder = `__GROUP_IMG_${imageCounter++}__`;
-                        imagePlaceholders.set(placeholder, `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`);
-                        replacement = placeholder;
+                        imageTagReplacementEntries.push([fullTag, `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`]);
+                        replacement = fullTag;
                     } else {
                         replacement = result.fallbackText;
                     }
@@ -1244,10 +1242,7 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
             offset += replacement.length - fullTag.length;
         }
     }
-    let richHtml = replaceAiSelectedEmoticons(escapeHtml(currentMes).replace(/\n/g, '<br>'), senderName);
-    imagePlaceholders.forEach((imageHtml, placeholder) => {
-        richHtml = richHtml.replace(new RegExp(placeholder, 'g'), imageHtml);
-    });
+    const richHtml = replaceAiSelectedEmoticons(escapeHtml(currentMes).replace(/\n/g, '<br>'), senderName, imageTagReplacementEntries);
     return wrapRichMessageHtml(richHtml);
 }
 

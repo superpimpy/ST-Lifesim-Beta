@@ -969,7 +969,7 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
     const allContactsList = getAllContacts();
     const normalizedSource = normalizeQuotesForRoomPicTag(String(rawText || ''));
     let processedText = normalizedSource;
-    const imageTagReplacementMap = new Map();
+    const imageTagReplacementEntries = [];
     const transcript = buildRoomTranscript(room, candidateMap);
     const userName = String(getContext()?.name1 || '').trim();
     ROOM_PIC_TAG_REGEX.lastIndex = 0;
@@ -998,7 +998,7 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
                     if (imageUrl) {
                         const safeUrl = escapeHtml(imageUrl);
                         const safePrompt = escapeHtml(rawPrompt);
-                        imageTagReplacementMap.set(fullTag, `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`);
+                        imageTagReplacementEntries.push([fullTag, `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`]);
                         replacement = fullTag;
                     }
                 }
@@ -1017,7 +1017,7 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
             });
         }
     }
-    const html = buildRoomMessageHtml(processedText, senderName, imageTagReplacementMap);
+    const html = buildRoomMessageHtml(processedText, senderName, imageTagReplacementEntries);
     const plainText = processedText
         .replace(/<?pic\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi, ' [사진] ')
         .split('\n')

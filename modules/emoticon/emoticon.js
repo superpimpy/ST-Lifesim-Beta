@@ -58,13 +58,18 @@ let categoryVisibilityCache = null;
 
 function applyTagReplacementMode(text, tagReplacementMap) {
     let source = String(text || '');
-    if (!(tagReplacementMap instanceof Map) || tagReplacementMap.size === 0) return source;
-    tagReplacementMap.forEach((replacementHtml, originalTag) => {
+    const replacementEntries = tagReplacementMap instanceof Map
+        ? [...tagReplacementMap.entries()]
+        : (Array.isArray(tagReplacementMap) ? tagReplacementMap : []);
+    if (replacementEntries.length === 0) return source;
+    replacementEntries.forEach((entry) => {
+        const originalTag = Array.isArray(entry) ? entry[0] : '';
+        const replacementHtml = Array.isArray(entry) ? entry[1] : '';
         const targetTag = String(originalTag || '').trim();
         const replacement = String(replacementHtml || '');
         if (!targetTag || !replacement) return;
         const escapedTargetTag = escapeHtml(targetTag);
-        source = source.split(escapedTargetTag).join(replacement);
+        source = source.replace(escapedTargetTag, replacement);
     });
     return source;
 }
@@ -260,7 +265,7 @@ function resolveAiEmoticonHtmlMap(senderName) {
  * - 메시지 한 줄이 "• 이름" 같은 bullet 형식인 경우
  * @param {string} text
  * @param {string} senderName
- * @param {Map<string, string>|null} tagReplacementMap
+ * @param {Map<string, string>|Array<[string, string]>|null} tagReplacementMap
  * @returns {string}
  */
 export function replaceAiSelectedEmoticons(text, senderName = '{{char}}', tagReplacementMap = null) {
