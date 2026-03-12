@@ -3712,7 +3712,7 @@ async function applyCharacterImageDisplayMode() {
         if (allowAutoImageGeneration) {
             // ── ON 모드: 이미지 생성 API로 실제 이미지 생성 (순차적 UI 업데이트) ──
             // 응답 내 <pic prompt="...">의 직접 이미지 프롬프트를 추적해 Image API로 생성
-            const pendingPicMatches = picMatches.filter((match) => {
+            const unprocessedPicMatches = picMatches.filter((match) => {
                 const fullTag = match[0];
                 const rawPrompt = (match[1] || match[2] || '').trim();
                 if (!rawPrompt) return false;
@@ -3721,12 +3721,12 @@ async function applyCharacterImageDisplayMode() {
                 const picTagKey = buildProcessedPicTagKey(rawPrompt, fullTag);
                 return !processedPicTags.has(picTagKey);
             });
-            if (pendingPicMatches.length === 0) {
+            if (unprocessedPicMatches.length === 0) {
                 return;
             }
             // 최대 이미지 수 제한
-            const limitedPicMatches = pendingPicMatches.slice(0, MAX_MESSENGER_IMAGES_PER_RESPONSE);
-            if (pendingPicMatches.length > MAX_MESSENGER_IMAGES_PER_RESPONSE) {
+            const limitedPicMatches = unprocessedPicMatches.slice(0, MAX_MESSENGER_IMAGES_PER_RESPONSE);
+            if (unprocessedPicMatches.length > MAX_MESSENGER_IMAGES_PER_RESPONSE) {
                 showToast(`📷 이미지 최대 ${MAX_MESSENGER_IMAGES_PER_RESPONSE}장까지 생성 가능합니다.`, 'warn', 2000);
             }
             showToast(`📷 ${limitedPicMatches.length}개 이미지 생성 중...`, 'info', 2000);
