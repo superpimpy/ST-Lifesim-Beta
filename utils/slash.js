@@ -199,7 +199,7 @@ export async function runSdImageGeneration(prompt, options = {}) {
             console.warn('[ST-LifeSim] /sd 이미지 생성 시도 실패:', { attempt: attempt + 1, error });
         }
         if (attempt < retries && retryDelayMs > 0) {
-            await wait(retryDelayMs * (attempt + 1));
+            await wait(Math.min(retryDelayMs * (2 ** attempt), 1500));
         }
     }
     return '';

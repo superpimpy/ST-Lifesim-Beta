@@ -27,6 +27,7 @@ const ROOM_IMAGE_OFF_PROMPT = '<image_generation_rule>\nWhen the responder would
 const ROOM_PIC_TAG_REGEX = /<?pic\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi;
 const ROOM_EMOTICON_ONLY_HTML_REGEX = /^<img\b[^>]*aria-label="[^"]*이모티콘[^"]*"[^>]*>$/i;
 const ROOM_EMOTICON_TOKEN_ONLY_REGEX = /^\s*\[\[\s*emoticon\s*:\s*[^\]]+\s*\]\]\s*$/i;
+const ROOM_REPLY_TOAST_DURATION_MS = 2600;
 const ROOM_DEFAULTS = {
     autoReplyEnabled: true,
     responseProbability: 100,
@@ -1189,7 +1190,7 @@ async function runRoomAutoReplies(roomId, onUpdate = null, options = {}) {
                     const replyPreview = String(reply.text || '').replace(/\s+/g, ' ').trim();
                     if (replyPreview) {
                         const senderLabel = getMemberDisplayLabel(responderKey, candidateMap);
-                        showToast(buildRoomReplyToastContent(freshRoom, senderLabel, replyPreview, candidateMap), 'info', 2600);
+                        showToast(buildRoomReplyToastContent(freshRoom, senderLabel, replyPreview, candidateMap), 'info', ROOM_REPLY_TOAST_DURATION_MS);
                     }
                     latestState.onUpdate?.(freshRoom);
                     _activeRoomListRenderer?.();
