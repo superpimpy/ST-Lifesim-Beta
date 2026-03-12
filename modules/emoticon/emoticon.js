@@ -56,6 +56,22 @@ const EMOTICON_SEARCH_DEBOUNCE_MS = 90;
 let emoticonCache = null;
 let categoryVisibilityCache = null;
 
+function applyTagReplacementMode(text, tagReplacementMap) {
+    let source = String(text || '');
+    if (!(tagReplacementMap instanceof Map) || tagReplacementMap.size === 0) return source;
+    tagReplacementMap.forEach((replacementHtml, originalTag) => {
+        const targetTag = String(originalTag || '').trim();
+        const replacement = String(replacementHtml || '');
+        if (!targetTag || !replacement) return;
+        const escapedTargetTag = escapeHtml(targetTag);
+        source = source.split(escapedTargetTag).join(replacement);
+        if (escapedTargetTag !== targetTag) {
+            source = source.split(targetTag).join(replacement);
+        }
+    });
+    return source;
+}
+
 /**
  * @typedef {Object} Emoticon
  * @property {string} id
@@ -247,10 +263,11 @@ function resolveAiEmoticonHtmlMap(senderName) {
  * - 메시지 한 줄이 "• 이름" 같은 bullet 형식인 경우
  * @param {string} text
  * @param {string} senderName
+ * @param {Map<string, string>|null} tagReplacementMap
  * @returns {string}
  */
-export function replaceAiSelectedEmoticons(text, senderName = '{{char}}') {
-    const source = String(text || '');
+export function replaceAiSelectedEmoticons(text, senderName = '{{char}}', tagReplacementMap = null) {
+    const source = applyTagReplacementMode(text, tagReplacementMap);
     if (!source.trim()) return source;
     const htmlMap = resolveAiEmoticonHtmlMap(senderName);
     if (htmlMap.size === 0) return source;
