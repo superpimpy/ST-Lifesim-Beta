@@ -3390,17 +3390,17 @@ const MAX_IMAGE_GEN_RETRIES = 3;
 // 메신저 이미지 프롬프트 주입 태그
 const MSG_IMAGE_INJECT_TAG = 'st-lifesim-msg-image';
 
-// <pic prompt="..."> 패턴 감지 정규식 — 강화된 버전
+// <pic prompt="..."> 또는 레거시 <img prompt="..."> 패턴 감지 정규식 — 강화된 버전
 // 지원 패턴:
 //   <pic prompt="...">  /  <pic prompt="..." />  /  <pic prompt='...'>
 //   pic prompt="..."  (앵글 브래킷 없음)
 //   <pic prompt="..." (닫는 브래킷 누락)
 //   다양한 공백, 인용부호, HTML 엔티티 변형
-const PIC_TAG_REGEX = /<?pic\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi;
+const PIC_TAG_REGEX = /<?(?:pic|img)\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi;
 
 /**
  * AI 모델이 종종 출력하는 유니코드 스마트/커리 인용부호를 ASCII 인용부호로 정규화한다.
- * 또한 HTML 엔티티로 인코딩된 pic 태그, 전각 인용부호, 백틱 래핑 등을 처리한다.
+ * 또한 HTML 엔티티로 인코딩된 pic/img 태그, 전각 인용부호, 백틱 래핑 등을 처리한다.
  * 이를 통해 <pic prompt="..."> 정규식이 올바르게 매칭될 수 있도록 한다.
  * @param {string} text
  * @returns {string}
@@ -3413,10 +3413,10 @@ function normalizeQuotesForPicTag(text) {
         .replace(/[\u2018\u2019\u201A\u201B\uFF07]/g, "'")
         // HTML-entity-encoded pic tags → decoded for regex matching
         // e.g. &lt;pic prompt=&quot;...&quot;&gt; → <pic prompt="...">
-        .replace(/&lt;(\s*pic\s+[^\n]*?prompt\s*=\s*)&quot;([^\n]*?)&quot;(\s*\/?\s*)&gt;/gi, '<$1"$2"$3>')
-        .replace(/&lt;(\s*pic\s+[^\n]*?prompt\s*=\s*)&quot;([^\n]*?)&quot;/gi, '<$1"$2"')
-        // Strip inline backtick wrapping around pic tags (e.g., `<pic prompt="...">`)
-        .replace(/`(<?\s*pic\s+[^`\n]*?prompt\s*=\s*(?:"[^"]*"|'[^']*')(?:\s*\/?\s*>)?)`/gi, '$1');
+        .replace(/&lt;(\s*(?:pic|img)\s+[^\n]*?prompt\s*=\s*)&quot;([^\n]*?)&quot;(\s*\/?\s*)&gt;/gi, '<$1"$2"$3>')
+        .replace(/&lt;(\s*(?:pic|img)\s+[^\n]*?prompt\s*=\s*)&quot;([^\n]*?)&quot;/gi, '<$1"$2"')
+        // Strip inline backtick wrapping around pic/img tags (e.g., `<pic prompt="...">`)
+        .replace(/`(<?\s*(?:pic|img)\s+[^`\n]*?prompt\s*=\s*(?:"[^"]*"|'[^']*')(?:\s*\/?\s*>)?)`/gi, '$1');
 }
 
 /**

@@ -24,7 +24,7 @@ const ROOM_ICON_GROUP = '👥';
 const ROOM_ICON_DIRECT = '💬';
 const ROOM_IMAGE_ON_PROMPT = '<image_generation_rule>\nWhen the responder would realistically take and send a photo in this room, insert a <pic prompt="concise English Danbooru-style tags"> tag.\nOnly use <pic> for photos the responder could actually take with their phone.\nNo narration, mood shots, or third-person views.\nRules:\n1) <pic prompt="..."> must already be final direct image tags.\n2) Format must be exactly "scene tags | Character 1: appearance tags | Character 2: appearance tags" with the double quotes included.\n3) Use "Character N:" labels, not actual names, for appearance blocks.\n4) Use explicit count tags such as 1girl, 1boy, 2girls, 2boys; never generic people-count tags.\n5) If three or more characters appear, include group shot.\n6) Preserve any weighted tags or special syntax such as 2::tag::, -2::tag::, or 3::tag:: exactly as written.\n7) Keep core appearance tags such as hair, eyes, and outfit when they are available for included characters.\n8) No Korean, explanations, markdown, or prose.\n</image_generation_rule>';
 const ROOM_IMAGE_OFF_PROMPT = '<image_generation_rule>\nWhen the responder would realistically take and send a photo in this room, insert a <pic prompt="short Korean photo description"> tag.\nOnly use <pic> for photos the responder could actually take with their phone.\nNo narration, mood shots, or third-person views.\n</image_generation_rule>';
-const ROOM_PIC_TAG_REGEX = /<?pic\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi;
+const ROOM_PIC_TAG_REGEX = /<?(?:pic|img)\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi;
 const ROOM_EMOTICON_ONLY_HTML_REGEX = /^<img\b[^>]*aria-label="[^"]*이모티콘[^"]*"[^>]*>$/i;
 const ROOM_EMOTICON_TOKEN_ONLY_REGEX = /^\s*\[\[\s*emoticon\s*:\s*[^\]]+\s*\]\]\s*$/i;
 const ROOM_REPLY_TOAST_DURATION_MS = 2600;
@@ -344,9 +344,9 @@ function normalizeQuotesForRoomPicTag(text) {
     return String(text || '')
         .replace(/[\u201C\u201D\u201E\u201F\uFF02]/g, '"')
         .replace(/[\u2018\u2019\u201A\u201B\uFF07]/g, "'")
-        .replace(/&lt;(\s*pic\s+[^\n]*?prompt\s*=\s*)&quot;([^\n]*?)&quot;(\s*\/?\s*)&gt;/gi, '<$1"$2"$3>')
-        .replace(/&lt;(\s*pic\s+[^\n]*?prompt\s*=\s*)&quot;([^\n]*?)&quot;/gi, '<$1"$2"')
-        .replace(/`(<?\s*pic\s+[^`\n]*?prompt\s*=\s*(?:"[^"]*"|'[^']*')(?:\s*\/?\s*>)?)`/gi, '$1');
+        .replace(/&lt;(\s*(?:pic|img)\s+[^\n]*?prompt\s*=\s*)&quot;([^\n]*?)&quot;(\s*\/?\s*)&gt;/gi, '<$1"$2"$3>')
+        .replace(/&lt;(\s*(?:pic|img)\s+[^\n]*?prompt\s*=\s*)&quot;([^\n]*?)&quot;/gi, '<$1"$2"')
+        .replace(/`(<?\s*(?:pic|img)\s+[^`\n]*?prompt\s*=\s*(?:"[^"]*"|'[^']*')(?:\s*\/?\s*>)?)`/gi, '$1');
 }
 
 function escapeRegex(value) {
