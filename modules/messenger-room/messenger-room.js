@@ -61,6 +61,9 @@ function normalizeRoomMessageExtra(extra = {}) {
             .filter((item) => item.name && item.url)
         : [];
     const title = String(source.title || '').trim();
+    const processedPicTags = Array.isArray(source.processed_pic_tags)
+        ? source.processed_pic_tags.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
     return {
         ...source,
         image_swipes: imageSwipes,
@@ -68,6 +71,7 @@ function normalizeRoomMessageExtra(extra = {}) {
         title,
         inline_image: source.inline_image === true || imageSwipes.length > 0,
         emoticon_images: emoticonImages,
+        processed_pic_tags: processedPicTags,
     };
 }
 
@@ -214,6 +218,7 @@ export function normalizeMessengerRooms(rooms = [], binding = 'chat') {
                     authorKey: String(message?.authorKey || '').trim(),
                     authorName: String(message?.authorName || '').trim(),
                     text: String(message?.text || '').trim(),
+                    rawText: String(message?.rawText || message?.text || '').trim(),
                     html: String(message?.html || '').trim(),
                     extra: normalizeRoomMessageExtra(message?.extra),
                     timestamp: Number(message?.timestamp) || Date.now(),
@@ -499,15 +504,10 @@ function buildRoomInlineMediaHtml(extra, senderName) {
 
 function buildRoomInlineMessageHtml(message, senderName) {
     const normalizedExtra = normalizeRoomMessageExtra(message?.extra);
-    let html = buildRoomStoredMessageHtml(String(message?.rawText || message?.text || ''), senderName);
-    const trailingMediaHtml = buildRoomInlineMediaHtml({
-        ...normalizedExtra,
-        image_swipes: [],
-    }, senderName);
-    if (trailingMediaHtml) {
-        html = `${html}${html ? '<br>' : ''}${trailingMediaHtml}`;
-    }
-    return html;
+    const textHtml = buildRoomStoredMessageHtml(String(message?.text || message?.rawText || ''), senderName);
+    const mediaHtml = buildRoomInlineMediaHtml(normalizedExtra, senderName);
+    if (!mediaHtml) return textHtml;
+    return `<div class="slm-room-message-rich-content">${[textHtml, mediaHtml].filter(Boolean).join('')}</div>`;
 }
 
 function isSegmentedRoomMessageHtml(html) {
@@ -1084,22 +1084,28 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
     const settings = getRoomImageSettings();
     const normalizedSource = normalizeQuotesForRoomPicTag(String(rawText || ''));
     let processedText = normalizedSource;
+    const imageSwipes = [];
+    const processedPicTags = [];
+    let lastImagePrompt = '';
     ROOM_PIC_TAG_REGEX.lastIndex = 0;
     const picMatches = [...normalizedSource.matchAll(ROOM_PIC_TAG_REGEX)];
     if (picMatches.length > 0) {
         const replacements = [];
-        for (const match of picMatches.slice(0, 3)) {
+        for (const [matchIdx, match] of picMatches.entries()) {
             const fullTag = match[0];
             const rawPrompt = String(match[1] || match[2] || '').trim();
             let replacement = '';
+            let generatedInlineImage = false;
             if (rawPrompt) {
-                if (settings.messageImageGenerationMode) {
+                if (settings.messageImageGenerationMode && matchIdx < 3) {
                     const imageUrl = await generateRoomMessageImageViaApi(rawPrompt);
-                    if (imageUrl) {
-                        replacement = buildRoomGeneratedImageTag(imageUrl, rawPrompt);
-                        if (!replacement) {
-                            console.warn('[ST-LifeSim] 메신저 방 이미지 URL 형식 거부됨:', String(imageUrl).slice(0, 120));
-                        }
+                    if (imageUrl && isAllowedRoomGeneratedImageUrl(imageUrl)) {
+                        imageSwipes.push(imageUrl);
+                        processedPicTags.push(fullTag);
+                        lastImagePrompt = rawPrompt;
+                        generatedInlineImage = true;
+                    } else if (imageUrl) {
+                        console.warn('[ST-LifeSim] 메신저 방 이미지 URL 형식 거부됨:', String(imageUrl).slice(0, 120));
                     } else {
                         console.warn('[ST-LifeSim] 메신저 방 이미지 생성 실패:', {
                             senderName,
@@ -1109,6 +1115,9 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
                 }
                 if (!replacement) {
                     replacement = settings.messageImageTextTemplate.replace(/\{description\}/g, rawPrompt);
+                }
+                if (generatedInlineImage) {
+                    replacement = '';
                 }
             }
             replacements.push({ index: match.index, length: fullTag.length, replacement });
@@ -1122,14 +1131,15 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
             });
         }
     }
-    const fallbackText = processedText || normalizeRoomPromptText(rawText);
+    const fallbackText = normalizeRoomPromptText(processedText || rawText);
     const emoticonMedia = extractAiSelectedEmoticonMedia(fallbackText, senderName);
     const plainText = String(emoticonMedia.text || fallbackText).trim();
     const extra = normalizeRoomMessageExtra({
-        image_swipes: [],
-        image: '',
-        title: '',
-        inline_image: false,
+        image_swipes: imageSwipes,
+        image: imageSwipes[imageSwipes.length - 1] || '',
+        title: lastImagePrompt,
+        inline_image: imageSwipes.length > 0,
+        processed_pic_tags: processedPicTags,
         emoticon_images: emoticonMedia.emoticons,
     });
     const hasInlineMedia = hasRoomInlineMedia({ extra });
@@ -1141,7 +1151,7 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
         text: normalizedText,
         html: html !== normalizedText ? html : '',
         extra,
-        rawText: normalizedText,
+        rawText: normalizedSource,
     };
 }
 
@@ -1354,7 +1364,7 @@ function renderRoomMessageBubbleContent(message, bubble) {
     if (hasRoomInlineMedia({ extra })) {
         const inlineHtml = buildRoomInlineMessageHtml(message, senderName);
         bubble.innerHTML = inlineHtml;
-        bubble.classList.toggle('multiline', ROOM_BR_TAG_REGEX.test(inlineHtml) || isSegmentedRoomMessageHtml(inlineHtml));
+        bubble.classList.remove('multiline');
         bubble.classList.toggle('emoticon-only', isEmoticonOnlyRoomMessageHtml(inlineHtml));
         return;
     }
@@ -1364,7 +1374,7 @@ function renderRoomMessageBubbleContent(message, bubble) {
         bubble.classList.toggle('emoticon-only', isEmoticonOnlyRoomMessageHtml(message.html));
         return;
     }
-    const html = buildRoomStoredMessageHtml(String(message?.rawText || message?.text || ''), senderName);
+    const html = buildRoomStoredMessageHtml(String(message?.text || message?.rawText || ''), senderName);
     bubble.innerHTML = html;
     bubble.classList.toggle('multiline', isSegmentedRoomMessageHtml(html));
     bubble.classList.toggle('emoticon-only', isEmoticonOnlyRoomMessageHtml(html));
