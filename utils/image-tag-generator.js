@@ -890,7 +890,19 @@ function mergeAppearanceGroupsWithMatched(appearanceGroups = [], matched = []) {
     return appearanceGroups
         .map((group) => {
             const { name } = parseAppearanceGroup(group);
-            const sourceTags = matchedMap.get(String(name || '').trim().toLowerCase()) || '';
+            const normalizedName = String(name || '').trim().toLowerCase();
+            let sourceTags = matchedMap.get(normalizedName) || '';
+            if (!sourceTags) {
+                const characterIndexMatch = normalizedName.match(CHARACTER_INDEX_PATTERN);
+                if (characterIndexMatch) {
+                    const characterNumber = Number(characterIndexMatch[1]);
+                    const matchedIndex = characterNumber - 1;
+                    if (characterNumber >= 1 && matchedIndex < matched.length) {
+                        const matchedEntry = matched[matchedIndex];
+                        sourceTags = String(matchedEntry?.appearanceTags || '').trim();
+                    }
+                }
+            }
             return sourceTags ? mergeAppearanceGroupWithCore(group, sourceTags) : safeAppearanceGroup(group);
         })
         .filter(Boolean);
@@ -907,6 +919,7 @@ const APPEARANCE_TAG_KEYWORDS = [
     'tall', 'short', 'young', 'mature', 'face', 'lips', 'nose', 'ear', 'ears',
 ];
 const APPEARANCE_TAG_PATTERN = new RegExp(`\\b(${APPEARANCE_TAG_KEYWORDS.join('|')})\\b`, 'i');
+const CHARACTER_INDEX_PATTERN = /^character\s+(\d+)$/i;
 const MAX_DANBOORU_TAG_LENGTH = 80;
 
 function normalizeTagText(text) {
