@@ -3795,6 +3795,13 @@ function attachGeneratedMessageImagePostProcessing(msgIdx) {
 function scheduleGeneratedMessageImagePostProcessing(msgIdx) {
     const numericMsgIdx = Number(msgIdx);
     if (!Number.isFinite(numericMsgIdx) || numericMsgIdx < 0) return;
+    try {
+        if (attachGeneratedMessageImagePostProcessing(numericMsgIdx)) {
+            return;
+        }
+    } catch (err) {
+        console.error('[ST-LifeSim] Generated image post-processing error:', err);
+    }
     setTimeout(() => {
         try {
             attachGeneratedMessageImagePostProcessing(numericMsgIdx);
@@ -3963,6 +3970,7 @@ async function applyCharacterImageDisplayMode() {
                 lastMsg.mes = currentMes;
                 // renderedHtml을 덮어쓰지 않고 escaped media만 hydrate한다.
                 await refreshRenderedMessage(msgIdx, lastMsg, null, '이미지', { syncEscapedMediaOnly: true });
+                scheduleGeneratedMessageImagePostProcessing(msgIdx);
                 if (typeof ctx.saveChat === 'function') {
                     await ctx.saveChat();
                 }
