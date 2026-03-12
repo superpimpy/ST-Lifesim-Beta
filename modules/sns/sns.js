@@ -262,7 +262,7 @@ function buildSnsDirectImagePromptRequest(sourcePrompt, authorName, authorAppear
         'For interactions, use source#[action] and target#[action] tags.',
         'Outfit tags may be freely adjusted to fit the situation.',
         'Always produce a fresh prompt for a new image.',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 }
 
 async function createSnsImagePrompt(ctx, sourcePrompt, authorName, contacts = []) {
