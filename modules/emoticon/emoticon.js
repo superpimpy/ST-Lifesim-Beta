@@ -65,9 +65,6 @@ function applyTagReplacementMode(text, tagReplacementMap) {
         if (!targetTag || !replacement) return;
         const escapedTargetTag = escapeHtml(targetTag);
         source = source.split(escapedTargetTag).join(replacement);
-        if (escapedTargetTag !== targetTag) {
-            source = source.split(targetTag).join(replacement);
-        }
     });
     return source;
 }

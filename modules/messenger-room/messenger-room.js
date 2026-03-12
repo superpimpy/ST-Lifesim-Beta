@@ -979,7 +979,7 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
         for (const match of picMatches.slice(0, 3)) {
             const fullTag = match[0];
             const rawPrompt = String(match[1] || match[2] || '').trim();
-            let replacement = fullTag;
+            let replacement = '';
             if (rawPrompt) {
                 if (settings.messageImageGenerationMode) {
                     const includeNames = [senderName];
@@ -999,9 +999,10 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
                         const safeUrl = escapeHtml(imageUrl);
                         const safePrompt = escapeHtml(rawPrompt);
                         imageTagReplacementMap.set(fullTag, `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`);
+                        replacement = fullTag;
                     }
                 }
-                if (replacement === fullTag && !imageTagReplacementMap.has(fullTag)) {
+                if (!replacement) {
                     replacement = settings.messageImageTextTemplate.replace(/\{description\}/g, rawPrompt);
                 }
             }
@@ -1017,9 +1018,8 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
         }
     }
     const html = buildRoomMessageHtml(processedText, senderName, imageTagReplacementMap);
-    ROOM_PIC_TAG_REGEX.lastIndex = 0;
     const plainText = processedText
-        .replace(ROOM_PIC_TAG_REGEX, ' [사진] ')
+        .replace(/<?pic\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi, ' [사진] ')
         .split('\n')
         .map((line) => line.replace(/\s+/g, ' ').trim())
         .join('\n')
