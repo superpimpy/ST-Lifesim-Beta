@@ -3758,6 +3758,17 @@ async function waitForRenderedMessageTextElement(msgIdx, logLabel = '메시지')
     return false;
 }
 
+/**
+ * 렌더된 메시지 UI를 갱신한다.
+ * @param {number} msgIdx
+ * @param {object} message
+ * @param {string|null} html - 직접 덮어쓸 HTML. null이면 기본 렌더러 결과를 유지한다.
+ * @param {string} [logLabel='메시지']
+ * @param {{skipDirectHtmlSync?: boolean, syncEscapedMediaOnly?: boolean}} [options]
+ *   syncEscapedMediaOnly는 기본 렌더러가 escape한 생성 미디어 태그만 실제 DOM으로 복원해
+ *   기존 .mes_text 텍스트 구조/스타일을 유지할 때 사용한다.
+ * @returns {Promise<boolean>}
+ */
 async function refreshRenderedMessage(msgIdx, message, html, logLabel = '메시지', options = {}) {
     const { skipDirectHtmlSync = false, syncEscapedMediaOnly = false } = options;
     const nativeUpdateFn = getNativeUpdateMessageBlock();
@@ -3880,11 +3891,11 @@ async function applyCharacterImageDisplayMode() {
                 currentMes = currentMes.slice(0, adjustedIndex) + replacement + currentMes.slice(adjustedIndex + fullTag.length);
                 offset += replacement.length - fullTag.length;
 
-                // 매 생성마다 메시지 데이터와 렌더링 HTML을 즉시 갱신해
-                // 생성 직후 새 이미지가 화면에 바로 반영되도록 한다.
+                // 매 생성마다 메시지 데이터를 즉시 갱신해 생성 직후 새 이미지가 화면에 바로 반영되도록 한다.
+                // 이때 기본 렌더러가 만든 .mes_text 구조는 유지하고 생성 미디어 태그만 복원해 기존 텍스트 스타일 깨짐을 막는다.
                 lastMsg.mes = currentMes;
-                const renderedHtml = buildCharacterMessageRichHtml(currentMes, charName);
-                await refreshRenderedMessage(msgIdx, lastMsg, renderedHtml, '이미지');
+                // renderedHtml을 덮어쓰지 않고 escaped media만 hydrate한다.
+                await refreshRenderedMessage(msgIdx, lastMsg, null, '이미지', { syncEscapedMediaOnly: true });
                 if (typeof ctx.saveChat === 'function') {
                     await ctx.saveChat();
                 }

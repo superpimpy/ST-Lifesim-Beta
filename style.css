@@ -1548,19 +1548,11 @@ body[data-theme="dark"],
   border-radius: var(--slm-image-radius, 10px);
   box-shadow: 0 4px 15px rgba(0,0,0,0.22);
   border: 1px solid var(--slm-border);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .slm-message-rich-content img[data-slm-pic-id],
 .slm-room-message-bubble img[data-slm-pic-id] {
   width: min(100%, 240px);
-}
-
-.mes_text img[data-slm-pic-id]:hover,
-.slm-message-rich-content img[data-slm-pic-id]:hover,
-.slm-room-message-bubble img[data-slm-pic-id]:hover {
-  transform: scale(1.01);
-  box-shadow: 0 8px 25px rgba(0,0,0,0.3);
 }
 
 .slm-room-member-row {
