@@ -3898,6 +3898,14 @@ async function refreshRenderedMessage(msgIdx, message, html, logLabel = '메시�
     return nativeUpdated || domUpdated;
 }
 
+async function refreshAndPersistRenderedMessage(ctx, msgIdx, message, html, logLabel = '메시지', options = {}) {
+    await refreshRenderedMessage(msgIdx, message, html, logLabel, options);
+    if (typeof ctx?.saveChat === 'function') {
+        await ctx.saveChat();
+    }
+    await emitMessageRenderLifecycle(ctx, msgIdx);
+}
+
 /**
  * char 메시지 렌더링 후 이미지 태그를 처리한다
  * - ON: <pic prompt="..."> 태그를 감지하여 이미지 생성 API로 실제 이미지 생성
@@ -4001,12 +4009,8 @@ async function applyCharacterImageDisplayMode() {
                 // .mes_text에도 치환 결과가 바로 반영되도록 렌더 HTML 자체를 동기화한다.
                 lastMsg.mes = currentMes;
                 const renderedHtml = buildCharacterMessageRichHtml(currentMes, charName);
-                await refreshRenderedMessage(msgIdx, lastMsg, renderedHtml, '이미지');
+                await refreshAndPersistRenderedMessage(ctx, msgIdx, lastMsg, renderedHtml, '이미지');
                 scheduleGeneratedMessageImagePostProcessing(msgIdx);
-                if (typeof ctx.saveChat === 'function') {
-                    await ctx.saveChat();
-                }
-                await emitMessageRenderLifecycle(ctx, msgIdx);
             }
 
             if (generatedCount > 0) {
@@ -4040,11 +4044,7 @@ async function applyCharacterImageDisplayMode() {
 
             if (updatedMes !== mes) {
                 lastMsg.mes = updatedMes;
-                await refreshRenderedMessage(msgIdx, lastMsg, null, '이미지 텍스트', { skipDirectHtmlSync: true });
-                if (typeof ctx.saveChat === 'function') {
-                    await ctx.saveChat();
-                }
-                await emitMessageRenderLifecycle(ctx, msgIdx);
+                await refreshAndPersistRenderedMessage(ctx, msgIdx, lastMsg, null, '이미지 텍스트', { skipDirectHtmlSync: true });
             }
         }
     } finally {
@@ -4080,11 +4080,7 @@ async function applyCharacterEmoticonDisplayMode() {
         ? replaceAiSelectedEmoticons(renderedMessageEl.innerHTML, senderName)
         : getExistingOrBuiltRenderedHtml(msgIdx, updatedMes, senderName);
     lastMsg.mes = updatedMes;
-    await refreshRenderedMessage(msgIdx, lastMsg, renderedHtml, '이모티콘');
-    if (typeof ctx.saveChat === 'function') {
-        await ctx.saveChat();
-    }
-    await emitMessageRenderLifecycle(ctx, msgIdx);
+    await refreshAndPersistRenderedMessage(ctx, msgIdx, lastMsg, renderedHtml, '이모티콘');
 }
 
 // ── 주간/야간 테마 토글 ──────────────────────────────────────────
@@ -4339,14 +4335,14 @@ async function init() {
             onCharacterMessageRenderedForProactiveCall();
             trackGifticonUsageFromCharacterMessage();
             try {
-                await applyCharacterImageDisplayMode();
-            } catch (e) {
-                console.error('[ST-LifeSim] 이미지 표시 모드 적용 오류:', e);
-            }
-            try {
                 await applyCharacterEmoticonDisplayMode();
             } catch (e) {
                 console.error('[ST-LifeSim] 이모티콘 표시 모드 적용 오류:', e);
+            }
+            try {
+                await applyCharacterImageDisplayMode();
+            } catch (e) {
+                console.error('[ST-LifeSim] 이미지 표시 모드 적용 오류:', e);
             }
         });
     }
