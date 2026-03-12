@@ -3712,6 +3712,7 @@ async function applyCharacterImageDisplayMode() {
                 const fullTag = match[0];
                 const rawPrompt = (match[1] || match[2] || '').trim();
                 if (!rawPrompt) return false;
+                // prompt만 같아도 태그 원문(인용부호/공백/형태)이 다를 수 있어, 중복 생성 방지를 위해 원문 태그와 함께 키를 만든다.
                 const picTagKey = `${rawPrompt}::${fullTag}`;
                 return !processedPicTags.has(picTagKey);
             });
