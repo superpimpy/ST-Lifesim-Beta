@@ -3883,8 +3883,8 @@ async function applyCharacterImageDisplayMode() {
                 // 매 생성마다 메시지 데이터와 렌더링 HTML을 즉시 갱신해
                 // 생성 직후 새 이미지가 화면에 바로 반영되도록 한다.
                 lastMsg.mes = currentMes;
-                // html 인자는 사용하지 않고, 기본 렌더러가 이스케이프한 생성 이미지 태그만 기존 DOM에서 복원한다.
-                await refreshRenderedMessage(msgIdx, lastMsg, null, '이미지', { syncEscapedMediaOnly: true });
+                const renderedHtml = buildCharacterMessageRichHtml(currentMes, charName);
+                await refreshRenderedMessage(msgIdx, lastMsg, renderedHtml, '이미지');
                 if (typeof ctx.saveChat === 'function') {
                     await ctx.saveChat();
                 }
