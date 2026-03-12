@@ -3792,11 +3792,43 @@ function attachGeneratedMessageImagePostProcessing(msgIdx) {
     return attachedCount > 0;
 }
 
+/**
+ * 태그 치환 직후 깨질 수 있는 .mes / .mes_text 레이아웃 스타일을
+ * 대상 메시지 DOM에 한정해 다시 계산하도록 유도한다.
+ * @param {number} msgIdx
+ * @returns {boolean}
+ */
+function refreshRenderedMessageCss(msgIdx) {
+    const numericMsgIdx = Number(msgIdx);
+    if (!Number.isFinite(numericMsgIdx) || numericMsgIdx < 0) return false;
+    const messageElement = getRenderedMessageElement(numericMsgIdx);
+    const messageTextElement = messageElement?.querySelector('.mes_text');
+    if (!messageElement || !messageTextElement) return false;
+    if (!messageTextElement.querySelector('img[data-slm-pic-id]')) return false;
+
+    const parentNode = messageTextElement.parentNode;
+    if (!parentNode) return false;
+
+    const nextSibling = messageTextElement.nextSibling;
+    parentNode.removeChild(messageTextElement);
+    if (nextSibling) {
+        parentNode.insertBefore(messageTextElement, nextSibling);
+    } else {
+        parentNode.appendChild(messageTextElement);
+    }
+
+    void messageElement.offsetHeight;
+    void messageTextElement.offsetHeight;
+    return true;
+}
+
 function scheduleGeneratedMessageImagePostProcessing(msgIdx) {
     const numericMsgIdx = Number(msgIdx);
     if (!Number.isFinite(numericMsgIdx) || numericMsgIdx < 0) return;
     try {
-        if (attachGeneratedMessageImagePostProcessing(numericMsgIdx)) {
+        const attached = attachGeneratedMessageImagePostProcessing(numericMsgIdx);
+        refreshRenderedMessageCss(numericMsgIdx);
+        if (attached) {
             return;
         }
     } catch (err) {
@@ -3805,6 +3837,7 @@ function scheduleGeneratedMessageImagePostProcessing(msgIdx) {
     setTimeout(() => {
         try {
             attachGeneratedMessageImagePostProcessing(numericMsgIdx);
+            refreshRenderedMessageCss(numericMsgIdx);
         } catch (err) {
             console.error('[ST-LifeSim] Generated image post-processing error:', err);
         }
