@@ -3543,6 +3543,7 @@ function wrapRichMessageHtml(html) {
 const MESSAGE_RENDER_WAIT_ATTEMPTS = 6;
 const MESSAGE_RENDER_RETRY_DELAY_FAST = 50;
 const MESSAGE_RENDER_RETRY_DELAY_SLOW = 120;
+const GENERATED_INLINE_MEDIA_TAG_REGEX = /<img\b[^>]*(?:data-slm-pic-id|data-slm-emoticon)[^>]*>/gi;
 
 function getRenderedMessageTextElement(msgIdx) {
     if (!Number.isFinite(msgIdx) || msgIdx < 0) return null;
@@ -3559,7 +3560,7 @@ function getRenderedMessageTextElement(msgIdx) {
 function buildCharacterMessageRichHtml(text, senderName = '{{char}}') {
     const mediaPlaceholders = new Map();
     let mediaCounter = 0;
-    const source = String(text || '').replace(/<img\b[^>]*(?:data-slm-pic-id|data-slm-emoticon)[^>]*>/gi, (match) => {
+    const source = String(text || '').replace(GENERATED_INLINE_MEDIA_TAG_REGEX, (match) => {
         const placeholder = `__SLM_MEDIA_${mediaCounter++}__`;
         mediaPlaceholders.set(placeholder, match);
         return placeholder;
@@ -3614,6 +3615,75 @@ async function updateRenderedMessageHtml(msgIdx, html, logLabel = '메시지') {
     return false;
 }
 
+function createHtmlFragment(html) {
+    const template = document.createElement('template');
+    template.innerHTML = wrapRichMessageHtml(html);
+    return template.content;
+}
+
+function hydrateEscapedGeneratedMediaInElement(element) {
+    if (!element || !document?.createTreeWalker || !document?.createElement) return false;
+    const walker = document.createTreeWalker(
+        element,
+        globalThis.NodeFilter?.SHOW_TEXT ?? 4,
+    );
+    const textNodes = [];
+    let currentNode = walker.nextNode();
+    while (currentNode) {
+        if (GENERATED_INLINE_MEDIA_TAG_REGEX.test(currentNode.nodeValue || '')) {
+            textNodes.push(currentNode);
+        }
+        GENERATED_INLINE_MEDIA_TAG_REGEX.lastIndex = 0;
+        currentNode = walker.nextNode();
+    }
+
+    let changed = false;
+    for (const textNode of textNodes) {
+        const source = String(textNode.nodeValue || '');
+        GENERATED_INLINE_MEDIA_TAG_REGEX.lastIndex = 0;
+        let lastIndex = 0;
+        let match;
+        let hasLocalChange = false;
+        const fragment = document.createDocumentFragment();
+
+        while ((match = GENERATED_INLINE_MEDIA_TAG_REGEX.exec(source)) !== null) {
+            hasLocalChange = true;
+            if (match.index > lastIndex) {
+                fragment.append(source.slice(lastIndex, match.index));
+            }
+            fragment.append(createHtmlFragment(match[0]));
+            lastIndex = match.index + match[0].length;
+        }
+
+        if (!hasLocalChange) continue;
+        if (lastIndex < source.length) {
+            fragment.append(source.slice(lastIndex));
+        }
+        textNode.parentNode?.replaceChild(fragment, textNode);
+        changed = true;
+    }
+    GENERATED_INLINE_MEDIA_TAG_REGEX.lastIndex = 0;
+    return changed;
+}
+
+async function syncEscapedGeneratedMedia(msgIdx, logLabel = '메시지') {
+    if (!Number.isFinite(msgIdx) || msgIdx < 0) return false;
+    for (let attempt = 0; attempt < MESSAGE_RENDER_WAIT_ATTEMPTS; attempt++) {
+        try {
+            const mesTextEl = getRenderedMessageTextElement(msgIdx);
+            if (mesTextEl) {
+                return hydrateEscapedGeneratedMediaInElement(mesTextEl) || true;
+            }
+        } catch (uiErr) {
+            console.warn(`[ST-LifeSim] ${logLabel} 미디어 DOM 동기화 실패:`, uiErr);
+            return false;
+        }
+        await waitForDelay(attempt < 2 ? MESSAGE_RENDER_RETRY_DELAY_FAST : MESSAGE_RENDER_RETRY_DELAY_SLOW);
+    }
+    console.warn(`[ST-LifeSim] ${logLabel} 미디어 DOM 동기화 대상 요소를 찾지 못했습니다.`, { msgIdx });
+    return false;
+}
+
 async function waitForRenderedMessageTextElement(msgIdx, logLabel = '메시지') {
     if (!Number.isFinite(msgIdx) || msgIdx < 0) return false;
     for (let attempt = 0; attempt < MESSAGE_RENDER_WAIT_ATTEMPTS; attempt++) {
@@ -3627,7 +3697,7 @@ async function waitForRenderedMessageTextElement(msgIdx, logLabel = '메시지')
 }
 
 async function refreshRenderedMessage(msgIdx, message, html, logLabel = '메시지', options = {}) {
-    const { skipDirectHtmlSync = false } = options;
+    const { skipDirectHtmlSync = false, syncEscapedMediaOnly = false } = options;
     const nativeUpdateFn = getNativeUpdateMessageBlock();
     let nativeUpdated = false;
     if (nativeUpdateFn && message) {
@@ -3640,6 +3710,8 @@ async function refreshRenderedMessage(msgIdx, message, html, logLabel = '메시�
     }
     const domUpdated = skipDirectHtmlSync
         ? await waitForRenderedMessageTextElement(msgIdx, logLabel)
+        : syncEscapedMediaOnly
+            ? await syncEscapedGeneratedMedia(msgIdx, logLabel)
         : await updateRenderedMessageHtml(msgIdx, html, logLabel);
     return nativeUpdated || domUpdated;
 }
@@ -3746,8 +3818,7 @@ async function applyCharacterImageDisplayMode() {
                 // 매 생성마다 메시지 데이터와 렌더링 HTML을 즉시 갱신해
                 // 생성 직후 새 이미지가 화면에 바로 반영되도록 한다.
                 lastMsg.mes = currentMes;
-                const renderedHtml = buildCharacterMessageRichHtml(currentMes, charName);
-                await refreshRenderedMessage(msgIdx, lastMsg, renderedHtml, '이미지');
+                await refreshRenderedMessage(msgIdx, lastMsg, null, '이미지', { syncEscapedMediaOnly: true });
                 if (typeof ctx.saveChat === 'function') {
                     await ctx.saveChat();
                 }
@@ -3785,8 +3856,7 @@ async function applyCharacterImageDisplayMode() {
 
             if (updatedMes !== mes) {
                 lastMsg.mes = updatedMes;
-                const renderedHtml = buildCharacterMessageRichHtml(updatedMes, charName);
-                await refreshRenderedMessage(msgIdx, lastMsg, renderedHtml, '이미지 텍스트');
+                await refreshRenderedMessage(msgIdx, lastMsg, null, '이미지 텍스트', { skipDirectHtmlSync: true });
                 if (typeof ctx.saveChat === 'function') {
                     await ctx.saveChat();
                 }
