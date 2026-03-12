@@ -27,6 +27,7 @@ const ROOM_IMAGE_OFF_PROMPT = '<image_generation_rule>\nWhen the responder would
 const ROOM_PIC_TAG_REGEX = /<?pic\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi;
 const ROOM_EMOTICON_ONLY_HTML_REGEX = /^<img\b[^>]*aria-label="[^"]*이모티콘[^"]*"[^>]*>$/i;
 const ROOM_EMOTICON_TOKEN_ONLY_REGEX = /^\s*\[\[\s*emoticon\s*:\s*[^\]]+\s*\]\]\s*$/i;
+const ROOM_BR_TAG_REGEX = /<br\s*\/?>/i;
 const ROOM_REPLY_TOAST_DURATION_MS = 2600;
 const ROOM_DEFAULTS = {
     autoReplyEnabled: true,
@@ -458,7 +459,7 @@ function buildRoomInlineMessageHtml(message, senderName) {
 
     ROOM_PIC_TAG_REGEX.lastIndex = 0;
     for (const match of sourceText.matchAll(ROOM_PIC_TAG_REGEX)) {
-        const matchIndex = Number(match.index);
+        const matchIndex = typeof match.index === 'number' ? match.index : lastIndex;
         htmlParts.push(escapeHtml(sourceText.slice(lastIndex, matchIndex)));
         if (usedImageCount < normalizedExtra.image_swipes.length) {
             const imageUrl = normalizedExtra.image_swipes[usedImageCount];
@@ -1344,7 +1345,7 @@ function renderRoomMessageBubbleContent(message, bubble) {
     if (hasRoomInlineMedia({ extra })) {
         const inlineHtml = buildRoomInlineMessageHtml(message, senderName);
         bubble.innerHTML = inlineHtml;
-        bubble.classList.toggle('multiline', /<br\s*\/?>/i.test(inlineHtml) || isSegmentedRoomMessageHtml(inlineHtml));
+        bubble.classList.toggle('multiline', ROOM_BR_TAG_REGEX.test(inlineHtml) || isSegmentedRoomMessageHtml(inlineHtml));
         bubble.classList.toggle('emoticon-only', isEmoticonOnlyRoomMessageHtml(inlineHtml));
         return;
     }

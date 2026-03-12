@@ -3640,7 +3640,7 @@ function buildInlineDisplayHtml(text, senderName, extra = {}) {
 
     PIC_TAG_REGEX.lastIndex = 0;
     for (const match of sourceText.matchAll(PIC_TAG_REGEX)) {
-        const matchIndex = Number(match.index);
+        const matchIndex = typeof match.index === 'number' ? match.index : lastIndex;
         htmlParts.push(escapeHtml(sourceText.slice(lastIndex, matchIndex)));
         if (usedImageCount < normalizedExtra.image_swipes.length) {
             const imageUrl = normalizedExtra.image_swipes[usedImageCount];
