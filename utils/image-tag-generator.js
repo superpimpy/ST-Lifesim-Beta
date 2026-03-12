@@ -404,7 +404,7 @@ function resolveImagePromptContext(rawPrompt, options = {}) {
     const rawPromptText = String(rawPrompt || '');
     const explicitAppearanceRefs = new Set(
         Array.from(rawPromptText.matchAll(/{{appearanceTag:\s*([^}]+?)\s*}}/gi))
-            .map((match) => String(match?.[1] || '').trim().toLowerCase())
+            .map((match) => String(match[1] || '').trim().toLowerCase())
             .filter(Boolean),
     );
 
@@ -470,6 +470,8 @@ function resolveImagePromptContext(rawPrompt, options = {}) {
         if (!cleanName) continue;
         const normalized = cleanName.toLowerCase();
         if (matchedNamesLower.has(normalized)) continue;
+        // includeNames are prompt-scoped hints only: keep them only when the prompt
+        // explicitly references their appearance tag variable or mentions the name itself.
         if (!explicitAppearanceRefs.has(normalized) && !isNameMentioned(cleanName)) continue;
         const contact = allContacts.find(c =>
             String(c.name || '').trim().toLowerCase() === normalized
