@@ -3395,8 +3395,13 @@ const MSG_IMAGE_INJECT_TAG = 'st-lifesim-msg-image';
 //   <pic prompt="...">  /  <pic prompt="..." />  /  <pic prompt='...'>
 //   pic prompt="..."  (앵글 브래킷 없음)
 //   <pic prompt="..." (닫는 브래킷 누락)
+//   <pic class="..." prompt="..." data-x="..."> 처럼 prompt 앞뒤에 추가 속성이 있는 변형
 //   다양한 공백, 인용부호, HTML 엔티티 변형
-const PIC_TAG_REGEX = /<?(?:pic|img)\s+[^>\n]*?\bprompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*\/?\s*>)?/gi;
+const PIC_TAG_ATTRIBUTE_FRAGMENT = String.raw`\s+[^\s=/>]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>]+))?`;
+const PIC_TAG_REGEX = new RegExp(
+    String.raw`<?(?:pic|img)\b(?:${PIC_TAG_ATTRIBUTE_FRAGMENT})*?\s+prompt\s*=\s*(?:"([^"]*)"|'([^']*)')(?:${PIC_TAG_ATTRIBUTE_FRAGMENT})*(?:\s*\/?\s*>)?`,
+    'gi',
+);
 
 /**
  * AI 모델이 종종 출력하는 유니코드 스마트/커리 인용부호를 ASCII 인용부호로 정규화한다.
