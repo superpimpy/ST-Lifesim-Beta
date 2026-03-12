@@ -3761,6 +3761,7 @@ async function applyCharacterEmoticonDisplayMode() {
     if (typeof ctx.saveChat === 'function') {
         await ctx.saveChat();
     }
+    await emitMessageRenderLifecycle(ctx, msgIdx);
 }
 
 // ── 주간/야간 테마 토글 ──────────────────────────────────────────
