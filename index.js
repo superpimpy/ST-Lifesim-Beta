@@ -3438,6 +3438,10 @@ function normalizeQuotesForPicTag(text) {
         .replace(/`(<?\s*pic\s+[^`\n]*?prompt\s*=\s*(?:"[^"]*"|'[^']*')(?:\s*\/?\s*>)?)`/gi, '$1');
 }
 
+function buildProcessedPicTagKey(rawPrompt, fullTag) {
+    return JSON.stringify([String(rawPrompt || '').trim(), String(fullTag || '')]);
+}
+
 /**
  * 메신저 이미지 모드에 따라 AI 프롬프트 주입을 업데이트한다
  * ON: AI에게 사진 상황에서 <pic prompt="..."> 태그를 출력하도록 지시
@@ -3714,7 +3718,7 @@ async function applyCharacterImageDisplayMode() {
                 if (!rawPrompt) return false;
                 // 같은 프롬프트라도 태그 표기(인용 부호/공백/형태)가 다르면 별도 의도로 처리해야 하므로,
                 // 오탐 중복 제거를 막기 위해 prompt+fullTag 조합 키를 사용한다.
-                const picTagKey = `${rawPrompt}::${fullTag}`;
+                const picTagKey = buildProcessedPicTagKey(rawPrompt, fullTag);
                 return !processedPicTags.has(picTagKey);
             });
             if (pendingPicMatches.length === 0) {
@@ -3744,7 +3748,7 @@ async function applyCharacterImageDisplayMode() {
                 const fullTag = match[0];
                 const rawPrompt = (match[1] || match[2] || '').trim();
                 const adjustedIndex = match.index + offset;
-                const picTagKey = `${rawPrompt}::${fullTag}`;
+                const picTagKey = buildProcessedPicTagKey(rawPrompt, fullTag);
 
                 let replacement;
                 if (!rawPrompt) {
