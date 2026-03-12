@@ -212,7 +212,7 @@ function getProfileSummary(authorName) {
 
 function buildSnsImageInputPrompt(customTemplate, authorName, postContent) {
     // Only include scene/situation context for the image prompt.
-    // Appearance tags are handled separately by buildDirectImagePrompt via includeNames + getAppearanceTagsByName.
+    // Appearance tags are handled separately by buildDirectImagePrompt via contact context + getAppearanceTagsByName.
     if (!customTemplate) return `${authorName}'s social media photo post: "${postContent}"`;
     const authorProfile = getProfileSummary(authorName);
     return customTemplate
@@ -258,7 +258,7 @@ async function createSnsImagePrompt(ctx, sourcePrompt, authorName, contacts = []
     const tagWeight = Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0;
     const promptOptions = {
         forceIncludeNames: [authorName].filter(Boolean),
-        contacts: [],
+        contacts: Array.isArray(contacts) ? contacts.filter(Boolean) : [],
         getAppearanceTagsByName,
         tagWeight,
     };
