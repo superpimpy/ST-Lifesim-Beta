@@ -1198,6 +1198,9 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
     PIC_TAG_REGEX.lastIndex = 0;
     const picMatches = [...normalizedSource.matchAll(PIC_TAG_REGEX)];
     let currentMes = normalizedSource;
+    const imageSwipes = [];
+    const processedPicTags = [];
+    let lastImagePrompt = '';
     if (picMatches.length > 0) {
         const limitedPicMatches = picMatches.slice(0, MAX_MESSENGER_IMAGES_PER_RESPONSE);
         const limitedSet = new Set(limitedPicMatches.map((match) => match.index));
@@ -1212,8 +1215,11 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
                     const result = await processMessengerImageGeneration(rawPrompt, {
                         settings,
                     });
-                    if (result.imageUrl) {
-                        replacement = buildMessengerGeneratedImageTag(result.imageUrl, rawPrompt);
+                    if (result.imageUrl && isAllowedGeneratedImageUrl(result.imageUrl)) {
+                        imageSwipes.push(result.imageUrl);
+                        processedPicTags.push(fullTag);
+                        lastImagePrompt = rawPrompt;
+                        replacement = '';
                     } else {
                         replacement = result.fallbackText;
                     }
@@ -1226,9 +1232,15 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
             offset += replacement.length - fullTag.length;
         }
     }
-    const emoticonMedia = extractAiSelectedEmoticonMedia(currentMes || text, senderName);
-    const finalText = emoticonMedia.text || currentMes || String(text || '').trim();
+    const displayText = stripPicTagsForDisplay(currentMes || text);
+    const emoticonMedia = extractAiSelectedEmoticonMedia(displayText, senderName);
+    const finalText = emoticonMedia.text || displayText || String(text || '').trim();
     const extra = normalizeInlineMessageExtra({
+        image_swipes: imageSwipes,
+        image: imageSwipes[imageSwipes.length - 1] || '',
+        title: lastImagePrompt,
+        inline_image: imageSwipes.length > 0,
+        processed_pic_tags: processedPicTags,
         emoticon_images: emoticonMedia.emoticons,
     });
     const html = hasInlineMessageMedia(extra)
@@ -3460,7 +3472,9 @@ function isUrlAlreadyInChat(url, ctx) {
     const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
     return chat.some(msg => {
         const mes = String(msg?.mes || '');
-        return mes.includes(url);
+        if (mes.includes(url)) return true;
+        const extra = normalizeInlineMessageExtra(msg?.extra);
+        return extra.image === url || extra.image_swipes.includes(url);
     });
 }
 
@@ -3648,6 +3662,13 @@ function buildInlineDisplayHtml(text, senderName) {
     return replaceAiSelectedEmoticons(escapedText, senderName, tagReplacementMap);
 }
 
+function buildInlineMessageHtml(text, extra, senderName) {
+    const textHtml = buildInlineDisplayHtml(text, senderName);
+    const mediaHtml = buildInlineMessageMediaHtml(extra, senderName);
+    if (!mediaHtml) return textHtml;
+    return `<div class="slm-message-rich-content">${[textHtml, mediaHtml].filter(Boolean).join('')}</div>`;
+}
+
 async function updateRenderedMessageHtml(msgIdx, html, logLabel = '메시지') {
     if (!Number.isFinite(msgIdx) || msgIdx < 0) return false;
     const selectors = [
@@ -3731,6 +3752,9 @@ async function applyCharacterImageDisplayMode() {
             let currentMes = mes;
             let offset = 0; // 이전 치환으로 인한 누적 인덱스 오프셋
             let generatedCount = 0;
+            const imageSwipes = [];
+            const processedPicTags = [];
+            let lastImagePrompt = '';
 
             for (const match of picMatches) {
                 const fullTag = match[0];
@@ -3748,12 +3772,14 @@ async function applyCharacterImageDisplayMode() {
                     const result = await processMessengerImageGeneration(rawPrompt, {
                         settings,
                     });
-                    if (result.imageUrl) {
-                        replacement = buildMessengerGeneratedImageTag(result.imageUrl, rawPrompt);
-                        if (!replacement) {
-                            console.warn('[ST-LifeSim] 메신저 이미지 URL 형식 거부됨:', String(result.imageUrl).slice(0, 120));
-                            replacement = result.fallbackText;
-                        }
+                    if (result.imageUrl && isAllowedGeneratedImageUrl(result.imageUrl)) {
+                        imageSwipes.push(result.imageUrl);
+                        processedPicTags.push(fullTag);
+                        lastImagePrompt = rawPrompt;
+                        replacement = '';
+                    } else if (result.imageUrl) {
+                        console.warn('[ST-LifeSim] 메신저 이미지 URL 형식 거부됨:', String(result.imageUrl).slice(0, 120));
+                        replacement = result.fallbackText;
                     } else {
                         replacement = result.fallbackText;
                     }
@@ -3765,16 +3791,16 @@ async function applyCharacterImageDisplayMode() {
                 offset += replacement.length - fullTag.length;
 
                 // 매 생성마다 메시지 데이터 + UI를 즉시 업데이트하여 순차적으로 결과가 표시되도록 한다
-                lastMsg.mes = currentMes;
+                lastMsg.mes = stripPicTagsForDisplay(currentMes);
                 lastMsg.extra = normalizeInlineMessageExtra({
                     ...lastMsg.extra,
-                    image_swipes: [],
-                    image: '',
-                    title: '',
-                    inline_image: false,
-                    processed_pic_tags: [],
+                    image_swipes: imageSwipes,
+                    image: imageSwipes[imageSwipes.length - 1] || '',
+                    title: lastImagePrompt,
+                    inline_image: imageSwipes.length > 0,
+                    processed_pic_tags: processedPicTags,
                 });
-                await updateRenderedMessageHtml(msgIdx, buildInlineDisplayHtml(currentMes, charName), '이미지');
+                await updateRenderedMessageHtml(msgIdx, buildInlineMessageHtml(lastMsg.mes, lastMsg.extra, charName), '이미지');
             }
 
             // 모든 이미지 처리 완료 후 채팅 저장
@@ -3860,7 +3886,7 @@ async function applyCharacterEmoticonDisplayMode() {
     });
     // DOM mesid는 숫자 인덱스를 사용하므로 lastMsg 참조와 별개로 마지막 메시지 인덱스를 구한다.
     const msgIdx = Number(ctx.chat.length - 1);
-    await updateRenderedMessageHtml(msgIdx, buildInlineDisplayHtml(mes, senderName), '이모티콘');
+    await updateRenderedMessageHtml(msgIdx, buildInlineMessageHtml(mes, lastMsg.extra, senderName), '이모티콘');
     if (typeof ctx.saveChat === 'function') {
         await ctx.saveChat();
     }
