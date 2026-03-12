@@ -17,7 +17,7 @@ import { getContext } from './utils/st-context.js';
 import { getExtensionSettings } from './utils/storage.js';
 import { injectContext, clearContext, registerContextBuilder } from './utils/context-inject.js';
 import { createPopup, createTabs, closePopup } from './utils/popup.js';
-import { showToast, showConfirm, escapeHtml } from './utils/ui.js';
+import { showToast, showConfirm, escapeHtml, buildGeneratedMessageImageHtml } from './utils/ui.js';
 import { exportAllData, importAllData, clearAllData } from './utils/storage.js';
 import { renderTimeDividerUI, renderReadReceiptUI, renderNoContactUI, renderEventGeneratorUI, renderVoiceMemoUI, triggerQuickSend, triggerReadReceipt, triggerNoContact, triggerUserImageGenerationAndSendInBackground, triggerVoiceMemoInsertion, triggerDeletedMessage } from './modules/quick-tools/quick-tools.js';
 import { startFirstMsgTimer, renderFirstMsgSettingsUI } from './modules/firstmsg/firstmsg.js';
@@ -1228,10 +1228,8 @@ async function enrichGroupChatReplyContent(text, senderName, transcript) {
                         settings,
                     });
                     if (result.imageUrl) {
-                        const safeUrl = escapeHtml(result.imageUrl);
-                        const safePrompt = escapeHtml(rawPrompt);
                         const placeholder = `__GROUP_IMG_${imageCounter++}__`;
-                        imagePlaceholders.set(placeholder, `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`);
+                        imagePlaceholders.set(placeholder, buildGeneratedMessageImageHtml(result.imageUrl, rawPrompt));
                         replacement = placeholder;
                     } else {
                         replacement = result.fallbackText;
@@ -3656,9 +3654,7 @@ async function applyCharacterImageDisplayMode() {
                         settings,
                     });
                     if (result.imageUrl) {
-                        const safeUrl = escapeHtml(result.imageUrl);
-                        const safePrompt = escapeHtml(rawPrompt);
-                        replacement = `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`;
+                        replacement = buildGeneratedMessageImageHtml(result.imageUrl, rawPrompt);
                     } else {
                         replacement = result.fallbackText;
                     }
@@ -3986,11 +3982,19 @@ async function init() {
     }
 
     if (evSrc && eventTypes?.CHARACTER_MESSAGE_RENDERED) {
-        evSrc.on(eventTypes.CHARACTER_MESSAGE_RENDERED, () => {
+        evSrc.on(eventTypes.CHARACTER_MESSAGE_RENDERED, async () => {
             onCharacterMessageRenderedForProactiveCall();
             trackGifticonUsageFromCharacterMessage();
-            void applyCharacterEmoticonDisplayMode().catch((e) => console.error('[ST-LifeSim] 이모티콘 표시 모드 적용 오류:', e));
-            void applyCharacterImageDisplayMode().catch((e) => console.error('[ST-LifeSim] 이미지 표시 모드 적용 오류:', e));
+            try {
+                await applyCharacterEmoticonDisplayMode();
+            } catch (e) {
+                console.error('[ST-LifeSim] 이모티콘 표시 모드 적용 오류:', e);
+            }
+            try {
+                await applyCharacterImageDisplayMode();
+            } catch (e) {
+                console.error('[ST-LifeSim] 이미지 표시 모드 적용 오류:', e);
+            }
         });
     }
 

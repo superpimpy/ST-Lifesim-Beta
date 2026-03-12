@@ -34,6 +34,26 @@ export function escapeHtml(str) {
 }
 
 /**
+ * 메신저/채팅용 생성 이미지 HTML을 구성한다.
+ * 태그 치환 모드처럼 생성 이미지에만 전용 data 속성을 부여해
+ * CSS 후처리 대상이 이모티콘 이미지와 섞이지 않도록 한다.
+ * @param {string} imageUrl
+ * @param {string} prompt
+ * @param {Object} [options]
+ * @param {string} [options.imageId]
+ * @param {string} [options.className]
+ * @returns {string}
+ */
+export function buildGeneratedMessageImageHtml(imageUrl, prompt, options = {}) {
+    const safeUrl = escapeHtml(imageUrl);
+    if (!safeUrl) return '';
+    const safePrompt = escapeHtml(prompt || '');
+    const safeImageId = escapeHtml(String(options.imageId || `slm-pic-${generateId()}`));
+    const safeClassName = escapeHtml(String(options.className || 'slm-msg-generated-image').trim());
+    return `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="${safeClassName}" data-slm-pic-id="${safeImageId}">`;
+}
+
+/**
  * 토스트 알림을 화면에 표시한다
  * @param {string|Node} message - 표시할 메시지 또는 커스텀 노드
  * @param {'info'|'success'|'error'|'warn'} type - 토스트 타입

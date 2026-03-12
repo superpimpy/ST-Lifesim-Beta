@@ -9,7 +9,7 @@ import { translateTextToKorean } from '../sns/sns.js';
 import { buildDirectImagePrompt } from '../../utils/image-tag-generator.js';
 import { runSdImageGeneration } from '../../utils/slash.js';
 import { applyProfileImageStyle, normalizeProfileImageStyle, readImageFileAsDataUrl } from '../../utils/profile-image.js';
-import { escapeHtml, generateId, showConfirm, showToast } from '../../utils/ui.js';
+import { escapeHtml, generateId, showConfirm, showToast, buildGeneratedMessageImageHtml } from '../../utils/ui.js';
 
 const MODULE_KEY = 'messenger-rooms';
 const MAIN_CHAR_MEMBER_KEY = '__main_char__';
@@ -999,10 +999,8 @@ async function enrichRoomReplyContent(rawText, senderName, room, candidateMap) {
                     });
                     const imageUrl = tagResult.finalPrompt ? await generateRoomMessageImageViaApi(tagResult.finalPrompt) : '';
                     if (imageUrl) {
-                        const safeUrl = escapeHtml(imageUrl);
-                        const safePrompt = escapeHtml(rawPrompt);
                         const placeholder = `__ROOM_IMG_${imageCounter++}__`;
-                        imagePlaceholders.set(placeholder, `<img src="${safeUrl}" title="${safePrompt}" alt="${safePrompt}" class="slm-msg-generated-image" style="max-width:100%;border-radius:var(--slm-image-radius,10px);margin:4px 0">`);
+                        imagePlaceholders.set(placeholder, buildGeneratedMessageImageHtml(imageUrl, rawPrompt));
                         replacement = placeholder;
                     }
                 }
