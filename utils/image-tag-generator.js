@@ -559,7 +559,9 @@ export function buildDirectImagePrompt(rawPrompt, options = {}) {
     const appearanceGroups = uniquePromptBlocks.length > 0
         ? mergeAppearanceGroupsWithMatched(uniquePromptBlocks, matched)
         : matchedAppearanceGroups;
-    const filteredSceneTags = stripAppearanceTagsFromScene(sceneOnly, appearanceGroups);
+    const filteredSceneTags = pipeAppearanceBlocks.length > 0
+        ? safeTags(sceneOnly)
+        : stripAppearanceTagsFromScene(sceneOnly, appearanceGroups);
     const finalPrompt = buildImageApiPrompt(filteredSceneTags, appearanceGroups, { tagWeight });
     if (!finalPrompt && appearanceGroups.length === 0) return emptyResult;
     return { sceneTags: filteredSceneTags, appearanceGroups, finalPrompt };
@@ -667,7 +669,9 @@ export async function generateImageTags(rawPrompt, options = {}) {
 
     // ── Step 4: Build final prompt ──
     // Result: "scene tags | Character 1: appearance1 | Character 2: appearance2"
-    const filteredSceneTags = stripAppearanceTagsFromScene(sceneOnly, appearanceGroups);
+    const filteredSceneTags = pipeAppearanceBlocks.length > 0
+        ? safeTags(sceneOnly)
+        : stripAppearanceTagsFromScene(sceneOnly, appearanceGroups);
     const finalPrompt = buildImageApiPrompt(filteredSceneTags, appearanceGroups, { tagWeight });
 
     return { sceneTags: filteredSceneTags, appearanceGroups, finalPrompt };

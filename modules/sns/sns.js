@@ -210,31 +210,43 @@ function getProfileSummary(authorName) {
     return [contact?.description, contact?.personality].filter(Boolean).join(' / ').trim();
 }
 
+function getSnsAuthorImagePromptContext(authorName) {
+    return {
+        authorProfile: getProfileSummary(authorName),
+        authorAppearanceTags: String(getAppearanceTagsByName(authorName) || '').trim(),
+    };
+}
+
 function buildSnsImageInputPrompt(customTemplate, authorName, postContent) {
-    // Only include scene/situation context for the image prompt.
-    // Appearance tags are handled separately by buildDirectImagePrompt via contact context + getAppearanceTagsByName.
+    const { authorProfile, authorAppearanceTags } = getSnsAuthorImagePromptContext(authorName);
     if (!customTemplate) return `${authorName}'s social media photo post: "${postContent}"`;
-    const authorProfile = getProfileSummary(authorName);
     return customTemplate
         .replace(/\{\{authorName\}\}/g, authorName)
         .replace(/\{\{charName\}\}/g, authorName)
         .replace(/\{\{personality\}\}/g, authorProfile)
-        .replace(/\{\{appearance\}\}/g, '')
-        .replace(/\{\{appearanceTags\}\}/g, '')
+        .replace(/\{\{appearance\}\}/g, authorAppearanceTags)
+        .replace(/\{\{appearanceTags\}\}/g, authorAppearanceTags)
         .replace(/\{\{context\}\}/g, postContent)
         .replace(/\{\{postContent\}\}/g, postContent)
         .replace(/\{authorName\}/g, authorName)
         .replace(/\{charName\}/g, authorName)
         .replace(/\{personality\}/g, authorProfile)
-        .replace(/\{appearance\}/g, '')
-        .replace(/\{appearanceTags\}/g, '')
+        .replace(/\{appearance\}/g, authorAppearanceTags)
+        .replace(/\{appearanceTags\}/g, authorAppearanceTags)
         .replace(/\{context\}/g, postContent)
         .replace(/\{postContent\}/g, postContent);
 }
 
-function buildSnsDirectImagePromptRequest(sourcePrompt, authorName) {
+function buildSnsDirectImagePromptRequest(sourcePrompt, authorName, authorAppearanceTags = '') {
     return [
         String(sourcePrompt || '').trim(),
+        '',
+        '[Author context]',
+        `The SNS post author is ${authorName || 'the author'}.`,
+        'Treat the posting author as the main subject of the image prompt.',
+        'When only one character appears, Character 1 must represent the posting author.',
+        authorAppearanceTags ? `Author appearance tags for Character 1: ${authorAppearanceTags}` : '',
+        authorAppearanceTags ? 'Preserve the provided author appearance tags in the final prompt instead of replacing them with generic looks.' : '',
         '',
         '[Output rule]',
         `Return exactly one final direct image prompt for the author.`,
@@ -250,12 +262,13 @@ function buildSnsDirectImagePromptRequest(sourcePrompt, authorName) {
         'For interactions, use source#[action] and target#[action] tags.',
         'Outfit tags may be freely adjusted to fit the situation.',
         'Always produce a fresh prompt for a new image.',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 }
 
 async function createSnsImagePrompt(ctx, sourcePrompt, authorName, contacts = []) {
     if (!ctx) return { sceneTags: '', appearanceGroups: [], finalPrompt: '' };
     const tagWeight = Number(getExtensionSettings()?.['st-lifesim']?.tagWeight) || 0;
+    const { authorAppearanceTags } = getSnsAuthorImagePromptContext(authorName);
     const promptOptions = {
         forceIncludeNames: [authorName].filter(Boolean),
         contacts: Array.isArray(contacts) ? contacts.filter(Boolean) : [],
@@ -264,7 +277,7 @@ async function createSnsImagePrompt(ctx, sourcePrompt, authorName, contacts = []
     };
     const generatedPrompt = await generateSnsText(
         ctx,
-        buildSnsDirectImagePromptRequest(sourcePrompt, authorName),
+        buildSnsDirectImagePromptRequest(sourcePrompt, authorName, authorAppearanceTags),
         `${authorName || 'sns'}-image`,
         'snsImage',
     );
